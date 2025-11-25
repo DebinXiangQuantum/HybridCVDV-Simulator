@@ -1,0 +1,225 @@
+#pragma once
+
+#include <vector>
+#include <complex>
+#include <memory>
+#include <string>
+#include "cv_state_pool.h"
+#include "fock_ell_operator.h"
+#include "hdd_node.h"
+
+/**
+ * 门操作类型枚举
+ */
+enum class GateType {
+    // Level 0: 对角门
+    PHASE_ROTATION,
+    KERR_GATE,
+    CONDITIONAL_PARITY,
+
+    // Level 1: 梯算符门
+    CREATION_OPERATOR,
+    ANNIHILATION_OPERATOR,
+
+    // Level 2: 单模门
+    DISPLACEMENT,
+    SQUEEZING,
+
+    // Level 3: 双模门
+    BEAM_SPLITTER,
+
+    // Level 4: 混合控制门
+    CONTROLLED_DISPLACEMENT,
+    CONTROLLED_SQUEEZING
+};
+
+/**
+ * 门操作参数结构体
+ */
+struct GateParams {
+    GateType type;
+    std::vector<int> target_qubits;     // 目标Qubit索引
+    std::vector<int> target_qumodes;    // 目标Qumode索引
+    std::vector<std::complex<double>> params;  // 门参数
+
+    // 构造函数
+    GateParams(GateType t) : type(t) {}
+    GateParams(GateType t, const std::vector<int>& qubits,
+               const std::vector<int>& qumodes = {},
+               const std::vector<std::complex<double>>& p = {})
+        : type(t), target_qubits(qubits), target_qumodes(qumodes), params(p) {}
+};
+
+/**
+ * 量子线路类
+ * 管理量子门的序列和执行
+ */
+class QuantumCircuit {
+private:
+    int num_qubits_;              // Qubit数量
+    int num_qumodes_;             // Qumode数量
+    int cv_truncation_;           // CV状态截断维度
+
+    HDDNode* root_node_;          // HDD根节点
+    HDDNodeManager node_manager_; // HDD节点管理器
+    CVStatePool state_pool_;      // CV状态池
+
+    std::vector<GateParams> gate_sequence_;  // 门操作序列
+
+    // 内部状态
+    bool is_built_;               // 是否已构建
+    bool is_executed_;            // 是否已执行
+
+public:
+    /**
+     * 构造函数
+     * @param num_qubits Qubit数量
+     * @param num_qumodes Qumode数量
+     * @param cv_truncation CV状态截断维度
+     * @param max_states 最大状态数量
+     */
+    QuantumCircuit(int num_qubits, int num_qumodes, int cv_truncation, int max_states = 1024);
+
+    /**
+     * 析构函数
+     */
+    ~QuantumCircuit();
+
+    /**
+     * 添加门操作到线路
+     */
+    void add_gate(const GateParams& gate);
+
+    /**
+     * 批量添加门操作
+     */
+    void add_gates(const std::vector<GateParams>& gates);
+
+    /**
+     * 构建量子线路 (准备执行)
+     */
+    void build();
+
+    /**
+     * 执行量子线路
+     */
+    void execute();
+
+    /**
+     * 重置量子线路状态
+     */
+    void reset();
+
+    /**
+     * 获取最终状态的振幅
+     * @param qubit_states Qubit状态向量 (0或1)
+     * @param qumode_states Qumode状态向量
+     * @return 状态振幅
+     */
+    std::complex<double> get_amplitude(const std::vector<int>& qubit_states,
+                                     const std::vector<std::vector<std::complex<double>>>& qumode_states);
+
+    /**
+     * 获取状态池引用 (用于高级操作)
+     */
+    CVStatePool& get_state_pool() { return state_pool_; }
+    const CVStatePool& get_state_pool() const { return state_pool_; }
+
+    /**
+     * 获取HDD根节点
+     */
+    HDDNode* get_root_node() { return root_node_; }
+
+    /**
+     * 获取节点管理器引用
+     */
+    HDDNodeManager& get_node_manager() { return node_manager_; }
+
+    /**
+     * 获取线路统计信息
+     */
+    struct CircuitStats {
+        int num_qubits;
+        int num_qumodes;
+        int cv_truncation;
+        int num_gates;
+        int active_states;
+        size_t hdd_nodes;
+    };
+    CircuitStats get_stats() const;
+
+private:
+    /**
+     * 初始化HDD结构
+     */
+    void initialize_hdd();
+
+    /**
+     * 执行单个门操作
+     */
+    void execute_gate(const GateParams& gate);
+
+    /**
+     * 执行Level 0门 (对角门)
+     */
+    void execute_level0_gate(const GateParams& gate);
+
+    /**
+     * 执行Level 1门 (梯算符门)
+     */
+    void execute_level1_gate(const GateParams& gate);
+
+    /**
+     * 执行Level 2门 (单模门)
+     */
+    void execute_level2_gate(const GateParams& gate);
+
+    /**
+     * 执行Level 3门 (双模门)
+     */
+    void execute_level3_gate(const GateParams& gate);
+
+    /**
+     * 执行Level 4门 (混合控制门)
+     */
+    void execute_level4_gate(const GateParams& gate);
+
+    /**
+     * 工具函数：准备ELL算符
+     */
+    FockELLOperator* prepare_ell_operator(const GateParams& gate);
+
+    /**
+     * 工具函数：收集需要更新的状态ID
+     */
+    std::vector<int> collect_target_states(const GateParams& gate);
+
+    // 禁用拷贝
+    QuantumCircuit(const QuantumCircuit&) = delete;
+    QuantumCircuit& operator=(const QuantumCircuit&) = delete;
+};
+
+/**
+ * 便捷函数：创建常用门操作
+ */
+namespace Gates {
+    // Level 0 门
+    GateParams PhaseRotation(int qubit, double theta);
+    GateParams KerrGate(int qumode, double chi);
+    GateParams ConditionalParity(int qumode, double parity);
+
+    // Level 1 门
+    GateParams CreationOperator(int qumode);
+    GateParams AnnihilationOperator(int qumode);
+
+    // Level 2 门
+    GateParams Displacement(int qumode, std::complex<double> alpha);
+    GateParams Squeezing(int qumode, std::complex<double> xi);
+
+    // Level 3 门
+    GateParams BeamSplitter(int qumode1, int qumode2, double theta, double phi = 0.0);
+
+    // Level 4 门
+    GateParams ControlledDisplacement(int control_qubit, int target_qumode, std::complex<double> alpha);
+    GateParams ControlledSqueezing(int control_qubit, int target_qumode, std::complex<double> xi);
+}
