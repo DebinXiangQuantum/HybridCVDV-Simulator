@@ -7,8 +7,6 @@ namespace Reference {
 
 // ===== 工具函数实现 =====
 
-// ===== 辅助矩阵函数 =====
-
 // 矩阵乘法
 Matrix matrix_multiply(const Matrix& A, const Matrix& B) {
     int dim = A.size();
@@ -127,12 +125,30 @@ ErrorMetrics compute_error_metrics(const Vector& reference, const Vector& implem
     return {l2_error, max_error, relative_error, fidelity_deviation};
 }
 
+// ===== 矩阵指数辅助函数 =====
+Matrix matrix_exponentiate(const Matrix& generator, int order = 8) {
+    int dim = generator.size();
+    Matrix result = create_identity_matrix(dim);
+    Matrix power = result; // A^0 = I
+    
+    // exp(A) = sum A^k / k!
+    double factorial = 1.0;
+    for (int k = 1; k <= order; ++k) {
+        factorial *= k;
+        power = matrix_multiply(power, generator);
+        Matrix term = matrix_multiply_scalar(power, 1.0 / factorial);
+        matrix_add_to(result, term);
+    }
+    return result;
+}
+
 // ===== Level 0: 对角门实现 =====
 
 Vector DiagonalGates::apply_phase_rotation(const Vector& input, double theta) {
     Vector result = input;
     for (size_t n = 0; n < result.size(); ++n) {
-        double phase = -theta * static_cast<double>(n);  // 注意负号
+        // R(theta) = exp[-i theta n]
+        double phase = -theta * static_cast<double>(n);
         Complex phase_factor(std::cos(phase), std::sin(phase));
         result[n] *= phase_factor;
     }
@@ -142,7 +158,7 @@ Vector DiagonalGates::apply_phase_rotation(const Vector& input, double theta) {
 Vector DiagonalGates::apply_kerr_gate(const Vector& input, double chi) {
     Vector result = input;
     for (size_t n = 0; n < result.size(); ++n) {
-        double phase = -chi * static_cast<double>(n * n);  // 注意负号
+        double phase = -chi * static_cast<double>(n * n);
         Complex phase_factor(std::cos(phase), std::sin(phase));
         result[n] *= phase_factor;
     }
@@ -152,7 +168,13 @@ Vector DiagonalGates::apply_kerr_gate(const Vector& input, double chi) {
 Vector DiagonalGates::apply_conditional_parity(const Vector& input, double parity) {
     Vector result = input;
     for (size_t n = 0; n < result.size(); ++n) {
-        double phase = -parity * M_PI * (static_cast<double>(n) - std::floor(static_cast<double>(n) / 2.0) * 2.0);
+        // CP = exp[-i pi n] for parity=1?
+        // definition in gatesmath: CP = CR(pi) = exp[-i pi/2 n] for sigma_z terms...
+        // But stand-alone CP usually means Parity (-1)^n.
+        // gatesmath: "CP = CR(pi)" where CR(theta) = exp[-i theta/2 sigma_z n].
+        // If this is stand-alone P (not conditional on qubit but just Parity op): P = exp[i pi n] = (-1)^n.
+        // The existing implementation used some complex formula. I will stick to P = (-1)^n.
+        double phase = parity * M_PI * static_cast<double>(n); 
         Complex phase_factor(std::cos(phase), std::sin(phase));
         result[n] *= phase_factor;
     }
@@ -167,7 +189,6 @@ Vector LadderGates::apply_creation_operator(const Vector& input) {
         double coeff = std::sqrt(static_cast<double>(n));
         result[n] = coeff * input[n - 1];
     }
-    // result[0] 保持为 0
     return result;
 }
 
@@ -177,7 +198,6 @@ Vector LadderGates::apply_annihilation_operator(const Vector& input) {
         double coeff = std::sqrt(static_cast<double>(n + 1));
         result[n] = coeff * input[n + 1];
     }
-    // result.back() 保持为 0
     return result;
 }
 
@@ -197,191 +217,293 @@ Vector SingleModeGates::apply_squeezing_gate(const Vector& input, Complex xi) {
 
 // ===== Level 3: 双模门实现 =====
 
-Vector TwoModeGates::apply_beam_splitter(const Vector& input, double theta, double phi, int max_photon) {
+Vector TwoModeGates::apply_beam_splitter(const Vector& input, double theta, double phi) {
+    // Determine D from input size (assumed D^2)
     int total_dim = input.size();
-    // 简化的实现：假设输入是单模状态，扩展到双模
-    // 在实际实现中，需要根据具体的状态表示方式处理
-
-    // 这里提供一个简化的实现
-    Vector result = input;
-
-    // 计算光束分裂器的简单版本
-    // BS = [[cosθ, -sinθ*e^(iφ)], [sinθ*e^(iφ), cosθ]]
-
-    double cos_theta = std::cos(theta);
-    double sin_theta = std::sin(theta);
-    Complex phase_factor(std::cos(phi), std::sin(phi));
-
-    // 对于真空输入，简单的处理
-    if (input.size() >= 2) {
-        Complex input0 = input[0];
-        Complex input1 = (input.size() > 1) ? input[1] : Complex(0.0, 0.0);
-
-        result[0] = cos_theta * input0 - sin_theta * phase_factor * input1;
-        if (result.size() > 1) {
-            result[1] = sin_theta * phase_factor * input0 + cos_theta * input1;
-        }
+    int dim = static_cast<int>(std::sqrt(total_dim));
+    if (dim * dim != total_dim) {
+        throw std::invalid_argument("Input vector size must be square number (D^2) for two-mode gate");
     }
-
-    return result;
+    
+    Matrix bs_matrix = create_beam_splitter_matrix(dim, dim, theta, phi);
+    return matrix_vector_multiply(bs_matrix, input);
 }
 
-// ===== 矩阵创建函数 =====
+// ===== Level 4: 混合控制门实现 =====
 
-// 广义Laguerre多项式计算
-double generalized_laguerre(int n, int alpha, double x) {
-    if (n < 0 || alpha < 0) return 0.0;
-    if (n == 0) return 1.0;
-
-    // 对于测试目的，使用简化的实现
-    // L_n^alpha(x) 的近似值
-    if (n == 1) return alpha + 1.0 - x;
-
-    // 使用级数展开或近似
-    // 对于小的x，我们可以使用前几项
-    if (std::abs(x) < 1.0) {
-        if (n == 0) return 1.0;
-        if (n == 1) return alpha + 1.0 - x;
-        if (n == 2) return (alpha + 1.0) * (alpha + 2.0) / 2.0 - (alpha + 3.0) * x / 2.0 + x * x / 2.0;
-    }
-
-    // 对于更大的x，使用渐进行为
-    return std::exp(x / 2.0) * std::pow(-x, n) / std::tgamma(n + alpha + 1) * std::tgamma(alpha + n + 1);
+void HybridControlGates::apply_conditional_displacement(Vector& v0, Vector& v1, Reference::Complex alpha) {
+    // Branch 0: D(+alpha)
+    v0 = SingleModeGates::apply_displacement_gate(v0, alpha);
+    
+    // Branch 1: D(-alpha)
+    v1 = SingleModeGates::apply_displacement_gate(v1, -alpha);
 }
+
+void HybridControlGates::apply_conditional_squeezing(Vector& v0, Vector& v1, Reference::Complex zeta) {
+    // Branch 0: S(+zeta)
+    v0 = SingleModeGates::apply_squeezing_gate(v0, zeta);
+    
+    // Branch 1: S(-zeta)
+    v1 = SingleModeGates::apply_squeezing_gate(v1, -zeta);
+}
+
+void HybridControlGates::apply_conditional_rotation(Vector& v0, Vector& v1, double theta) {
+    // CR(theta) = exp[-i theta/2 sigma_z n]
+    // Q=0: sigma_z = 1 => exp[-i theta/2 n]
+    v0 = DiagonalGates::apply_phase_rotation(v0, theta / 2.0);
+    
+    // Q=1: sigma_z = -1 => exp[+i theta/2 n] = exp[-i (-theta/2) n]
+    v1 = DiagonalGates::apply_phase_rotation(v1, -theta / 2.0);
+}
+
+void HybridControlGates::apply_conditional_beam_splitter(Vector& v0, Vector& v1, double theta, double phi) {
+    // CBS(theta, phi)
+    // Q=0: BS(theta, phi)
+    v0 = TwoModeGates::apply_beam_splitter(v0, theta, phi);
+    
+    // Q=1: BS(-theta, phi)
+    v1 = TwoModeGates::apply_beam_splitter(v1, -theta, phi);
+}
+
+// ===== Interaction Gates =====
+
+void InteractionGates::apply_rabi(Vector& v0, Vector& v1, double theta) {
+    // RB(theta) = exp[-i sigma_x (theta a^dag + theta^* a)]
+    // Let H_disp = theta a^dag - (-theta^*) a. 
+    // Wait, displacement generator is alpha a^dag - alpha^* a.
+    // Here generator is G = theta a^dag + theta^* a.
+    // If we set alpha = theta, D(theta) has generator theta a^dag - theta^* a.
+    // If theta is real, G = theta(a^dag + a). D(i theta) = exp[i theta a^dag + i theta a] = exp[i G].
+    // So G = -i ln(D(i theta)).
+    // We need exp[-i sigma_x G] = cos(G) I - i sin(G) sigma_x.
+    
+    // Since Reference implementation can be inefficient, let's just compute G explicitly.
+    int dim = v0.size();
+    Matrix a_matrix(dim, std::vector<Complex>(dim, Complex(0.0, 0.0)));
+    Matrix a_dagger_matrix(dim, std::vector<Complex>(dim, Complex(0.0, 0.0)));
+    for (int i = 0; i < dim - 1; ++i) {
+        double coeff = std::sqrt(i + 1.0);
+        a_matrix[i][i + 1] = Complex(coeff, 0.0);
+        a_dagger_matrix[i + 1][i] = Complex(coeff, 0.0);
+    }
+    
+    Matrix G = matrix_multiply_scalar(a_dagger_matrix, theta);
+    Matrix temp = matrix_multiply_scalar(a_matrix, std::conj(theta)); // + theta^* a
+    matrix_add_to(G, temp); // G is Hermitian if theta is complex? No.
+    // theta a^dag + theta^* a is Hermitian.
+    
+    // Compute cos(G) and sin(G)
+    // cos(G) = I - G^2/2! + ...
+    // sin(G) = G - G^3/3! + ...
+    // We can use matrix_exponentiate for exp(iG) = cos(G) + i sin(G).
+    Matrix iG = matrix_multiply_scalar(G, Complex(0.0, 1.0));
+    Matrix exp_iG = matrix_exponentiate(iG);
+    
+    Matrix minus_iG = matrix_multiply_scalar(G, Complex(0.0, -1.0));
+    Matrix exp_minus_iG = matrix_exponentiate(minus_iG);
+    
+    // cos(G) = (exp(iG) + exp(-iG)) / 2
+    Matrix cosG = matrix_multiply_scalar(exp_iG, 0.5);
+    matrix_add_to(cosG, matrix_multiply_scalar(exp_minus_iG, 0.5));
+    
+    // sin(G) = (exp(iG) - exp(-iG)) / 2i
+    Matrix sinG = matrix_multiply_scalar(exp_iG, Complex(0.0, -0.5)); // 1/2i = -i/2
+    matrix_add_to(sinG, matrix_multiply_scalar(exp_minus_iG, Complex(0.0, 0.5))); // -(-i/2) = i/2
+    
+    Vector new_v0 = matrix_vector_multiply(cosG, v0);
+    Vector temp_v1 = matrix_vector_multiply(sinG, v1);
+    // v0' = cosG v0 - i sinG v1
+    for(int i=0; i<dim; ++i) new_v0[i] -= Complex(0.0, 1.0) * temp_v1[i];
+    
+    Vector new_v1 = matrix_vector_multiply(sinG, v0);
+    // v1' = -i sinG v0 + cosG v1
+    for(int i=0; i<dim; ++i) new_v1[i] *= Complex(0.0, -1.0);
+    Vector temp_cos_v1 = matrix_vector_multiply(cosG, v1);
+    for(int i=0; i<dim; ++i) new_v1[i] += temp_cos_v1[i];
+    
+    v0 = new_v0;
+    v1 = new_v1;
+}
+
+void InteractionGates::apply_jaynes_cummings(Vector& v0, Vector& v1, double theta, double phi) {
+    // JC acts on subspaces |1, n> and |0, n+1>.
+    // v0 corresponds to |0>, v1 corresponds to |1>.
+    // Couple v1[n] and v0[n+1].
+    
+    int dim = v0.size();
+    Vector new_v0 = v0;
+    Vector new_v1 = v1;
+    
+    // |0,0> is decoupled and unchanged (annihilated by a).
+    
+    for (int n = 0; n < dim - 1; ++n) {
+        // Subspace: |1, n> (in v1 at index n) and |0, n+1> (in v0 at index n+1)
+        // Coupling strength Omega_n = theta * sqrt(n+1)
+        double omega = theta * std::sqrt(n + 1.0);
+        
+        Complex c1 = v1[n];      // |1, n>
+        Complex c0 = v0[n+1];    // |0, n+1>
+        
+        // From gatesmath.md:
+        // |0, n+1> -> cos(Omega) |0, n+1> - i e^{-i phi} sin(Omega) |1, n>
+        // |1, n>   -> -i e^{i phi} sin(Omega) |0, n+1> + cos(Omega) |1, n>
+        
+        double cos_w = std::cos(omega);
+        double sin_w = std::sin(omega);
+        
+        Complex term_from_1 = Complex(0.0, -1.0) * std::exp(Complex(0.0, -phi)) * sin_w * c1;
+        new_v0[n+1] = cos_w * c0 + term_from_1;
+        
+        Complex term_from_0 = Complex(0.0, -1.0) * std::exp(Complex(0.0, phi)) * sin_w * c0;
+        new_v1[n] = term_from_0 + cos_w * c1;
+    }
+    // v0[0] unchanged.
+    // v1[dim-1] decoupled (if we truncate) or coupled to |0, dim> (which is out of bounds).
+    // So v1[dim-1] effectively just rotates by cos? Or if we assume hard truncation, a|dim>=0?
+    // If a|dim>=0, then |1, dim-1> -> |0, dim> is 0. So it stays |1, dim-1>.
+    // cos(theta*sqrt(dim))? No, a|dim>=0 means sqrt(dim)|dim-1>.
+    // Actually if we truncate, we assume higher states don't exist.
+    
+    v0 = new_v0;
+    v1 = new_v1;
+}
+
+void InteractionGates::apply_anti_jaynes_cummings(Vector& v0, Vector& v1, double theta, double phi) {
+    // AJC: |0, n> <-> |1, n+1>
+    int dim = v0.size();
+    Vector new_v0 = v0;
+    Vector new_v1 = v1;
+    
+    for (int n = 0; n < dim - 1; ++n) {
+        // Subspace: |0, n> and |1, n+1>
+        // Omega = theta * sqrt(n+1)
+        double omega = theta * std::sqrt(n + 1.0);
+        
+        Complex c0 = v0[n];      // |0, n>
+        Complex c1 = v1[n+1];    // |1, n+1>
+        
+        // Logic derived similar to JC but flipped
+        // |0, n> -> cos(Omega) |0, n> - i e^{-i phi} sin(Omega) |1, n+1>
+        // |1, n+1> -> -i e^{i phi} sin(Omega) |0, n> + cos(Omega) |1, n+1>
+        
+        double cos_w = std::cos(omega);
+        double sin_w = std::sin(omega);
+        
+        Complex term_from_1 = Complex(0.0, -1.0) * std::exp(Complex(0.0, -phi)) * sin_w * c1;
+        new_v0[n] = cos_w * c0 + term_from_1;
+        
+        Complex term_from_0 = Complex(0.0, -1.0) * std::exp(Complex(0.0, phi)) * sin_w * c0;
+        new_v1[n+1] = term_from_0 + cos_w * c1;
+    }
+    
+    v0 = new_v0;
+    v1 = new_v1;
+}
+
+// ===== Special Gates =====
+
+void SpecialGates::apply_sqr(Vector& v0, Vector& v1, const std::vector<double>& thetas, const std::vector<double>& phis) {
+    int dim = v0.size();
+    for (int n = 0; n < dim; ++n) {
+        double theta = (n < thetas.size()) ? thetas[n] : 0.0;
+        double phi = (n < phis.size()) ? phis[n] : 0.0;
+        
+        // R(theta, phi) on qubit basis {|0>, |1>} for mode n
+        // Matrix: [[alpha, beta], [-beta*, alpha*]]
+        // alpha = cos(theta/2)
+        // beta = -e^{-i phi} sin(theta/2)
+        
+        double cos_t = std::cos(theta / 2.0);
+        double sin_t = std::sin(theta / 2.0);
+        Complex alpha(cos_t, 0.0);
+        Complex beta = -std::exp(Complex(0.0, -phi)) * sin_t;
+        
+        Complex c0 = v0[n];
+        Complex c1 = v1[n];
+        
+        v0[n] = alpha * c0 + beta * c1;
+        v1[n] = -std::conj(beta) * c0 + std::conj(alpha) * c1;
+    }
+}
+
+// ===== 矩阵创建函数实现 =====
 
 Matrix create_displacement_matrix(int dim, Complex alpha) {
-    // 使用矩阵指数方法计算位移算符
     // D(α) = exp(α*a† - conj(α)*a)
-
-    // 创建a和a†矩阵
     Matrix a_matrix(dim, std::vector<Complex>(dim, Complex(0.0, 0.0)));
     Matrix a_dagger_matrix(dim, std::vector<Complex>(dim, Complex(0.0, 0.0)));
 
     for (int i = 0; i < dim - 1; ++i) {
         double coeff = std::sqrt(i + 1.0);
-        a_matrix[i][i + 1] = Complex(coeff, 0.0);        // a |i+1⟩ = √(i+1) |i⟩
-        a_dagger_matrix[i + 1][i] = Complex(coeff, 0.0);  // a† |i⟩ = √(i+1) |i+1⟩
+        a_matrix[i][i + 1] = Complex(coeff, 0.0);
+        a_dagger_matrix[i + 1][i] = Complex(coeff, 0.0);
     }
 
-    // 计算生成元: α*a† - conj(α)*a
     Matrix generator = matrix_multiply_scalar(a_dagger_matrix, alpha);
     Matrix temp = matrix_multiply_scalar(a_matrix, -std::conj(alpha));
     matrix_add_to(generator, temp);
 
-    // 计算矩阵指数: 使用更高的展开阶数以获得更好的精度
-    // exp(generator) ≈ I + A + A²/2! + A³/3! + A⁴/4! + A⁵/5! + A⁶/6!
-    Matrix result = create_identity_matrix(dim);  // I
-
-    Matrix A_power = generator;  // A^1
-    matrix_add_to(result, A_power);  // + A
-
-    A_power = matrix_multiply(A_power, generator);  // A^2
-    matrix_add_to(result, matrix_multiply_scalar(A_power, 1.0/2.0));  // + A²/2
-
-    A_power = matrix_multiply(A_power, generator);  // A^3
-    matrix_add_to(result, matrix_multiply_scalar(A_power, 1.0/6.0));  // + A³/6
-
-    A_power = matrix_multiply(A_power, generator);  // A^4
-    matrix_add_to(result, matrix_multiply_scalar(A_power, 1.0/24.0)); // + A⁴/24
-
-    A_power = matrix_multiply(A_power, generator);  // A^5
-    matrix_add_to(result, matrix_multiply_scalar(A_power, 1.0/120.0)); // + A⁵/5!
-
-    A_power = matrix_multiply(A_power, generator);  // A^6
-    matrix_add_to(result, matrix_multiply_scalar(A_power, 1.0/720.0)); // + A⁶/6!
-
-    return result;
+    return matrix_exponentiate(generator, 10); // Use helper
 }
 
 Matrix create_squeezing_matrix(int dim, Complex xi) {
-    Matrix matrix(dim, std::vector<Complex>(dim, Complex(0.0, 0.0)));
-
-    // 简化的挤压矩阵实现
-    // S(ξ) = exp(ξ*a²/2 - ξ*(a†)²/2)
-
-    for (int n = 0; n < dim; ++n) {
-        for (int m = 0; m < dim; ++m) {
-            // 这里应该计算完整的挤压矩阵元素
-            // 暂时使用单位矩阵作为占位符
-            if (n == m) {
-                matrix[n][m] = Complex(1.0, 0.0);
-            }
-        }
+    // S(ξ) = exp(1/2 * (ξ*a†^2 - ξ*a^2)) ? No, S(xi) = exp[1/2 (xi^* a^2 - xi (a^dag)^2)]
+    // Check definition in gatesmath: S(xi) = exp[1/2 (xi^* a^2 - xi (a^dag)^2)]
+    // Wait, typically S(z) = exp(1/2 (z* a^2 - z a^dag^2)) where z = r e^{i theta}.
+    // Here xi is used.
+    
+    Matrix a_matrix(dim, std::vector<Complex>(dim, Complex(0.0, 0.0)));
+    Matrix a_dagger_matrix(dim, std::vector<Complex>(dim, Complex(0.0, 0.0)));
+    
+    for (int i = 0; i < dim - 1; ++i) {
+        double coeff = std::sqrt(i + 1.0);
+        a_matrix[i][i + 1] = Complex(coeff, 0.0);
+        a_dagger_matrix[i + 1][i] = Complex(coeff, 0.0);
     }
-
-    return matrix;
+    
+    Matrix a2 = matrix_multiply(a_matrix, a_matrix);
+    Matrix adag2 = matrix_multiply(a_dagger_matrix, a_dagger_matrix);
+    
+    // G = 1/2 (xi^* a^2 - xi (a^dag)^2)
+    Matrix term1 = matrix_multiply_scalar(a2, 0.5 * std::conj(xi));
+    Matrix term2 = matrix_multiply_scalar(adag2, -0.5 * xi);
+    
+    Matrix generator = term1;
+    matrix_add_to(generator, term2);
+    
+    return matrix_exponentiate(generator, 10);
 }
 
 Matrix create_beam_splitter_matrix(int dim1, int dim2, double theta, double phi) {
+    // BS(theta, phi) = exp[-i theta/2 (e^{i phi} a^dag b + e^{-i phi} a b^dag)]
     int total_dim = dim1 * dim2;
-    Matrix matrix(total_dim, std::vector<Complex>(total_dim, Complex(0.0, 0.0)));
-
-    double cos_theta = std::cos(theta);
-    double sin_theta = std::sin(theta);
-    Complex phase_factor(std::cos(phi), std::sin(phi));
-
-    // 简化的双模光束分裂器矩阵
-    // 在实际实现中，这应该是一个更复杂的块对角矩阵
-
+    Matrix generator(total_dim, std::vector<Complex>(total_dim, Complex(0.0, 0.0)));
+    
+    // a^dag b connects |n1, n2> to |n1+1, n2-1>
+    // a b^dag connects |n1, n2> to |n1-1, n2+1>
+    
     for (int n1 = 0; n1 < dim1; ++n1) {
         for (int n2 = 0; n2 < dim2; ++n2) {
-            int idx = n1 * dim2 + n2;
-
-            // 对角元素 (n1,n2) -> (n1,n2)
-            matrix[idx][idx] = cos_theta;
-
-            // 交叉项 (n1,n2) -> (n1+1,n2-1) 等
-            // 这里需要根据光子数守恒实现完整的逻辑
+            int idx_src = n1 * dim2 + n2;
+            
+            // Term 1: e^{i phi} a^dag b |n1, n2> = e^{i phi} sqrt(n1+1) sqrt(n2) |n1+1, n2-1>
+            if (n1 + 1 < dim1 && n2 - 1 >= 0) {
+                int idx_dst = (n1 + 1) * dim2 + (n2 - 1);
+                Complex val = std::exp(Complex(0.0, phi)) * std::sqrt(n1 + 1.0) * std::sqrt(static_cast<double>(n2));
+                // G[dst][src] += -i theta/2 * val
+                generator[idx_dst][idx_src] += Complex(0.0, -theta/2.0) * val;
+            }
+            
+            // Term 2: e^{-i phi} a b^dag |n1, n2> = e^{-i phi} sqrt(n1) sqrt(n2+1) |n1-1, n2+1>
+            if (n1 - 1 >= 0 && n2 + 1 < dim2) {
+                int idx_dst = (n1 - 1) * dim2 + (n2 + 1);
+                Complex val = std::exp(Complex(0.0, -phi)) * std::sqrt(static_cast<double>(n1)) * std::sqrt(n2 + 1.0);
+                generator[idx_dst][idx_src] += Complex(0.0, -theta/2.0) * val;
+            }
         }
     }
-
-    return matrix;
-}
-
-// ===== Level 4: 混合控制门实现 =====
-
-Vector HybridControlGates::apply_controlled_displacement(int control_state, const Vector& target_state,
-                                                       Reference::Complex alpha) {
-    if (control_state == 0) {
-        // 控制位为|0⟩，不应用任何操作
-        return target_state;
-    } else if (control_state == 1) {
-        // 控制位为|1⟩，应用位移门
-        return SingleModeGates::apply_displacement_gate(target_state, alpha);
-    } else {
-        throw std::invalid_argument("控制状态必须是0或1");
-    }
-}
-
-Vector HybridControlGates::apply_controlled_squeezing(int control_state, const Vector& target_state,
-                                                    Reference::Complex xi) {
-    if (control_state == 0) {
-        // 控制位为|0⟩，不应用任何操作
-        return target_state;
-    } else if (control_state == 1) {
-        // 控制位为|1⟩，应用挤压门
-        return SingleModeGates::apply_squeezing_gate(target_state, xi);
-    } else {
-        throw std::invalid_argument("控制状态必须是0或1");
-    }
-}
-
-Vector HybridControlGates::apply_hybrid_control_gate(int control_state, const Vector& target_state,
-                                                   const std::string& gate_type,
-                                                   const std::vector<Reference::Complex>& params) {
-    if (gate_type == "controlled_displacement") {
-        if (params.size() < 1) {
-            throw std::invalid_argument("受控位移门需要1个参数");
-        }
-        return apply_controlled_displacement(control_state, target_state, params[0]);
-    } else if (gate_type == "controlled_squeezing") {
-        if (params.size() < 1) {
-            throw std::invalid_argument("受控挤压门需要1个参数");
-        }
-        return apply_controlled_squeezing(control_state, target_state, params[0]);
-    } else {
-        throw std::invalid_argument("不支持的混合控制门类型: " + gate_type);
-    }
+    
+    return matrix_exponentiate(generator, 10);
 }
 
 } // namespace Reference

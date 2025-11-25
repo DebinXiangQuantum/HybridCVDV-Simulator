@@ -7,9 +7,9 @@ set(ENV{LD_LIBRARY_PATH} "$ENV{CUDA_HOME}/lib64:$ENV{LD_LIBRARY_PATH}")
 # 设置CUDA架构 (必须在project()之前)
 set(CMAKE_CUDA_ARCHITECTURES 60 70 80)
 
-# 指定CUDA主机编译器为GCC 9 (兼容CUDA 12.0)
-set(CMAKE_CUDA_HOST_COMPILER "/usr/bin/gcc-9")
-set(CUDA_HOST_COMPILER "/usr/bin/gcc-9")
+# 指定CUDA主机编译器
+set(CMAKE_CUDA_HOST_COMPILER "g++")
+set(CUDA_HOST_COMPILER "g++")
 
 project(HybridCVDV-Simulator VERSION 1.5 LANGUAGES CXX)
 
@@ -140,16 +140,16 @@ if(CUDA_FOUND)
 endif()
 
 # 验证程序
-add_executable(${PROJECT_NAME}_validation test_validation.cpp)
+add_executable(${PROJECT_NAME}_validation tests/test_validation.cpp)
 target_link_libraries(${PROJECT_NAME}_validation ${PROJECT_NAME})
 
 # GPU验证程序
 if(CUDA_FOUND)
-    add_executable(${PROJECT_NAME}_gpu_validation test_gpu_validation.cpp)
+    add_executable(${PROJECT_NAME}_gpu_validation tests/test_gpu_validation.cpp)
     target_link_libraries(${PROJECT_NAME}_gpu_validation ${PROJECT_NAME} ${CUDA_LIBRARIES})
 else()
     # CPU-only版本的GPU验证程序
-    add_executable(${PROJECT_NAME}_gpu_validation test_gpu_validation.cpp)
+    add_executable(${PROJECT_NAME}_gpu_validation tests/test_gpu_validation.cpp)
     target_link_libraries(${PROJECT_NAME}_gpu_validation ${PROJECT_NAME})
     target_compile_definitions(${PROJECT_NAME}_gpu_validation PRIVATE CPU_ONLY_GPU_TEST)
 endif()
@@ -170,9 +170,7 @@ if(GTest_FOUND)
         tests/test_fock_ell_operator.cpp
         tests/test_diagonal_gates.cpp
         tests/test_ladder_gates.cpp
-        tests/test_single_mode_gates.cpp
-        tests/test_two_mode_gates.cpp
-        tests/test_hybrid_gates.cpp
+        tests/test_gates_implementation.cpp
         tests/test_system.cpp
     )
 
