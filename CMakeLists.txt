@@ -55,6 +55,7 @@ find_package(GTest QUIET)
 
 # 包含目录
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src/reference)
 
 # 源文件列表
 set(CORE_SOURCES

@@ -5,7 +5,7 @@
 #include <cuda_runtime.h>
 #include <chrono>
 #include "cv_state_pool.h"
-#include "src/reference/reference_gates.h"
+#include "reference_gates.h"
 
 // 声明GPU函数
 extern void apply_phase_rotation(CVStatePool* pool, const int* targets, int batch_size, double theta);
