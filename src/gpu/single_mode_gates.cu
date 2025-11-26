@@ -1,5 +1,6 @@
 #include <cuda_runtime.h>
 #include <cuComplex.h>
+#include <stdexcept>
 #include "cv_state_pool.h"
 #include "fock_ell_operator.h"
 
