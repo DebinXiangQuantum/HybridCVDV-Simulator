@@ -194,6 +194,14 @@ bool CVStatePool::is_valid_state(int state_id) const {
  * 重置状态池
  */
 void CVStatePool::reset() {
+    // 同步所有GPU操作，确保在重置前所有操作完成
+    cudaDeviceSynchronize();
+    cudaError_t sync_err = cudaGetLastError();
+    if (sync_err != cudaSuccess && sync_err != cudaErrorNotReady) {
+        // 如果之前的操作有错误，记录但不抛出异常（因为我们在重置）
+        std::cerr << "警告：重置状态池前检测到GPU错误: " << cudaGetErrorString(sync_err) << std::endl;
+    }
+
     active_count = 0;
 
     // 重置空闲列表：0, 1, 2, ..., capacity-1

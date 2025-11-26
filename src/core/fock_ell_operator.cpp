@@ -250,9 +250,29 @@ int FockELLOperator::get_nnz() const {
  * 重新分配GPU内存
  */
 void FockELLOperator::realloc_gpu_memory() {
+    // 同步所有GPU操作，确保在释放内存前所有操作完成
+    cudaDeviceSynchronize();
+    cudaError_t sync_err = cudaGetLastError();
+    if (sync_err != cudaSuccess && sync_err != cudaErrorNotReady) {
+        // 如果之前的操作有错误，记录但不抛出异常
+        std::cerr << "警告：重新分配GPU内存前检测到GPU错误: " << cudaGetErrorString(sync_err) << std::endl;
+    }
+
     // 释放现有内存
-    if (ell_val) cudaFree(ell_val);
-    if (ell_col) cudaFree(ell_col);
+    if (ell_val) {
+        cudaError_t err = cudaFree(ell_val);
+        if (err != cudaSuccess) {
+            std::cerr << "警告：释放ELL值内存失败: " << cudaGetErrorString(err) << std::endl;
+        }
+        ell_val = nullptr;
+    }
+    if (ell_col) {
+        cudaError_t err = cudaFree(ell_col);
+        if (err != cudaSuccess) {
+            std::cerr << "警告：释放ELL列索引内存失败: " << cudaGetErrorString(err) << std::endl;
+        }
+        ell_col = nullptr;
+    }
 
     size_t val_size = static_cast<size_t>(dim) * max_bandwidth * sizeof(cuDoubleComplex);
     size_t col_size = static_cast<size_t>(dim) * max_bandwidth * sizeof(int);
@@ -267,6 +287,7 @@ void FockELLOperator::realloc_gpu_memory() {
     err = cudaMalloc(&ell_col, col_size);
     if (err != cudaSuccess) {
         cudaFree(ell_val);
+        ell_val = nullptr;
         throw std::runtime_error("无法分配GPU内存用于ELL列索引: " + std::string(cudaGetErrorString(err)));
     }
 }

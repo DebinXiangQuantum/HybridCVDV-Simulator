@@ -127,11 +127,13 @@ void apply_controlled_displacement(CVStatePool* state_pool,
     );
     
     CHECK_CUDA(cudaGetLastError());
+    CHECK_CUDA(cudaDeviceSynchronize());
     
     copy_back_hybrid_kernel<<<grid_dim, block_dim>>>(
         state_pool->data, state_pool->d_trunc, d_state_ids, controlled_states.size(), temp_buffer
     );
     CHECK_CUDA(cudaGetLastError());
+    CHECK_CUDA(cudaDeviceSynchronize());
 
     CHECK_CUDA(cudaFree(d_state_ids));
     CHECK_CUDA(cudaFree(temp_buffer));

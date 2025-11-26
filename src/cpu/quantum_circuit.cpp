@@ -2,6 +2,17 @@
 #include <iostream>
 #include <algorithm>
 #include <cmath>
+#include <cuda_runtime.h>
+#include <stdexcept>
+
+// CUDA错误检查宏
+#define CHECK_CUDA(call) \
+    do { \
+        cudaError_t err = call; \
+        if (err != cudaSuccess) { \
+            throw std::runtime_error("CUDA错误: " + std::string(cudaGetErrorString(err))); \
+        } \
+    } while (0)
 
 // 包含GPU内核头文件
 // Level 0
@@ -116,6 +127,14 @@ void QuantumCircuit::execute() {
  * 重置量子线路状态
  */
 void QuantumCircuit::reset() {
+    // 同步所有GPU操作，确保在重置前所有操作完成
+    cudaDeviceSynchronize();
+    cudaError_t sync_err = cudaGetLastError();
+    if (sync_err != cudaSuccess && sync_err != cudaErrorNotReady) {
+        // 如果之前的操作有错误，记录但不抛出异常（因为我们在重置）
+        std::cerr << "警告：重置前检测到GPU错误: " << cudaGetErrorString(sync_err) << std::endl;
+    }
+
     if (root_node_) {
         node_manager_.release_node(root_node_);
         root_node_ = nullptr;
@@ -192,9 +211,9 @@ void QuantumCircuit::execute_level0_gate(const GateParams& gate) {
 
     // 上传状态ID到GPU
     int* d_target_ids = nullptr;
-    cudaMalloc(&d_target_ids, target_states.size() * sizeof(int));
-    cudaMemcpy(d_target_ids, target_states.data(),
-               target_states.size() * sizeof(int), cudaMemcpyHostToDevice);
+    CHECK_CUDA(cudaMalloc(&d_target_ids, target_states.size() * sizeof(int)));
+    CHECK_CUDA(cudaMemcpy(d_target_ids, target_states.data(),
+               target_states.size() * sizeof(int), cudaMemcpyHostToDevice));
 
     double param = gate.params.empty() ? 0.0 : gate.params[0].real();
 
@@ -212,7 +231,11 @@ void QuantumCircuit::execute_level0_gate(const GateParams& gate) {
             break;
     }
 
-    cudaFree(d_target_ids);
+    // 检查GPU内核执行错误
+    CHECK_CUDA(cudaGetLastError());
+    CHECK_CUDA(cudaDeviceSynchronize());
+
+    CHECK_CUDA(cudaFree(d_target_ids));
 }
 
 /**
@@ -224,9 +247,9 @@ void QuantumCircuit::execute_level1_gate(const GateParams& gate) {
     if (target_states.empty()) return;
 
     int* d_target_ids = nullptr;
-    cudaMalloc(&d_target_ids, target_states.size() * sizeof(int));
-    cudaMemcpy(d_target_ids, target_states.data(),
-               target_states.size() * sizeof(int), cudaMemcpyHostToDevice);
+    CHECK_CUDA(cudaMalloc(&d_target_ids, target_states.size() * sizeof(int)));
+    CHECK_CUDA(cudaMemcpy(d_target_ids, target_states.data(),
+               target_states.size() * sizeof(int), cudaMemcpyHostToDevice));
 
     switch (gate.type) {
         case GateType::CREATION_OPERATOR:
@@ -239,7 +262,11 @@ void QuantumCircuit::execute_level1_gate(const GateParams& gate) {
             break;
     }
 
-    cudaFree(d_target_ids);
+    // 检查GPU内核执行错误
+    CHECK_CUDA(cudaGetLastError());
+    CHECK_CUDA(cudaDeviceSynchronize());
+
+    CHECK_CUDA(cudaFree(d_target_ids));
 }
 
 /**
@@ -251,23 +278,29 @@ void QuantumCircuit::execute_level2_gate(const GateParams& gate) {
     if (target_states.empty()) return;
 
     int* d_target_ids = nullptr;
-    cudaMalloc(&d_target_ids, target_states.size() * sizeof(int));
-    cudaMemcpy(d_target_ids, target_states.data(),
-               target_states.size() * sizeof(int), cudaMemcpyHostToDevice);
+    CHECK_CUDA(cudaMalloc(&d_target_ids, target_states.size() * sizeof(int)));
+    CHECK_CUDA(cudaMemcpy(d_target_ids, target_states.data(),
+               target_states.size() * sizeof(int), cudaMemcpyHostToDevice));
 
     if (gate.type == GateType::DISPLACEMENT && !gate.params.empty()) {
         cuDoubleComplex alpha = make_cuDoubleComplex(gate.params[0].real(), gate.params[0].imag());
         apply_displacement_gate(&state_pool_, d_target_ids, target_states.size(), alpha);
+        // 检查GPU内核执行错误
+        CHECK_CUDA(cudaGetLastError());
+        CHECK_CUDA(cudaDeviceSynchronize());
     } else {
         // 使用ELL格式的通用实现
         FockELLOperator* ell_op = prepare_ell_operator(gate);
         if (ell_op) {
             apply_single_mode_gate(&state_pool_, ell_op, d_target_ids, target_states.size());
+            // 在删除ELL操作符之前，确保GPU操作完成
+            CHECK_CUDA(cudaGetLastError());
+            CHECK_CUDA(cudaDeviceSynchronize());
             delete ell_op;
         }
     }
 
-    cudaFree(d_target_ids);
+    CHECK_CUDA(cudaFree(d_target_ids));
 }
 
 /**
@@ -279,9 +312,9 @@ void QuantumCircuit::execute_level3_gate(const GateParams& gate) {
     if (target_states.empty()) return;
 
     int* d_target_ids = nullptr;
-    cudaMalloc(&d_target_ids, target_states.size() * sizeof(int));
-    cudaMemcpy(d_target_ids, target_states.data(),
-               target_states.size() * sizeof(int), cudaMemcpyHostToDevice);
+    CHECK_CUDA(cudaMalloc(&d_target_ids, target_states.size() * sizeof(int)));
+    CHECK_CUDA(cudaMemcpy(d_target_ids, target_states.data(),
+               target_states.size() * sizeof(int), cudaMemcpyHostToDevice));
 
     if (gate.type == GateType::BEAM_SPLITTER && gate.params.size() >= 2) {
         double theta = gate.params[0].real();
@@ -292,15 +325,19 @@ void QuantumCircuit::execute_level3_gate(const GateParams& gate) {
         // The target qumodes are specified in gate.targets
         int state_id = 0;  // Currently we only have one state
         int* d_state_id = nullptr;
-        cudaMalloc(&d_state_id, sizeof(int));
-        cudaMemcpy(d_state_id, &state_id, sizeof(int), cudaMemcpyHostToDevice);
+        CHECK_CUDA(cudaMalloc(&d_state_id, sizeof(int)));
+        CHECK_CUDA(cudaMemcpy(d_state_id, &state_id, sizeof(int), cudaMemcpyHostToDevice));
 
         apply_beam_splitter(&state_pool_, d_state_id, 1, theta, phi, max_photon);
 
-        cudaFree(d_state_id);
+        // 检查GPU内核执行错误
+        CHECK_CUDA(cudaGetLastError());
+        CHECK_CUDA(cudaDeviceSynchronize());
+
+        CHECK_CUDA(cudaFree(d_state_id));
     }
 
-    cudaFree(d_target_ids);
+    CHECK_CUDA(cudaFree(d_target_ids));
 }
 
 /**
@@ -322,7 +359,32 @@ void QuantumCircuit::execute_level4_gate(const GateParams& gate) {
         }
     }
 
-    apply_hybrid_control_gate(root_node_, &state_pool_, node_manager_, gate_type, param);
+    // 对于混合控制门，目前实现是占位符
+    // 如果gate_type是controlled_displacement，我们需要实际实现它
+    if (gate_type == "controlled_displacement" && root_node_ != nullptr) {
+        // 收集需要应用控制位移的状态
+        // 简化实现：收集所有活跃状态
+        std::vector<int> controlled_states;
+        for (int i = 0; i < state_pool_.active_count; ++i) {
+            controlled_states.push_back(i);
+        }
+        
+        if (!controlled_states.empty()) {
+            // 使用hybrid_gates.cu中的apply_controlled_displacement函数
+            // 但需要先声明它
+            extern void apply_controlled_displacement(CVStatePool* state_pool,
+                                                     const std::vector<int>& controlled_states,
+                                                     cuDoubleComplex alpha);
+            apply_controlled_displacement(&state_pool_, controlled_states, param);
+            // apply_controlled_displacement内部已经包含错误检查和同步
+        }
+    } else {
+        // 调用占位符函数（目前为空实现）
+        apply_hybrid_control_gate(root_node_, &state_pool_, node_manager_, gate_type, param);
+        // 即使占位符也可能有GPU操作，检查错误
+        CHECK_CUDA(cudaGetLastError());
+        CHECK_CUDA(cudaDeviceSynchronize());
+    }
 }
 
 /**
