@@ -57,6 +57,7 @@ QuantumCircuit::~QuantumCircuit() {
  */
 void QuantumCircuit::add_gate(const GateParams& gate) {
     if (is_built_) {
+        std::cout << "Attempting to add gate type " << (int)gate.type << " after build." << std::endl;
         throw std::runtime_error("不能在构建后添加门操作");
     }
     gate_sequence_.push_back(gate);
@@ -125,8 +126,8 @@ void QuantumCircuit::reset() {
     is_built_ = false;
     is_executed_ = false;
 
-    // 重新初始化状态池 (可选)
-    // 这里保持状态池不变，以允许重新使用
+    // 重新初始化状态池
+    state_pool_.reset();
 }
 
 /**

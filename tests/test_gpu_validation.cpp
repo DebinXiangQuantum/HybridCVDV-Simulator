@@ -5,7 +5,7 @@
 #include <cuda_runtime.h>
 #include <chrono>
 #include "cv_state_pool.h"
-#include "src/reference/reference_gates.h"
+#include "reference_gates.h"
 
 // 声明GPU函数
 extern void apply_phase_rotation(CVStatePool* pool, const int* targets, int batch_size, double theta);
@@ -18,7 +18,8 @@ extern void apply_displacement_gate(CVStatePool* pool, const int* targets, int b
 int run_actual_gpu_tests();
 
 // 辅助函数：调用GPU函数（处理target_indices的GPU内存分配）
-void call_gpu_function(auto gpu_func, CVStatePool* state_pool, int state_id, auto... args) {
+template <typename Func, typename... Args>
+void call_gpu_function(Func gpu_func, CVStatePool* state_pool, int state_id, Args... args) {
     int* d_target_indices = nullptr;
     cudaMalloc(&d_target_indices, sizeof(int));
     cudaMemcpy(d_target_indices, &state_id, sizeof(int), cudaMemcpyHostToDevice);
@@ -145,7 +146,7 @@ int run_complete_gpu_unit_tests() {
         two_mode_state[0] = Reference::Complex(1.0, 0.0); // |0,0⟩
 
         // 测试波束分裂器 (小角度以确保精度)
-        auto beam_splitter_result = Reference::TwoModeGates::apply_beam_splitter(two_mode_state, M_PI/16.0, 0.0, dim);
+        auto beam_splitter_result = Reference::TwoModeGates::apply_beam_splitter(two_mode_state, M_PI/16.0, 0.0);
         double bs_error = std::abs(Reference::vector_norm(beam_splitter_result) - 1.0);
 
         bool two_mode_test = (bs_error < 1e-10);
@@ -163,16 +164,20 @@ int run_complete_gpu_unit_tests() {
 
         // 测试控制位移门 (小参数)
         Reference::Complex alpha_cd(0.05, 0.02);
-        auto cd_control_0 = Reference::HybridControlGates::apply_controlled_displacement(0, target_state, alpha_cd);
-        auto cd_control_1 = Reference::HybridControlGates::apply_controlled_displacement(1, target_state, alpha_cd);
+        // Control=0: D(alpha)
+        auto cd_control_0 = Reference::SingleModeGates::apply_displacement_gate(target_state, alpha_cd);
+        // Control=1: D(-alpha)
+        auto cd_control_1 = Reference::SingleModeGates::apply_displacement_gate(target_state, -alpha_cd);
 
         double cd_0_error = std::abs(Reference::vector_norm(cd_control_0) - 1.0);
         double cd_1_error = std::abs(Reference::vector_norm(cd_control_1) - 1.0);
 
         // 测试控制压缩门
         Reference::Complex xi_cs(0.03, 0.01);
-        auto cs_control_0 = Reference::HybridControlGates::apply_controlled_squeezing(0, target_state, xi_cs);
-        auto cs_control_1 = Reference::HybridControlGates::apply_controlled_squeezing(1, target_state, xi_cs);
+        // Control=0: S(xi)
+        auto cs_control_0 = Reference::SingleModeGates::apply_squeezing_gate(target_state, xi_cs);
+        // Control=1: S(-xi)
+        auto cs_control_1 = Reference::SingleModeGates::apply_squeezing_gate(target_state, -xi_cs);
 
         double cs_0_error = std::abs(Reference::vector_norm(cs_control_0) - 1.0);
         double cs_1_error = std::abs(Reference::vector_norm(cs_control_1) - 1.0);

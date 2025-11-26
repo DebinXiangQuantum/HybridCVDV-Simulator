@@ -189,3 +189,27 @@ const cuDoubleComplex* CVStatePool::get_state_ptr(int state_id) const {
 bool CVStatePool::is_valid_state(int state_id) const {
     return state_id >= 0 && state_id < capacity;
 }
+
+/**
+ * 重置状态池
+ */
+void CVStatePool::reset() {
+    active_count = 0;
+
+    // 重置空闲列表：0, 1, 2, ..., capacity-1
+    std::vector<int> host_free_list(capacity);
+    for (int i = 0; i < capacity; ++i) {
+        host_free_list[i] = i;
+    }
+
+    cudaError_t err = cudaMemcpy(free_list, host_free_list.data(),
+                                 capacity * sizeof(int), cudaMemcpyHostToDevice);
+    if (err != cudaSuccess) {
+        std::cerr << "重置状态池失败: " << cudaGetErrorString(err) << std::endl;
+    }
+
+    // 可选：重置数据内存为0
+    // cudaMemset(data, 0, static_cast<size_t>(capacity) * d_trunc * sizeof(cuDoubleComplex));
+    
+    std::cout << "CVStatePool 已重置" << std::endl;
+}

@@ -1,14 +1,14 @@
 #include <gtest/gtest.h>
 #include "cv_state_pool.h"
-#include "reference_gates.h"
+#include "../src/reference/reference_gates.h"
 #include <vector>
 #include <cmath>
 #include <cuda_runtime.h>
 
 // 声明外部函数
-extern void apply_phase_rotation(CVStatePool& pool, const int* targets, int batch_size, double theta);
-extern void apply_kerr_gate(CVStatePool& pool, const int* targets, int batch_size, double chi);
-extern void apply_conditional_parity(CVStatePool& pool, const int* targets, int batch_size, double parity);
+extern void apply_phase_rotation(CVStatePool* pool, const int* targets, int batch_size, double theta);
+extern void apply_kerr_gate(CVStatePool* pool, const int* targets, int batch_size, double chi);
+extern void apply_conditional_parity(CVStatePool* pool, const int* targets, int batch_size, double parity);
 
 /**
  * 对角门操作单元测试
@@ -88,6 +88,38 @@ protected:
         EXPECT_LT(error_metrics.relative_error, max_allowed_error);
         EXPECT_LT(error_metrics.fidelity_deviation, max_allowed_error);
     }
+
+    /**
+     * 辅助函数：调用GPU门函数，处理target_indices的GPU内存分配
+     */
+    template <typename Func, typename... Args>
+    void call_gpu_gate(Func func, const std::vector<int>& targets, Args... args) {
+        int* d_targets;
+        cudaError_t err = cudaMalloc(&d_targets, targets.size() * sizeof(int));
+        if (err != cudaSuccess) {
+            FAIL() << "Failed to allocate device memory for targets: " << cudaGetErrorString(err);
+            return;
+        }
+        
+        err = cudaMemcpy(d_targets, targets.data(), targets.size() * sizeof(int), cudaMemcpyHostToDevice);
+        if (err != cudaSuccess) {
+            cudaFree(d_targets);
+            FAIL() << "Failed to copy targets to device: " << cudaGetErrorString(err);
+            return;
+        }
+        
+        func(pool, d_targets, targets.size(), args...);
+        
+        // 同步并检查错误
+        cudaDeviceSynchronize();
+        err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            cudaFree(d_targets);
+            FAIL() << "GPU kernel execution failed: " << cudaGetErrorString(err);
+        }
+        
+        cudaFree(d_targets);
+    }
 };
 
 TEST_F(DiagonalGatesTest, PhaseRotationIdentity) {
@@ -100,8 +132,7 @@ TEST_F(DiagonalGatesTest, PhaseRotationIdentity) {
     auto ref_result = Reference::DiagonalGates::apply_phase_rotation(ref_input, 0.0);
 
     // GPU实现
-    int target_ids[] = {state_id};
-    apply_phase_rotation(*pool, target_ids, 1, 0.0);
+    call_gpu_gate(apply_phase_rotation, {state_id}, 0.0);
 
     std::vector<cuDoubleComplex> gpu_result;
     pool->download_state(state_id, gpu_result);
@@ -121,8 +152,7 @@ TEST_F(DiagonalGatesTest, PhaseRotationPi) {
     auto ref_result = Reference::DiagonalGates::apply_phase_rotation(ref_input, M_PI);
 
     // GPU实现
-    int target_ids[] = {state_id};
-    apply_phase_rotation(*pool, target_ids, 1, M_PI);
+    call_gpu_gate(apply_phase_rotation, {state_id}, M_PI);
 
     std::vector<cuDoubleComplex> gpu_result;
     pool->download_state(state_id, gpu_result);
@@ -142,8 +172,7 @@ TEST_F(DiagonalGatesTest, PhaseRotationPiHalf) {
     auto ref_result = Reference::DiagonalGates::apply_phase_rotation(ref_input, M_PI / 2.0);
 
     // GPU实现
-    int target_ids[] = {state_id};
-    apply_phase_rotation(*pool, target_ids, 1, M_PI / 2.0);
+    call_gpu_gate(apply_phase_rotation, {state_id}, M_PI / 2.0);
 
     std::vector<cuDoubleComplex> gpu_result;
     pool->download_state(state_id, gpu_result);
@@ -163,8 +192,7 @@ TEST_F(DiagonalGatesTest, KerrGateVacuum) {
     auto ref_result = Reference::DiagonalGates::apply_kerr_gate(ref_input, 1.0);
 
     // GPU实现
-    int target_ids[] = {state_id};
-    apply_kerr_gate(*pool, target_ids, 1, 1.0);
+    call_gpu_gate(apply_kerr_gate, {state_id}, 1.0);
 
     std::vector<cuDoubleComplex> gpu_result;
     pool->download_state(state_id, gpu_result);
@@ -182,8 +210,7 @@ TEST_F(DiagonalGatesTest, KerrGateFockState) {
 
     // 应用Kerr门: K(χ) |2⟩ = e^{-iχ·2²} |2⟩ = e^{-iχ·4} |2⟩
     double chi = 0.5;
-    int target_ids[] = {state_id};
-    apply_kerr_gate(*pool, target_ids, 1, chi);
+    call_gpu_gate(apply_kerr_gate, {state_id}, chi);
 
     std::vector<cuDoubleComplex> result_state;
     pool->download_state(state_id, result_state);
@@ -191,20 +218,19 @@ TEST_F(DiagonalGatesTest, KerrGateFockState) {
     // |2⟩分量应该变成 e^{-iχ·4}
     double expected_phase = -chi * 4.0;
     double expected_real = cos(expected_phase);
-    double expected_imag = -sin(expected_phase);  // 注意Kerr门公式中的负号
+    double expected_imag = sin(expected_phase);  // 修正: expected_phase 已经包含了负号
 
     EXPECT_NEAR(cuCreal(result_state[2]), expected_real, 1e-10);
     EXPECT_NEAR(cuCimag(result_state[2]), expected_imag, 1e-10);
 
     // 其他分量应该为0
     result_state[2] = make_cuDoubleComplex(0.0, 0.0);
-    expect_normalized(result_state);
+    EXPECT_NEAR(calculate_norm(result_state), 0.0, 1e-10);
 }
 
 TEST_F(DiagonalGatesTest, ConditionalParityEven) {
     // 测试条件奇偶校验门 (偶数模式)
-    int target_ids[] = {state_id};
-    apply_conditional_parity(*pool, target_ids, 1, 0.0);  // 偶数
+    call_gpu_gate(apply_conditional_parity, {state_id}, 0.0);  // 偶数
 
     std::vector<cuDoubleComplex> result_state;
     pool->download_state(state_id, result_state);
@@ -218,8 +244,7 @@ TEST_F(DiagonalGatesTest, ConditionalParityEven) {
 
 TEST_F(DiagonalGatesTest, ConditionalParityOdd) {
     // 测试条件奇偶校验门 (奇数模式)
-    int target_ids[] = {state_id};
-    apply_conditional_parity(*pool, target_ids, 1, 1.0);  // 奇数
+    call_gpu_gate(apply_conditional_parity, {state_id}, 1.0);  // 奇数
 
     std::vector<cuDoubleComplex> result_state;
     pool->download_state(state_id, result_state);
@@ -238,15 +263,14 @@ TEST_F(DiagonalGatesTest, BatchProcessing) {
     state2[1] = make_cuDoubleComplex(1.0, 0.0);  // |1⟩状态
     pool->upload_state(state_id2, state2);
 
-    int target_ids[] = {state_id, state_id2};
-    apply_phase_rotation(*pool, target_ids, 2, M_PI);
+    call_gpu_gate(apply_phase_rotation, {state_id, state_id2}, M_PI);
 
-    // 验证第一个状态
+    // 验证第一个状态 (|0⟩): R(π) |0⟩ = e^{-iπ·0} |0⟩ = |0⟩
     std::vector<cuDoubleComplex> result1;
     pool->download_state(state_id, result1);
-    EXPECT_NEAR(cuCreal(result1[0]), -1.0, 1e-10);
+    EXPECT_NEAR(cuCreal(result1[0]), 1.0, 1e-10);
 
-    // 验证第二个状态: R(π) |1⟩ = e^{-iπ·1} |1⟩ = -|1⟩
+    // 验证第二个状态 (|1⟩): R(π) |1⟩ = e^{-iπ·1} |1⟩ = -|1⟩
     std::vector<cuDoubleComplex> result2;
     pool->download_state(state_id2, result2);
     EXPECT_NEAR(cuCreal(result2[1]), -1.0, 1e-10);
@@ -268,8 +292,7 @@ TEST_F(DiagonalGatesTest, ComplexSuperposition) {
     auto ref_result = Reference::DiagonalGates::apply_phase_rotation(ref_input, M_PI / 4.0);
 
     // GPU实现
-    int target_ids[] = {state_id};
-    apply_phase_rotation(*pool, target_ids, 1, M_PI / 4.0);
+    call_gpu_gate(apply_phase_rotation, {state_id}, M_PI / 4.0);
 
     std::vector<cuDoubleComplex> gpu_result;
     pool->download_state(state_id, gpu_result);

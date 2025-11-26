@@ -86,6 +86,12 @@ struct CVStatePool {
      */
     bool is_valid_state(int state_id) const;
 
+    /**
+     * 重置状态池
+     * 重置所有分配，恢复为空闲状态
+     */
+    void reset();
+
 private:
     // 禁用拷贝构造和赋值
     CVStatePool(const CVStatePool&) = delete;

@@ -20,6 +20,9 @@ FockELLOperator::FockELLOperator(int matrix_dim, int bandwidth)
 
     // 分配GPU内存
     realloc_gpu_memory();
+    
+    // 上传初始数据（零矩阵）到GPU
+    upload_to_gpu();
 
     std::cout << "FockELLOperator 初始化完成: 维度=" << dim
               << ", 带宽=" << max_bandwidth << std::endl;

@@ -40,8 +40,8 @@ sudo sh cuda_11.8.0_520.61.05_linux.run
 
 ```bash
 # 添加到~/.bashrc或/etc/environment
-export PATH=/usr/local/cuda-11.8/bin${PATH:+:${PATH}}
-export LD_LIBRARY_PATH=/usr/local/cuda-11.8/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
+export PATH=/usr/local/cuda/bin${PATH:+:${PATH}}
+export LD_LIBRARY_PATH=/usr/local/cuda/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
 
 # 重新加载环境变量
 source ~/.bashrc
@@ -86,8 +86,7 @@ cd HybridCVDV-Simulator
 ### 2. 创建构建目录
 
 ```bash
-mkdir build
-cd build
+mkdir build && cd build
 ```
 
 ### 3. 配置CMake
@@ -97,7 +96,7 @@ cd build
 cmake ..
 
 # 或手动指定CUDA路径
-cmake -DCUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda-11.8 ..
+cmake .. -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc
 ```
 
 ### 4. 编译项目
