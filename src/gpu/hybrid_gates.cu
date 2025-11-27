@@ -287,12 +287,31 @@ void apply_rabi_interaction(CVStatePool* state_pool,
     CHECK_CUDA(cudaMalloc(&temp_buffer, buffer_size));
     
     // Apply to v0
-    apply_controlled_displacement_kernel<<<gd, bd>>>(state_pool->data, state_pool->d_trunc, d_id0, n, alpha0, temp_buffer);
-    copy_back_hybrid_kernel<<<gd, bd>>>(state_pool->data, state_pool->d_trunc, d_id0, n, temp_buffer);
+    int num_states = static_cast<int>(n);
+    apply_controlled_displacement_kernel<<<gd, bd>>>(
+        state_pool->data, state_pool->d_trunc, state_pool->capacity,
+        d_id0, num_states, alpha0, temp_buffer);
+    CHECK_CUDA(cudaGetLastError());
+    CHECK_CUDA(cudaDeviceSynchronize());
+    
+    copy_back_hybrid_kernel<<<gd, bd>>>(
+        state_pool->data, state_pool->d_trunc, state_pool->capacity,
+        d_id0, num_states, temp_buffer);
+    CHECK_CUDA(cudaGetLastError());
+    CHECK_CUDA(cudaDeviceSynchronize());
     
     // Apply to v1
-    apply_controlled_displacement_kernel<<<gd, bd>>>(state_pool->data, state_pool->d_trunc, d_id1, n, alpha1, temp_buffer);
-    copy_back_hybrid_kernel<<<gd, bd>>>(state_pool->data, state_pool->d_trunc, d_id1, n, temp_buffer);
+    apply_controlled_displacement_kernel<<<gd, bd>>>(
+        state_pool->data, state_pool->d_trunc, state_pool->capacity,
+        d_id1, num_states, alpha1, temp_buffer);
+    CHECK_CUDA(cudaGetLastError());
+    CHECK_CUDA(cudaDeviceSynchronize());
+    
+    copy_back_hybrid_kernel<<<gd, bd>>>(
+        state_pool->data, state_pool->d_trunc, state_pool->capacity,
+        d_id1, num_states, temp_buffer);
+    CHECK_CUDA(cudaGetLastError());
+    CHECK_CUDA(cudaDeviceSynchronize());
     
     CHECK_CUDA(cudaFree(temp_buffer));
     
