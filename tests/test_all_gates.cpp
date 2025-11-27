@@ -135,10 +135,10 @@ TEST_F(GateTest, TestPhaseRotation) {
     double theta = M_PI / 4.0;
     Reference::Vector result = Reference::DiagonalGates::apply_phase_rotation(input, theta);
 
-    // 验证相位因子
-    EXPECT_NEAR(std::arg(result[0]), 0.0, 1e-10);
-    EXPECT_NEAR(std::arg(result[1]), M_PI/4.0 + M_PI/2.0, 1e-10); // 原相位 + θ
-    EXPECT_NEAR(std::arg(result[2]), 2.0 * M_PI/4.0, 1e-10);
+    // 验证相位因子：R(θ) 应用相位因子 e^{-iθn}
+    EXPECT_NEAR(std::arg(result[0]), 0.0, 1e-10);                           // e^{-iθ*0} * 1 = 1
+    EXPECT_NEAR(std::arg(result[1]), M_PI/2.0 - M_PI/4.0, 1e-10);         // e^{-iθ*1} * i = i * e^{-iθ}，相位 = π/2 - θ
+    EXPECT_NEAR(std::arg(result[2]), -2.0 * M_PI/4.0, 1e-10);             // e^{-iθ*2} * 0 = 0，相位 = -2θ
 }
 
 TEST_F(GateTest, TestDisplacement) {
