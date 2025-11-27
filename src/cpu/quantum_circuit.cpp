@@ -1437,6 +1437,38 @@ namespace Gates {
         return GateParams(GateType::CONDITIONAL_SQUEEZING, {control_qubit}, {target_qumode}, {xi});
     }
 
+    GateParams ConditionalBeamSplitter(int control_qubit, int target_qumode1, int target_qumode2, double theta, double phi) {
+        return GateParams(GateType::CONDITIONAL_BEAM_SPLITTER, {control_qubit}, {target_qumode1, target_qumode2}, {theta, phi});
+    }
+
+    GateParams ConditionalTwoModeSqueezing(int control_qubit, int target_qumode1, int target_qumode2, std::complex<double> xi) {
+        return GateParams(GateType::CONDITIONAL_TWO_MODE_SQUEEZING, {control_qubit}, {target_qumode1, target_qumode2}, {xi});
+    }
+
+    GateParams ConditionalSUM(int control_qubit, int target_qumode1, int target_qumode2, double theta, double phi) {
+        return GateParams(GateType::CONDITIONAL_SUM, {control_qubit}, {target_qumode1, target_qumode2}, {theta, phi});
+    }
+
+    GateParams RabiInteraction(int control_qubit, int target_qumode, double theta) {
+        return GateParams(GateType::RABI_INTERACTION, {control_qubit}, {target_qumode}, {theta});
+    }
+
+    GateParams JaynesCummings(int control_qubit, int target_qumode, double theta, double phi) {
+        return GateParams(GateType::JAYNES_CUMMINGS, {control_qubit}, {target_qumode}, {theta, phi});
+    }
+
+    GateParams AntiJaynesCummings(int control_qubit, int target_qumode, double theta, double phi) {
+        return GateParams(GateType::ANTI_JAYNES_CUMMINGS, {control_qubit}, {target_qumode}, {theta, phi});
+    }
+
+    GateParams SelectiveQubitRotation(int target_qubit, int control_qumode, const std::vector<double>& theta_vec, const std::vector<double>& phi_vec) {
+        std::vector<std::complex<double>> params;
+        params.reserve(theta_vec.size() + phi_vec.size());
+        for (double theta : theta_vec) params.push_back(theta);
+        for (double phi : phi_vec) params.push_back(phi);
+        return GateParams(GateType::SELECTIVE_QUBIT_ROTATION, {target_qubit}, {control_qumode}, params);
+    }
+
     // Qubit门
     GateParams Hadamard(int qubit) {
         return GateParams(GateType::HADAMARD, {qubit});

@@ -18,7 +18,8 @@ extern void apply_displacement_gate(CVStatePool* pool, const int* targets, int b
 int run_actual_gpu_tests();
 
 // 辅助函数：调用GPU函数（处理target_indices的GPU内存分配）
-void call_gpu_function(auto gpu_func, CVStatePool* state_pool, int state_id, auto... args) {
+template<typename Func, typename... Args>
+void call_gpu_function(Func gpu_func, CVStatePool* state_pool, int state_id, Args... args) {
     int* d_target_indices = nullptr;
     cudaMalloc(&d_target_indices, sizeof(int));
     cudaMemcpy(d_target_indices, &state_id, sizeof(int), cudaMemcpyHostToDevice);

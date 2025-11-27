@@ -49,6 +49,11 @@ Vector normalize_vector(const Vector& v);
 double fidelity(const Vector& v1, const Vector& v2);
 
 /**
+ * 工具函数：计算两个向量的张量积
+ */
+Vector tensor_product(const Vector& a, const Vector& b);
+
+/**
  * 工具函数：计算两个实现之间的误差
  */
 struct ErrorMetrics {
