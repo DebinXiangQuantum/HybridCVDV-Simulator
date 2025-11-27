@@ -2,6 +2,8 @@
 #include <iostream>
 #include <algorithm>
 #include <cmath>
+#include <cuda_runtime.h>
+#include <cuComplex.h>
 
 // 包含GPU内核头文件
 // Level 0
@@ -28,6 +30,219 @@ void apply_hybrid_control_gate(HDDNode* root_node, CVStatePool* state_pool,
                               HDDNodeManager& node_manager,
                               const std::string& gate_type,
                               cuDoubleComplex param);
+
+// 状态加法函数
+void add_states(CVStatePool* state_pool,
+                const int* src1_indices,
+                const cuDoubleComplex* weights1,
+                const int* src2_indices,
+                const cuDoubleComplex* weights2,
+                const int* dst_indices,
+                int batch_size);
+
+/**
+ * HDD节点加法: result = w1 * n1 + w2 * n2
+ */
+HDDNode* QuantumCircuit::hdd_add(HDDNode* n1, std::complex<double> w1, HDDNode* n2, std::complex<double> w2) {
+    // 处理零权重
+    if (std::abs(w1) < 1e-14) {
+        if (std::abs(w2) < 1e-14) {
+            // 两者都为零：返回"零"节点
+            int zero_id = state_pool_.allocate_state();
+            std::vector<cuDoubleComplex> zeros(cv_truncation_, make_cuDoubleComplex(0.0, 0.0));
+            state_pool_.upload_state(zero_id, zeros);
+            return node_manager_.create_terminal_node(zero_id);
+        }
+        // 只有 w2，递归处理
+        return hdd_add(n2, w2, n1, w1);
+    }
+    if (std::abs(w2) < 1e-14) {
+        // 只有 w1，递归处理
+        return hdd_add(n1, w1, n2, w2);
+    }
+
+    // 基本情况：终端节点
+    if (n1->is_terminal() && n2->is_terminal()) {
+        int id1 = n1->tensor_id;
+        int id2 = n2->tensor_id;
+        int new_id = state_pool_.allocate_state();
+        
+        // 准备设备端数据
+        int* d_src1 = nullptr;
+        int* d_src2 = nullptr;
+        int* d_dst = nullptr;
+        cuDoubleComplex* d_w1 = nullptr;
+        cuDoubleComplex* d_w2 = nullptr;
+        
+        cudaMalloc(&d_src1, sizeof(int));
+        cudaMalloc(&d_src2, sizeof(int));
+        cudaMalloc(&d_dst, sizeof(int));
+        cudaMalloc(&d_w1, sizeof(cuDoubleComplex));
+        cudaMalloc(&d_w2, sizeof(cuDoubleComplex));
+        
+        cudaMemcpy(d_src1, &id1, sizeof(int), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_src2, &id2, sizeof(int), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_dst, &new_id, sizeof(int), cudaMemcpyHostToDevice);
+        
+        cuDoubleComplex w1_cu = make_cuDoubleComplex(w1.real(), w1.imag());
+        cuDoubleComplex w2_cu = make_cuDoubleComplex(w2.real(), w2.imag());
+        cudaMemcpy(d_w1, &w1_cu, sizeof(cuDoubleComplex), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_w2, &w2_cu, sizeof(cuDoubleComplex), cudaMemcpyHostToDevice);
+        
+        // 调用GPU内核
+        add_states(&state_pool_, d_src1, d_w1, d_src2, d_w2, d_dst, 1);
+        
+        // 清理
+        cudaFree(d_src1);
+        cudaFree(d_src2);
+        cudaFree(d_dst);
+        cudaFree(d_w1);
+        cudaFree(d_w2);
+        
+        return node_manager_.create_terminal_node(new_id);
+    }
+    
+    // 递归步骤
+    int level1 = n1->is_terminal() ? -1 : n1->qubit_level;
+    int level2 = n2->is_terminal() ? -1 : n2->qubit_level;
+    
+    if (level1 != level2) {
+        if (level1 > level2) {
+            HDDNode* new_low = hdd_add(n1->low, w1 * n1->w_low, n2, w2);
+            HDDNode* new_high = hdd_add(n1->high, w1 * n1->w_high, n2, w2);
+            return node_manager_.get_or_create_node(level1, new_low, new_high, 1.0, 1.0);
+        } else {
+            // level2 > level1
+            HDDNode* new_low = hdd_add(n1, w1, n2->low, w2 * n2->w_low);
+            HDDNode* new_high = hdd_add(n1, w1, n2->high, w2 * n2->w_high);
+            return node_manager_.get_or_create_node(level2, new_low, new_high, 1.0, 1.0);
+        }
+    }
+    
+    // 相同层级
+    int level = level1;
+    HDDNode* new_low = hdd_add(n1->low, w1 * n1->w_low, n2->low, w2 * n2->w_low);
+    HDDNode* new_high = hdd_add(n1->high, w1 * n1->w_high, n2->high, w2 * n2->w_high);
+    
+    return node_manager_.get_or_create_node(level, new_low, new_high, 1.0, 1.0);
+}
+
+HDDNode* QuantumCircuit::apply_single_qubit_gate_recursive(HDDNode* node, int target_qubit, const std::vector<std::complex<double>>& u) {
+    if (node->is_terminal()) {
+        return node;
+    }
+    
+    if (node->qubit_level == target_qubit) {
+        // 应用矩阵
+        // u: [u00, u01, u10, u11]
+        HDDNode* L = node->low;
+        HDDNode* H = node->high;
+        
+        std::complex<double> wL = node->w_low;
+        std::complex<double> wH = node->w_high;
+        
+        // New L = u00 * (wL * L) + u01 * (wH * H)
+        HDDNode* new_L = hdd_add(L, u[0] * wL, H, u[1] * wH);
+        
+        // New H = u10 * (wL * L) + u11 * (wH * H)
+        HDDNode* new_H = hdd_add(L, u[2] * wL, H, u[3] * wH);
+        
+        return node_manager_.get_or_create_node(node->qubit_level, new_L, new_H, 1.0, 1.0);
+    } else if (node->qubit_level > target_qubit) {
+        HDDNode* new_low = apply_single_qubit_gate_recursive(node->low, target_qubit, u);
+        HDDNode* new_high = apply_single_qubit_gate_recursive(node->high, target_qubit, u);
+        return node_manager_.get_or_create_node(node->qubit_level, new_low, new_high, node->w_low, node->w_high);
+    } else {
+        return node;
+    }
+}
+
+HDDNode* QuantumCircuit::apply_cnot_recursive(HDDNode* node, int control, int target) {
+    if (node->is_terminal()) return node;
+    
+    if (node->qubit_level == control) {
+        // 控制节点
+        HDDNode* new_low = node->low; // 恒等
+        
+        // 高分支：对目标应用X
+        std::vector<std::complex<double>> px = {0.0, 1.0, 1.0, 0.0};
+        HDDNode* new_high = apply_single_qubit_gate_recursive(node->high, target, px);
+        
+        return node_manager_.get_or_create_node(node->qubit_level, new_low, new_high, node->w_low, node->w_high);
+    } else if (node->qubit_level > control) {
+        HDDNode* new_low = apply_cnot_recursive(node->low, control, target);
+        HDDNode* new_high = apply_cnot_recursive(node->high, control, target);
+        return node_manager_.get_or_create_node(node->qubit_level, new_low, new_high, node->w_low, node->w_high);
+    }
+    
+    return node;
+}
+
+void QuantumCircuit::execute_qubit_gate(const GateParams& gate) {
+    if (gate.target_qubits.empty()) return;
+    
+    HDDNode* new_root = nullptr;
+    
+    if (gate.type == GateType::CNOT) {
+        if (gate.target_qubits.size() < 2) return;
+        int c = gate.target_qubits[0];
+        int t = gate.target_qubits[1];
+        if (c < t) {
+            throw std::runtime_error("Currently only supports Control > Target (higher index controls lower index)");
+        }
+        new_root = apply_cnot_recursive(root_node_, c, t);
+    } else {
+        int target = gate.target_qubits[0];
+        std::vector<std::complex<double>> mat(4);
+        
+        double inv_sqrt2 = 1.0 / std::sqrt(2.0);
+        
+        switch (gate.type) {
+            case GateType::HADAMARD:
+                mat = {inv_sqrt2, inv_sqrt2, inv_sqrt2, -inv_sqrt2};
+                break;
+            case GateType::PAULI_X:
+                mat = {0.0, 1.0, 1.0, 0.0};
+                break;
+            case GateType::PAULI_Y:
+                mat = {0.0, std::complex<double>(0, -1), std::complex<double>(0, 1), 0.0};
+                break;
+            case GateType::PAULI_Z:
+                mat = {1.0, 0.0, 0.0, -1.0};
+                break;
+            case GateType::ROTATION_X: {
+                double theta = gate.params[0].real();
+                double c = std::cos(theta/2);
+                double s = std::sin(theta/2);
+                mat = {c, std::complex<double>(0, -s), std::complex<double>(0, -s), c};
+                break;
+            }
+            case GateType::ROTATION_Y: {
+                double theta = gate.params[0].real();
+                double c = std::cos(theta/2);
+                double s = std::sin(theta/2);
+                mat = {c, -s, s, c};
+                break;
+            }
+            case GateType::ROTATION_Z: {
+                double theta = gate.params[0].real();
+                double c = std::cos(theta/2);
+                double s = std::sin(theta/2);
+                mat = {std::complex<double>(c, -s), 0.0, 0.0, std::complex<double>(c, s)}; // exp(-i t/2 Z)
+                break;
+            }
+            default:
+                return;
+        }
+        
+        new_root = apply_single_qubit_gate_recursive(root_node_, target, mat);
+    }
+    
+    if (new_root != root_node_) {
+        node_manager_.release_node(root_node_);
+        root_node_ = new_root;
+    }
+}
 
 /**
  * QuantumCircuit 构造函数
