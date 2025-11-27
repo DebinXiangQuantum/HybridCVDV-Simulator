@@ -189,3 +189,60 @@ const cuDoubleComplex* CVStatePool::get_state_ptr(int state_id) const {
 bool CVStatePool::is_valid_state(int state_id) const {
     return state_id >= 0 && state_id < capacity;
 }
+
+/**
+ * 获取所有活跃的状态ID
+ */
+std::vector<int> CVStatePool::get_active_state_ids() const {
+    std::vector<int> active_ids;
+    if (active_count == 0 || !free_list) {
+        return active_ids;
+    }
+
+    // 从GPU的free_list中读取活跃的状态ID
+    // free_list[0] 到 free_list[active_count-1] 是已分配的状态ID
+    std::vector<int> host_free_list(active_count);
+    cudaError_t err = cudaMemcpy(host_free_list.data(), free_list,
+                                 active_count * sizeof(int), cudaMemcpyDeviceToHost);
+    if (err != cudaSuccess) {
+        std::cerr << "无法从GPU读取活跃状态ID: " << cudaGetErrorString(err) << std::endl;
+        return active_ids;
+    }
+
+    active_ids = host_free_list;
+    return active_ids;
+}
+
+/**
+ * 重置状态池
+ */
+void CVStatePool::reset() {
+    // 同步所有GPU操作，确保在重置前所有操作完成
+    cudaDeviceSynchronize();
+    cudaError_t sync_err = cudaGetLastError();
+    if (sync_err != cudaSuccess && sync_err != cudaErrorNotReady) {
+        // 如果之前的操作有错误，尝试清除错误状态
+        std::cerr << "警告：重置状态池前检测到GPU错误: " << cudaGetErrorString(sync_err) << std::endl;
+        // 清除CUDA错误状态，允许后续操作继续
+        cudaGetLastError(); // 清除错误标志
+    }
+
+    active_count = 0;
+
+    // 重置空闲列表：0, 1, 2, ..., capacity-1
+    std::vector<int> host_free_list(capacity);
+    for (int i = 0; i < capacity; ++i) {
+        host_free_list[i] = i;
+    }
+
+    cudaError_t err = cudaMemcpy(free_list, host_free_list.data(),
+                                 capacity * sizeof(int), cudaMemcpyHostToDevice);
+    if (err != cudaSuccess) {
+        std::cerr << "重置状态池失败: " << cudaGetErrorString(err) << std::endl;
+    }
+
+    // 可选：重置数据内存为0
+    // cudaMemset(data, 0, static_cast<size_t>(capacity) * d_trunc * sizeof(cuDoubleComplex));
+    
+    std::cout << "CVStatePool 已重置" << std::endl;
+}

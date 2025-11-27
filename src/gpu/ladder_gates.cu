@@ -4,54 +4,6 @@
 #include "cv_state_pool.h"
 
 /**
- * 简化的创建算符内核 (用于测试)
- */
-__global__ void apply_creation_simple_kernel(
-    CVStatePool* state_pool,
-    const int* target_indices,
-    int batch_size
-) {
-    int batch_id = blockIdx.y;
-    if (batch_id >= batch_size) return;
-
-    int state_idx = target_indices[batch_id];
-    int n = blockIdx.x * blockDim.x + threadIdx.x;
-
-    if (n >= state_pool->d_trunc) return;
-
-    // 获取状态向量指针
-    cuDoubleComplex* psi = &state_pool->data[state_idx * state_pool->d_trunc];
-
-    // 简化的测试：只读取内存，不写入
-    cuDoubleComplex current_val = psi[n];
-    // 不做任何修改
-}
-
-/**
- * 简化的湮灭算符内核 (用于测试)
- */
-__global__ void apply_annihilation_simple_kernel(
-    CVStatePool* state_pool,
-    const int* target_indices,
-    int batch_size
-) {
-    int batch_id = blockIdx.y;
-    if (batch_id >= batch_size) return;
-
-    int state_idx = target_indices[batch_id];
-    int n = blockIdx.x * blockDim.x + threadIdx.x;
-
-    if (n >= state_pool->d_trunc) return;
-
-    // 获取状态向量指针
-    cuDoubleComplex* psi = &state_pool->data[state_idx * state_pool->d_trunc];
-
-    // 简化的测试：只读取内存，不写入
-    cuDoubleComplex current_val = psi[n];
-    // 不做任何修改
-}
-
-/**
  * Level 1: 梯算符门 (Ladder/Shift Gates) GPU内核
  *
  * 特性：矩阵仅有一条非零对角线（次对角线）。无需存储矩阵，系数实时计算。
@@ -227,8 +179,7 @@ void apply_creation_operator(CVStatePool* state_pool, const int* target_indices,
     dim3 block_dim(256);
     dim3 grid_dim((state_pool->d_trunc + block_dim.x - 1) / block_dim.x, batch_size);
 
-    // 使用简化的版本进行测试
-    apply_creation_simple_kernel<<<grid_dim, block_dim>>>(
+    apply_creation_operator_kernel<<<grid_dim, block_dim>>>(
         state_pool, target_indices, batch_size
     );
 
@@ -246,8 +197,7 @@ void apply_annihilation_operator(CVStatePool* state_pool, const int* target_indi
     dim3 block_dim(256);
     dim3 grid_dim((state_pool->d_trunc + block_dim.x - 1) / block_dim.x, batch_size);
 
-    // 使用简化的版本进行测试
-    apply_annihilation_simple_kernel<<<grid_dim, block_dim>>>(
+    apply_annihilation_operator_kernel<<<grid_dim, block_dim>>>(
         state_pool, target_indices, batch_size
     );
 

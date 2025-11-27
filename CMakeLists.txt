@@ -55,7 +55,7 @@ find_package(GTest QUIET)
 
 # 包含目录
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
-
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src/reference)
 # 源文件列表
 set(CORE_SOURCES
     src/core/cv_state_pool.cpp
@@ -140,16 +140,16 @@ if(CUDA_FOUND)
 endif()
 
 # 验证程序
-add_executable(${PROJECT_NAME}_validation test_validation.cpp)
+add_executable(${PROJECT_NAME}_validation tests/test_validation.cpp)
 target_link_libraries(${PROJECT_NAME}_validation ${PROJECT_NAME})
 
 # GPU验证程序
 if(CUDA_FOUND)
-    add_executable(${PROJECT_NAME}_gpu_validation test_gpu_validation.cpp)
+    add_executable(${PROJECT_NAME}_gpu_validation tests/test_gpu_validation.cpp)
     target_link_libraries(${PROJECT_NAME}_gpu_validation ${PROJECT_NAME} ${CUDA_LIBRARIES})
 else()
     # CPU-only版本的GPU验证程序
-    add_executable(${PROJECT_NAME}_gpu_validation test_gpu_validation.cpp)
+    add_executable(${PROJECT_NAME}_gpu_validation tests/test_gpu_validation.cpp)
     target_link_libraries(${PROJECT_NAME}_gpu_validation ${PROJECT_NAME})
     target_compile_definitions(${PROJECT_NAME}_gpu_validation PRIVATE CPU_ONLY_GPU_TEST)
 endif()
