@@ -557,28 +557,11 @@ void QuantumCircuit::execute_level4_gate(const GateParams& gate) {
     }
 
     // 对于混合控制门，目前实现是占位符
-    // 如果gate_type是controlled_displacement，我们需要实际实现它
-    if (gate_type == "controlled_displacement" && root_node_ != nullptr) {
-        // 收集需要应用控制位移的状态
-        // 从状态池获取所有活跃的状态ID
-        std::vector<int> controlled_states = state_pool_.get_active_state_ids();
-        
-        if (!controlled_states.empty()) {
-            // 使用hybrid_gates.cu中的apply_controlled_displacement函数
-            // 但需要先声明它
-            extern void apply_controlled_displacement(CVStatePool* state_pool,
-                                                     const std::vector<int>& controlled_states,
-                                                     cuDoubleComplex alpha);
-            apply_controlled_displacement(&state_pool_, controlled_states, param);
-            // apply_controlled_displacement内部已经包含错误检查和同步
-        }
-    } else {
-        // 调用占位符函数（目前为空实现）
-        apply_hybrid_control_gate(root_node_, &state_pool_, node_manager_, gate_type, param);
-        // 即使占位符也可能有GPU操作，检查错误
-        CHECK_CUDA(cudaGetLastError());
-        CHECK_CUDA(cudaDeviceSynchronize());
-    }
+    // 调用混合控制门执行函数
+    apply_hybrid_control_gate(root_node_, &state_pool_, node_manager_, gate_type, param);
+    // 检查GPU错误
+    CHECK_CUDA(cudaGetLastError());
+    CHECK_CUDA(cudaDeviceSynchronize());
 }
 
 /**
