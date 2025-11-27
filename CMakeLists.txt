@@ -118,14 +118,24 @@ if(CUDA_FOUND)
 endif()
 
 # 主库
-add_library(${PROJECT_NAME} STATIC
-    ${CORE_SOURCES}
-    ${GPU_SOURCES}
-    ${CPU_SOURCES}
-    ${SCHEDULER_SOURCES}
-    ${MEMORY_SOURCES}
-    ${REFERENCE_SOURCES}
-)
+if(CUDA_FOUND)
+    add_library(${PROJECT_NAME} STATIC
+        ${CORE_SOURCES}
+        ${GPU_SOURCES}
+        ${CPU_SOURCES}
+        ${SCHEDULER_SOURCES}
+        ${MEMORY_SOURCES}
+        ${REFERENCE_SOURCES}
+    )
+else()
+    add_library(${PROJECT_NAME} STATIC
+        ${CORE_SOURCES}
+        ${CPU_SOURCES}
+        ${SCHEDULER_SOURCES}
+        ${MEMORY_SOURCES}
+        ${REFERENCE_SOURCES}
+    )
+endif()
 
 # 链接CUDA运行时
 if(CUDA_FOUND)

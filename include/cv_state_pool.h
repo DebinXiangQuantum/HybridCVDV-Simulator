@@ -1,7 +1,31 @@
 #pragma once
 
+#ifdef __CUDACC__
 #include <cuda_runtime.h>
 #include <cuComplex.h>
+#else
+// CPU-only build: define minimal CUDA types
+typedef struct {
+    double x, y;
+} cuDoubleComplex;
+
+inline cuDoubleComplex make_cuDoubleComplex(double x, double y) {
+    return {x, y};
+}
+
+inline double cuCreal(cuDoubleComplex c) { return c.x; }
+inline double cuCimag(cuDoubleComplex c) { return c.y; }
+inline cuDoubleComplex cuCmul(cuDoubleComplex a, cuDoubleComplex b) {
+    return {a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x};
+}
+inline cuDoubleComplex cuCadd(cuDoubleComplex a, cuDoubleComplex b) {
+    return {a.x + b.x, a.y + b.y};
+}
+inline cuDoubleComplex cuConj(cuDoubleComplex c) {
+    return {c.x, -c.y};
+}
+#endif
+
 #include <vector>
 #include <memory>
 #include <atomic>

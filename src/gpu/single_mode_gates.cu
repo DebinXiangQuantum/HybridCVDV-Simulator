@@ -28,11 +28,11 @@ __global__ void apply_displacement_kernel(
     // ELL格式SpMV
     cuDoubleComplex sum = make_cuDoubleComplex(0.0, 0.0);
 
-    for (int k = 0; k < ell_op->max_nnz_per_row; ++k) {
-        int col = ell_op->ell_cols[n * ell_op->max_nnz_per_row + k];
+    for (int k = 0; k < ell_op->max_bandwidth; ++k) {
+        int col = ell_op->ell_col[n * ell_op->max_bandwidth + k];
         if (col == -1) break; // ELL填充
 
-        cuDoubleComplex val = ell_op->ell_vals[n * ell_op->max_nnz_per_row + k];
+        cuDoubleComplex val = ell_op->ell_val[n * ell_op->max_bandwidth + k];
         cuDoubleComplex input_val = psi_in[col];
 
         sum = cuCadd(sum, cuCmul(val, input_val));
@@ -145,7 +145,7 @@ __global__ void apply_ell_spmv_shared_kernel(
  * 矩阵元素：<n|D(α)|m> = √(n!/m!) * (α)^(n-m) * exp(-|α|²/2) * L_m^(n-m)(|α|²)
  * 其中 L 是Laguerre多项式
  */
-__global__ void apply_displacement_kernel(
+__global__ void apply_displacement_direct_kernel(
     CVStatePool* state_pool,
     const int* target_indices,
     int batch_size,
@@ -232,9 +232,9 @@ void apply_displacement_gate(CVStatePool* state_pool, const int* target_indices,
     dim3 block_dim(256);
     dim3 grid_dim((state_pool->d_trunc + block_dim.x - 1) / block_dim.x, batch_size);
 
-    // 使用简化的版本进行测试
-    apply_displacement_simple_kernel<<<grid_dim, block_dim>>>(
-        state_pool, target_indices, batch_size
+    // 使用直接计算版本
+    apply_displacement_direct_kernel<<<grid_dim, block_dim>>>(
+        state_pool, target_indices, batch_size, alpha
     );
 
     cudaError_t err = cudaGetLastError();
