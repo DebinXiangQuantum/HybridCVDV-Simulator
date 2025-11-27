@@ -131,6 +131,7 @@ TEST_F(GateTest, TestPhaseRotation) {
     Reference::Vector input(dim, Reference::Complex(0.0, 0.0));
     input[0] = Reference::Complex(1.0, 0.0);  // |0⟩
     input[1] = Reference::Complex(0.0, 1.0);  // i|1⟩
+    input[2] = Reference::Complex(1.0, 0.0);  // |2⟩
 
     double theta = M_PI / 4.0;
     Reference::Vector result = Reference::DiagonalGates::apply_phase_rotation(input, theta);
