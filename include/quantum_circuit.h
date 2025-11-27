@@ -30,7 +30,17 @@ enum class GateType {
 
     // Level 4: 混合控制门
     CONTROLLED_DISPLACEMENT,
-    CONTROLLED_SQUEEZING
+    CONTROLLED_SQUEEZING,
+
+    // Qubit门
+    HADAMARD,
+    PAULI_X,
+    PAULI_Y,
+    PAULI_Z,
+    ROTATION_X,
+    ROTATION_Y,
+    ROTATION_Z,
+    CNOT
 };
 
 /**
@@ -193,6 +203,26 @@ private:
      * 工具函数：收集需要更新的状态ID
      */
     std::vector<int> collect_target_states(const GateParams& gate);
+
+    /**
+     * HDD节点加法: result = w1 * n1 + w2 * n2
+     */
+    HDDNode* hdd_add(HDDNode* n1, std::complex<double> w1, HDDNode* n2, std::complex<double> w2);
+
+    /**
+     * 递归应用单qubit门
+     */
+    HDDNode* apply_single_qubit_gate_recursive(HDDNode* node, int target_qubit, const std::vector<std::complex<double>>& u);
+
+    /**
+     * 递归应用CNOT门
+     */
+    HDDNode* apply_cnot_recursive(HDDNode* node, int control, int target);
+
+    /**
+     * 执行qubit门操作
+     */
+    void execute_qubit_gate(const GateParams& gate);
 
     // 禁用拷贝
     QuantumCircuit(const QuantumCircuit&) = delete;
