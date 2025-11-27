@@ -191,6 +191,29 @@ bool CVStatePool::is_valid_state(int state_id) const {
 }
 
 /**
+ * 获取所有活跃的状态ID
+ */
+std::vector<int> CVStatePool::get_active_state_ids() const {
+    std::vector<int> active_ids;
+    if (active_count == 0 || !free_list) {
+        return active_ids;
+    }
+
+    // 从GPU的free_list中读取活跃的状态ID
+    // free_list[0] 到 free_list[active_count-1] 是已分配的状态ID
+    std::vector<int> host_free_list(active_count);
+    cudaError_t err = cudaMemcpy(host_free_list.data(), free_list,
+                                 active_count * sizeof(int), cudaMemcpyDeviceToHost);
+    if (err != cudaSuccess) {
+        std::cerr << "无法从GPU读取活跃状态ID: " << cudaGetErrorString(err) << std::endl;
+        return active_ids;
+    }
+
+    active_ids = host_free_list;
+    return active_ids;
+}
+
+/**
  * 重置状态池
  */
 void CVStatePool::reset() {
@@ -198,8 +221,10 @@ void CVStatePool::reset() {
     cudaDeviceSynchronize();
     cudaError_t sync_err = cudaGetLastError();
     if (sync_err != cudaSuccess && sync_err != cudaErrorNotReady) {
-        // 如果之前的操作有错误，记录但不抛出异常（因为我们在重置）
+        // 如果之前的操作有错误，尝试清除错误状态
         std::cerr << "警告：重置状态池前检测到GPU错误: " << cudaGetErrorString(sync_err) << std::endl;
+        // 清除CUDA错误状态，允许后续操作继续
+        cudaGetLastError(); // 清除错误标志
     }
 
     active_count = 0;

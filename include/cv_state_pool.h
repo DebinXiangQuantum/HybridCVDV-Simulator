@@ -92,6 +92,12 @@ struct CVStatePool {
      */
     void reset();
 
+    /**
+     * 获取所有活跃的状态ID
+     * @return 活跃状态ID的向量
+     */
+    std::vector<int> get_active_state_ids() const;
+
 private:
     // 禁用拷贝构造和赋值
     CVStatePool(const CVStatePool&) = delete;

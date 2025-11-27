@@ -131,8 +131,10 @@ void QuantumCircuit::reset() {
     cudaDeviceSynchronize();
     cudaError_t sync_err = cudaGetLastError();
     if (sync_err != cudaSuccess && sync_err != cudaErrorNotReady) {
-        // 如果之前的操作有错误，记录但不抛出异常（因为我们在重置）
+        // 如果之前的操作有错误，尝试清除错误状态
         std::cerr << "警告：重置前检测到GPU错误: " << cudaGetErrorString(sync_err) << std::endl;
+        // 清除CUDA错误状态，允许后续操作继续
+        cudaGetLastError(); // 清除错误标志
     }
 
     if (root_node_) {
@@ -363,11 +365,8 @@ void QuantumCircuit::execute_level4_gate(const GateParams& gate) {
     // 如果gate_type是controlled_displacement，我们需要实际实现它
     if (gate_type == "controlled_displacement" && root_node_ != nullptr) {
         // 收集需要应用控制位移的状态
-        // 简化实现：收集所有活跃状态
-        std::vector<int> controlled_states;
-        for (int i = 0; i < state_pool_.active_count; ++i) {
-            controlled_states.push_back(i);
-        }
+        // 从状态池获取所有活跃的状态ID
+        std::vector<int> controlled_states = state_pool_.get_active_state_ids();
         
         if (!controlled_states.empty()) {
             // 使用hybrid_gates.cu中的apply_controlled_displacement函数
@@ -391,15 +390,9 @@ void QuantumCircuit::execute_level4_gate(const GateParams& gate) {
  * 收集需要更新的状态ID
  */
 std::vector<int> QuantumCircuit::collect_target_states(const GateParams& gate) {
-    std::vector<int> target_states;
-
-    // 简化的实现：收集所有活跃状态
-    // 在实际实现中，需要根据门的具体目标进行过滤
-    for (int i = 0; i < state_pool_.active_count; ++i) {
-        target_states.push_back(i);
-    }
-
-    return target_states;
+    // 从状态池获取所有活跃的状态ID
+    // 这些是实际分配的状态ID，而不是简单的索引
+    return state_pool_.get_active_state_ids();
 }
 
 /**

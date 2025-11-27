@@ -27,14 +27,20 @@
 __global__ void apply_controlled_displacement_kernel(
     cuDoubleComplex* all_states_data,
     int d_trunc,
+    int capacity,
     const int* target_state_ids,
     int num_states,
     cuDoubleComplex alpha,
     cuDoubleComplex* temp_buffer
 ) {
-    int state_id = target_state_ids[blockIdx.y];
+    int batch_idx = blockIdx.y;
+    if (batch_idx >= num_states) return;
+    
+    int state_id = target_state_ids[batch_idx];
+    // 验证状态ID有效性
+    if (state_id < 0 || state_id >= capacity) return;
+    
     int n = blockIdx.x * blockDim.x + threadIdx.x;
-
     if (n >= d_trunc) return;
 
     cuDoubleComplex* psi = &all_states_data[state_id * d_trunc];
@@ -94,21 +100,35 @@ __global__ void apply_controlled_displacement_kernel(
 __global__ void copy_back_hybrid_kernel(
     cuDoubleComplex* all_states_data,
     int d_trunc,
+    int capacity,
     const int* target_state_ids,
     int num_states,
     const cuDoubleComplex* temp_buffer
 ) {
-    int state_id = target_state_ids[blockIdx.y];
+    int batch_idx = blockIdx.y;
+    if (batch_idx >= num_states) return;
+    
+    int state_id = target_state_ids[batch_idx];
+    // 验证状态ID有效性
+    if (state_id < 0 || state_id >= capacity) return;
+    
     int n = blockIdx.x * blockDim.x + threadIdx.x;
     if (n >= d_trunc) return;
     
-    all_states_data[state_id * d_trunc + n] = temp_buffer[blockIdx.y * d_trunc + n];
+    all_states_data[state_id * d_trunc + n] = temp_buffer[batch_idx * d_trunc + n];
 }
 
 void apply_controlled_displacement(CVStatePool* state_pool,
                                  const std::vector<int>& controlled_states,
                                  cuDoubleComplex alpha) {
     if (controlled_states.empty()) return;
+
+    // 验证所有状态ID的有效性
+    for (int state_id : controlled_states) {
+        if (!state_pool->is_valid_state(state_id)) {
+            throw std::runtime_error("无效的状态ID: " + std::to_string(state_id));
+        }
+    }
 
     int* d_state_ids = nullptr;
     CHECK_CUDA(cudaMalloc(&d_state_ids, controlled_states.size() * sizeof(int)));
@@ -123,14 +143,16 @@ void apply_controlled_displacement(CVStatePool* state_pool,
     dim3 grid_dim((state_pool->d_trunc + block_dim.x - 1) / block_dim.x, controlled_states.size());
 
     apply_controlled_displacement_kernel<<<grid_dim, block_dim>>>(
-        state_pool->data, state_pool->d_trunc, d_state_ids, controlled_states.size(), alpha, temp_buffer
+        state_pool->data, state_pool->d_trunc, state_pool->capacity, 
+        d_state_ids, controlled_states.size(), alpha, temp_buffer
     );
     
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
     
     copy_back_hybrid_kernel<<<grid_dim, block_dim>>>(
-        state_pool->data, state_pool->d_trunc, d_state_ids, controlled_states.size(), temp_buffer
+        state_pool->data, state_pool->d_trunc, state_pool->capacity,
+        d_state_ids, controlled_states.size(), temp_buffer
     );
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
