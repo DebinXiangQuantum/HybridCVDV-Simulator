@@ -211,6 +211,56 @@ private:
     std::vector<int> collect_target_states(const GateParams& gate);
 
     /**
+     * 对单个状态应用位移门
+     */
+    void apply_displacement_to_state(int state_id, std::complex<double> alpha);
+
+    /**
+     * 对单个状态应用挤压门
+     */
+    void apply_squeezing_to_state(int state_id, std::complex<double> xi);
+
+    /**
+     * 对单个状态应用光束分裂器
+     */
+    void apply_beam_splitter_to_state(int state_id, double theta, double phi, int max_photon);
+
+    /**
+     * 对单个状态应用双模挤压门
+     */
+    void apply_two_mode_squeezing_to_state(int state_id, std::complex<double> xi);
+
+    /**
+     * 对单个状态应用SUM门
+     */
+    void apply_sum_to_state(int state_id, double theta, double phi);
+
+    /**
+     * 对单个状态应用Rabi相互作用
+     */
+    void apply_rabi_to_state(int state_id, double theta);
+
+    /**
+     * 对单个状态应用Jaynes-Cummings相互作用
+     */
+    void apply_jaynes_cummings_to_state(int state_id, double theta, double phi);
+
+    /**
+     * 对单个状态应用Anti-Jaynes-Cummings相互作用
+     */
+    void apply_anti_jaynes_cummings_to_state(int state_id, double theta, double phi);
+
+    /**
+     * 对单个状态应用选择性Qubit旋转
+     */
+    void apply_selective_qubit_rotation_to_state(int state_id, const std::vector<double>& theta_vec, const std::vector<double>& phi_vec);
+
+    /**
+     * 准备挤压门的ELL算符
+     */
+    FockELLOperator* prepare_squeezing_ell_operator(std::complex<double> xi);
+
+    /**
      * HDD节点加法: result = w1 * n1 + w2 * n2
      */
     HDDNode* hdd_add(HDDNode* n1, std::complex<double> w1, HDDNode* n2, std::complex<double> w2);
@@ -226,9 +276,109 @@ private:
     HDDNode* apply_cnot_recursive(HDDNode* node, int control, int target);
 
     /**
+     * 递归应用CZ门
+     */
+    HDDNode* apply_cz_recursive(HDDNode* node, int control, int target);
+
+    /**
+     * 递归应用条件位移门
+     */
+    HDDNode* apply_conditional_displacement_recursive(HDDNode* node, int control_qubit, int target_qumode, std::complex<double> alpha);
+
+    /**
+     * 递归应用条件挤压门
+     */
+    HDDNode* apply_conditional_squeezing_recursive(HDDNode* node, int control_qubit, int target_qumode, std::complex<double> xi);
+
+    /**
+     * 递归应用条件光束分裂器
+     */
+    HDDNode* apply_conditional_beam_splitter_recursive(HDDNode* node, int control_qubit, int qumode1, int qumode2, double theta, double phi);
+
+    /**
+     * 递归应用条件双模挤压
+     */
+    HDDNode* apply_conditional_two_mode_squeezing_recursive(HDDNode* node, int control_qubit, int qumode1, int qumode2, std::complex<double> xi);
+
+    /**
+     * 递归应用条件SUM门
+     */
+    HDDNode* apply_conditional_sum_recursive(HDDNode* node, int control_qubit, int qumode1, int qumode2, double theta, double phi);
+
+    /**
+     * 递归应用Rabi相互作用
+     */
+    HDDNode* apply_rabi_interaction_recursive(HDDNode* node, int control_qubit, int target_qumode, double theta);
+
+    /**
+     * 递归应用Jaynes-Cummings相互作用
+     */
+    HDDNode* apply_jaynes_cummings_recursive(HDDNode* node, int control_qubit, int target_qumode, double theta, double phi);
+
+    /**
+     * 递归应用Anti-Jaynes-Cummings相互作用
+     */
+    HDDNode* apply_anti_jaynes_cummings_recursive(HDDNode* node, int control_qubit, int target_qumode, double theta, double phi);
+
+    /**
+     * 递归应用选择性Qubit旋转
+     */
+    HDDNode* apply_selective_qubit_rotation_recursive(HDDNode* node, int target_qubit, int control_qumode, const std::vector<double>& theta_vec, const std::vector<double>& phi_vec);
+
+    /**
      * 执行qubit门操作
      */
     void execute_qubit_gate(const GateParams& gate);
+
+    /**
+     * 执行混合门操作 (CPU+GPU)
+     */
+    void execute_hybrid_gate(const GateParams& gate);
+
+    /**
+     * 执行条件位移门 CD(α)
+     */
+    void execute_conditional_displacement(const GateParams& gate);
+
+    /**
+     * 执行条件挤压门 CS(ξ)
+     */
+    void execute_conditional_squeezing(const GateParams& gate);
+
+    /**
+     * 执行条件光束分裂器 CBS(θ,φ)
+     */
+    void execute_conditional_beam_splitter(const GateParams& gate);
+
+    /**
+     * 执行条件双模挤压 CTMS(ξ)
+     */
+    void execute_conditional_two_mode_squeezing(const GateParams& gate);
+
+    /**
+     * 执行条件SUM门
+     */
+    void execute_conditional_sum(const GateParams& gate);
+
+    /**
+     * 执行Rabi相互作用 RB(θ)
+     */
+    void execute_rabi_interaction(const GateParams& gate);
+
+    /**
+     * 执行Jaynes-Cummings相互作用 JC(θ,φ)
+     */
+    void execute_jaynes_cummings(const GateParams& gate);
+
+    /**
+     * 执行Anti-Jaynes-Cummings相互作用 AJC(θ,φ)
+     */
+    void execute_anti_jaynes_cummings(const GateParams& gate);
+
+    /**
+     * 执行选择性Qubit旋转 SQR(θ,φ)
+     */
+    void execute_selective_qubit_rotation(const GateParams& gate);
 
     // 禁用拷贝
     QuantumCircuit(const QuantumCircuit&) = delete;

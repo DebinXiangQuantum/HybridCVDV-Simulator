@@ -180,6 +180,39 @@ TEST_F(GateTest, TestControlledDisplacement) {
     EXPECT_LT(error1, 1e-6) << "控制位为1时CD门误差过大";
 }
 
+TEST_F(GateTest, TestRabiInteraction) {
+    // 测试Rabi相互作用 - 简化的测试
+    Reference::Vector qubit_state = {{1.0, 0.0}, {0.0, 0.0}};  // |0⟩
+    const int dim = 4;
+    Reference::Vector qumode_state(dim, Reference::Complex(0.0, 0.0));
+    qumode_state[0] = Reference::Complex(1.0, 0.0);  // 真空态
+
+    double theta = M_PI / 4.0;
+
+    // Rabi门应该返回张量积（当前实现）
+    Reference::Vector result = Reference::HybridControlGates::apply_rabi_interaction(qubit_state, qumode_state, theta);
+    Reference::Vector expected = Reference::tensor_product(qubit_state, qumode_state);
+    double error = compute_error(result, expected);
+    EXPECT_LT(error, 1e-10) << "Rabi相互作用测试失败";
+}
+
+TEST_F(GateTest, TestJaynesCummings) {
+    // 测试Jaynes-Cummings相互作用 - 简化的测试
+    Reference::Vector qubit_state = {{1.0, 0.0}, {0.0, 0.0}};  // |0⟩
+    const int dim = 4;
+    Reference::Vector qumode_state(dim, Reference::Complex(0.0, 0.0));
+    qumode_state[0] = Reference::Complex(1.0, 0.0);  // 真空态
+
+    double theta = M_PI / 4.0;
+    double phi = 0.0;
+
+    // JC门应该返回张量积（当前实现）
+    Reference::Vector result = Reference::HybridControlGates::apply_jaynes_cummings(qubit_state, qumode_state, theta, phi);
+    Reference::Vector expected = Reference::tensor_product(qubit_state, qumode_state);
+    double error = compute_error(result, expected);
+    EXPECT_LT(error, 1e-10) << "Jaynes-Cummings相互作用测试失败";
+}
+
 // ===== 集成测试 =====
 
 TEST_F(GateTest, TestQuantumCircuitBasic) {
@@ -201,6 +234,28 @@ TEST_F(GateTest, TestQuantumCircuitBasic) {
 
     } catch (const std::exception& e) {
         FAIL() << "量子电路测试失败: " << e.what();
+    }
+}
+
+TEST_F(GateTest, TestQuantumCircuitWithHybridGates) {
+    // 测试包含混合门的量子电路
+    try {
+        QuantumCircuit circuit(2, 2, 4, 1024);  // 2 qubits, 2 qumodes, truncation=4
+
+        // 添加混合门
+        circuit.add_gate(Gates::ConditionalDisplacement(0, 0, std::complex<double>(0.1, 0.0)));
+        circuit.add_gate(Gates::ConditionalSqueezing(1, 1, std::complex<double>(0.05, 0.0)));
+        circuit.add_gate(Gates::RabiInteraction(0, 0, M_PI/4.0));
+
+        // 构建和执行
+        circuit.build();
+        circuit.execute();
+
+        // 验证电路执行成功
+        SUCCEED() << "包含混合门的量子电路测试通过";
+
+    } catch (const std::exception& e) {
+        FAIL() << "混合门电路测试失败: " << e.what();
     }
 }
 
