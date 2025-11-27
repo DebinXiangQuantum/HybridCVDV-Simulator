@@ -40,9 +40,10 @@ __global__ void apply_kerr_simple_kernel(
 }
 
 /**
- * 简化的相位旋转门内核 (避免函数指针)
+ * 相位旋转门内核 R(θ) = exp(-i θ n)
+ * 公式：ψ_out[n] = ψ_in[n] · exp(-i θ n)
  */
-__global__ void apply_phase_rotation_simple_kernel(
+__global__ void apply_phase_rotation_kernel(
     CVStatePool* state_pool,
     const int* target_indices,
     int batch_size,
@@ -59,12 +60,13 @@ __global__ void apply_phase_rotation_simple_kernel(
     // 获取状态向量指针
     cuDoubleComplex* psi = &state_pool->data[state_idx * state_pool->d_trunc];
 
-    // 最简单的测试：什么都不做，只是检查内存访问
-    if (n < state_pool->d_trunc) {
-        // 什么都不做，只是检查能否访问内存
-        cuDoubleComplex temp = psi[n];
-        // 不做任何修改
-    }
+    // 计算相位因子: exp(-i * theta * n)
+    double phase = -theta * static_cast<double>(n);
+    cuDoubleComplex phase_factor = make_cuDoubleComplex(cos(phase), sin(phase));
+
+    // 应用相位旋转
+    cuDoubleComplex current_val = psi[n];
+    psi[n] = cuCmul(current_val, phase_factor);
 }
 
 /**
@@ -141,8 +143,8 @@ void apply_phase_rotation(CVStatePool* state_pool, const int* target_indices,
     dim3 block_dim(256);
     dim3 grid_dim((state_pool->d_trunc + block_dim.x - 1) / block_dim.x, batch_size);
 
-    // 使用简化的内核，避免函数指针
-    apply_phase_rotation_simple_kernel<<<grid_dim, block_dim>>>(
+    // 使用正确的相位旋转内核
+    apply_phase_rotation_kernel<<<grid_dim, block_dim>>>(
         state_pool, target_indices, batch_size, theta
     );
 

@@ -188,70 +188,28 @@ HDDNode* QuantumCircuit::apply_cnot_recursive(HDDNode* node, int control, int ta
     return node;
 }
 
-void QuantumCircuit::execute_qubit_gate(const GateParams& gate) {
-    if (gate.target_qubits.empty()) return;
-    
-    HDDNode* new_root = nullptr;
-    
-    if (gate.type == GateType::CNOT) {
-        if (gate.target_qubits.size() < 2) return;
-        int c = gate.target_qubits[0];
-        int t = gate.target_qubits[1];
-        if (c < t) {
-            throw std::runtime_error("Currently only supports Control > Target (higher index controls lower index)");
-        }
-        new_root = apply_cnot_recursive(root_node_, c, t);
-    } else {
-        int target = gate.target_qubits[0];
-        std::vector<std::complex<double>> mat(4);
-        
-        double inv_sqrt2 = 1.0 / std::sqrt(2.0);
-        
-        switch (gate.type) {
-            case GateType::HADAMARD:
-                mat = {inv_sqrt2, inv_sqrt2, inv_sqrt2, -inv_sqrt2};
-                break;
-            case GateType::PAULI_X:
-                mat = {0.0, 1.0, 1.0, 0.0};
-                break;
-            case GateType::PAULI_Y:
-                mat = {0.0, std::complex<double>(0, -1), std::complex<double>(0, 1), 0.0};
-                break;
-            case GateType::PAULI_Z:
-                mat = {1.0, 0.0, 0.0, -1.0};
-                break;
-            case GateType::ROTATION_X: {
-                double theta = gate.params[0].real();
-                double c = std::cos(theta/2);
-                double s = std::sin(theta/2);
-                mat = {c, std::complex<double>(0, -s), std::complex<double>(0, -s), c};
-                break;
-            }
-            case GateType::ROTATION_Y: {
-                double theta = gate.params[0].real();
-                double c = std::cos(theta/2);
-                double s = std::sin(theta/2);
-                mat = {c, -s, s, c};
-                break;
-            }
-            case GateType::ROTATION_Z: {
-                double theta = gate.params[0].real();
-                double c = std::cos(theta/2);
-                double s = std::sin(theta/2);
-                mat = {std::complex<double>(c, -s), 0.0, 0.0, std::complex<double>(c, s)}; // exp(-i t/2 Z)
-                break;
-            }
-            default:
-                return;
-        }
-        
-        new_root = apply_single_qubit_gate_recursive(root_node_, target, mat);
+/**
+ * 递归应用CZ门
+ */
+HDDNode* QuantumCircuit::apply_cz_recursive(HDDNode* node, int control, int target) {
+    if (node->is_terminal()) return node;
+
+    if (node->qubit_level == control) {
+        // 控制节点
+        HDDNode* new_low = node->low; // 恒等
+
+        // 高分支：对目标应用Z
+        std::vector<std::complex<double>> pz = {1.0, 0.0, 0.0, -1.0};
+        HDDNode* new_high = apply_single_qubit_gate_recursive(node->high, target, pz);
+
+        return node_manager_.get_or_create_node(node->qubit_level, new_low, new_high, node->w_low, node->w_high);
+    } else if (node->qubit_level > control) {
+        HDDNode* new_low = apply_cz_recursive(node->low, control, target);
+        HDDNode* new_high = apply_cz_recursive(node->high, control, target);
+        return node_manager_.get_or_create_node(node->qubit_level, new_low, new_high, node->w_low, node->w_high);
     }
-    
-    if (new_root != root_node_) {
-        node_manager_.release_node(root_node_);
-        root_node_ = new_root;
-    }
+
+    return node;
 }
 
 /**
@@ -386,6 +344,22 @@ void QuantumCircuit::initialize_hdd() {
  */
 void QuantumCircuit::execute_gate(const GateParams& gate) {
     switch (gate.type) {
+        // CPU端纯Qubit门
+        case GateType::HADAMARD:
+        case GateType::PAULI_X:
+        case GateType::PAULI_Y:
+        case GateType::PAULI_Z:
+        case GateType::ROTATION_X:
+        case GateType::ROTATION_Y:
+        case GateType::ROTATION_Z:
+        case GateType::PHASE_GATE_S:
+        case GateType::PHASE_GATE_T:
+        case GateType::CNOT:
+        case GateType::CZ:
+            execute_qubit_gate(gate);
+            break;
+
+        // GPU端纯Qumode门
         case GateType::PHASE_ROTATION:
         case GateType::KERR_GATE:
         case GateType::CONDITIONAL_PARITY:
@@ -406,9 +380,17 @@ void QuantumCircuit::execute_gate(const GateParams& gate) {
             execute_level3_gate(gate);
             break;
 
-        case GateType::CONTROLLED_DISPLACEMENT:
-        case GateType::CONTROLLED_SQUEEZING:
-            execute_level4_gate(gate);
+        // CPU+GPU混合门
+        case GateType::CONDITIONAL_DISPLACEMENT:
+        case GateType::CONDITIONAL_SQUEEZING:
+        case GateType::CONDITIONAL_BEAM_SPLITTER:
+        case GateType::CONDITIONAL_TWO_MODE_SQUEEZING:
+        case GateType::CONDITIONAL_SUM:
+        case GateType::RABI_INTERACTION:
+        case GateType::JAYNES_CUMMINGS:
+        case GateType::ANTI_JAYNES_CUMMINGS:
+        case GateType::SELECTIVE_QUBIT_ROTATION:
+            execute_hybrid_gate(gate);
             break;
 
         default:
@@ -600,6 +582,243 @@ void QuantumCircuit::execute_level4_gate(const GateParams& gate) {
 }
 
 /**
+ * 执行Qubit门操作
+ */
+void QuantumCircuit::execute_qubit_gate(const GateParams& gate) {
+    if (gate.target_qubits.empty()) {
+        throw std::runtime_error("Qubit门需要指定目标Qubit");
+    }
+
+    int target_qubit = gate.target_qubits[0];
+    if (target_qubit >= num_qubits_) {
+        throw std::runtime_error("目标Qubit索引超出范围");
+    }
+
+    // 构造对应的单比特门矩阵U
+    std::vector<std::complex<double>> u(4, std::complex<double>(0.0, 0.0));
+
+    switch (gate.type) {
+        case GateType::PAULI_X: {
+            // X = [[0, 1], [1, 0]]
+            u[1] = 1.0;  // (0,1)
+            u[2] = 1.0;  // (1,0)
+            break;
+        }
+        case GateType::PAULI_Y: {
+            // Y = [[0, -i], [i, 0]]
+            u[1] = std::complex<double>(0.0, -1.0);  // (0,1)
+            u[2] = std::complex<double>(0.0, 1.0);   // (1,0)
+            break;
+        }
+        case GateType::PAULI_Z: {
+            // Z = [[1, 0], [0, -1]]
+            u[0] = 1.0;   // (0,0)
+            u[3] = -1.0;  // (1,1)
+            break;
+        }
+        case GateType::HADAMARD: {
+            // H = 1/√2 * [[1, 1], [1, -1]]
+            double inv_sqrt2 = 1.0 / std::sqrt(2.0);
+            u[0] = inv_sqrt2;  // (0,0)
+            u[1] = inv_sqrt2;  // (0,1)
+            u[2] = inv_sqrt2;  // (1,0)
+            u[3] = -inv_sqrt2; // (1,1)
+            break;
+        }
+        case GateType::ROTATION_X: {
+            if (gate.params.empty()) {
+                throw std::runtime_error("Rx门需要角度参数");
+            }
+            double theta = gate.params[0].real();
+            double cos_half = std::cos(theta / 2.0);
+            double sin_half = std::sin(theta / 2.0);
+            // Rx(θ) = [[cos(θ/2), -i*sin(θ/2)], [-i*sin(θ/2), cos(θ/2)]]
+            u[0] = cos_half;                           // (0,0)
+            u[1] = std::complex<double>(0.0, -sin_half); // (0,1)
+            u[2] = std::complex<double>(0.0, -sin_half); // (1,0)
+            u[3] = cos_half;                           // (1,1)
+            break;
+        }
+        case GateType::ROTATION_Y: {
+            if (gate.params.empty()) {
+                throw std::runtime_error("Ry门需要角度参数");
+            }
+            double theta = gate.params[0].real();
+            double cos_half = std::cos(theta / 2.0);
+            double sin_half = std::sin(theta / 2.0);
+            // Ry(θ) = [[cos(θ/2), -sin(θ/2)], [sin(θ/2), cos(θ/2)]]
+            u[0] = cos_half;     // (0,0)
+            u[1] = -sin_half;    // (0,1)
+            u[2] = sin_half;     // (1,0)
+            u[3] = cos_half;     // (1,1)
+            break;
+        }
+        case GateType::ROTATION_Z: {
+            if (gate.params.empty()) {
+                throw std::runtime_error("Rz门需要角度参数");
+            }
+            double theta = gate.params[0].real();
+            double cos_half = std::cos(theta / 2.0);
+            double sin_half = std::sin(theta / 2.0);
+            // Rz(θ) = [[cos(θ/2)-i*sin(θ/2), 0], [0, cos(θ/2)+i*sin(θ/2)]]
+            // = [[e^(-iθ/2), 0], [0, e^(iθ/2)]]
+            u[0] = std::complex<double>(cos_half, -sin_half); // (0,0)
+            u[3] = std::complex<double>(cos_half, sin_half);  // (1,1)
+            break;
+        }
+        case GateType::PHASE_GATE_S: {
+            // S = [[1, 0], [0, i]]
+            u[0] = 1.0;  // (0,0)
+            u[3] = std::complex<double>(0.0, 1.0); // (1,1)
+            break;
+        }
+        case GateType::PHASE_GATE_T: {
+            // T = [[1, 0], [0, e^(iπ/4)]]
+            u[0] = 1.0;  // (0,0)
+            u[3] = std::complex<double>(std::cos(M_PI/4.0), std::sin(M_PI/4.0)); // (1,1)
+            break;
+        }
+        case GateType::CNOT: {
+            // CNOT是双比特门，需要控制位和目标位
+            if (gate.target_qubits.size() < 2) {
+                throw std::runtime_error("CNOT门需要控制位和目标位");
+            }
+            int control = gate.target_qubits[0];
+            int target = gate.target_qubits[1];
+            root_node_ = apply_cnot_recursive(root_node_, control, target);
+            return;  // CNOT特殊处理，不走单比特门逻辑
+        }
+        case GateType::CZ: {
+            // CZ也是双比特门
+            if (gate.target_qubits.size() < 2) {
+                throw std::runtime_error("CZ门需要控制位和目标位");
+            }
+            int control = gate.target_qubits[0];
+            int target = gate.target_qubits[1];
+            // CZ可以通过修改CNOT来实现，或者直接实现
+            // 这里暂时用CNOT的逻辑，后面可以优化
+            root_node_ = apply_cz_recursive(root_node_, control, target);
+            return;  // CZ特殊处理
+        }
+        default:
+            throw std::runtime_error("不支持的Qubit门类型");
+    }
+
+    // 应用单比特门到HDD
+    root_node_ = apply_single_qubit_gate_recursive(root_node_, target_qubit, u);
+}
+
+/**
+ * 执行混合门操作 (CPU+GPU)
+ */
+void QuantumCircuit::execute_hybrid_gate(const GateParams& gate) {
+    // 混合门需要同时操作Qubit和Qumode
+    // 根据gatemath.md，这些门分为分离型和混合型
+
+    switch (gate.type) {
+        // 分离型受控门
+        case GateType::CONDITIONAL_DISPLACEMENT: {
+            if (gate.target_qubits.size() < 1 || gate.target_qumodes.size() < 1) {
+                throw std::runtime_error("CD门需要控制Qubit和目标Qumode");
+            }
+            // 实现CD门：当Qubit为|1⟩时应用Displacement
+            execute_conditional_displacement(gate);
+            break;
+        }
+        case GateType::CONDITIONAL_SQUEEZING: {
+            if (gate.target_qubits.size() < 1 || gate.target_qumodes.size() < 1) {
+                throw std::runtime_error("CS门需要控制Qubit和目标Qumode");
+            }
+            execute_conditional_squeezing(gate);
+            break;
+        }
+        case GateType::CONDITIONAL_BEAM_SPLITTER: {
+            if (gate.target_qubits.size() < 1 || gate.target_qumodes.size() < 2) {
+                throw std::runtime_error("CBS门需要控制Qubit和两个目标Qumode");
+            }
+            execute_conditional_beam_splitter(gate);
+            break;
+        }
+
+        // 混合型相互作用门
+        case GateType::RABI_INTERACTION: {
+            if (gate.target_qubits.size() < 1 || gate.target_qumodes.size() < 1) {
+                throw std::runtime_error("RB门需要控制Qubit和目标Qumode");
+            }
+            execute_rabi_interaction(gate);
+            break;
+        }
+        case GateType::JAYNES_CUMMINGS: {
+            if (gate.target_qubits.size() < 1 || gate.target_qumodes.size() < 1) {
+                throw std::runtime_error("JC门需要控制Qubit和目标Qumode");
+            }
+            execute_jaynes_cummings(gate);
+            break;
+        }
+        case GateType::ANTI_JAYNES_CUMMINGS: {
+            if (gate.target_qubits.size() < 1 || gate.target_qumodes.size() < 1) {
+                throw std::runtime_error("AJC门需要控制Qubit和目标Qumode");
+            }
+            execute_anti_jaynes_cummings(gate);
+            break;
+        }
+        case GateType::SELECTIVE_QUBIT_ROTATION: {
+            if (gate.target_qubits.size() < 1 || gate.target_qumodes.size() < 1) {
+                throw std::runtime_error("SQR门需要目标Qubit和控制Qumode");
+            }
+            execute_selective_qubit_rotation(gate);
+            break;
+        }
+
+        default:
+            throw std::runtime_error("未知的混合门类型: " + std::to_string(static_cast<int>(gate.type)));
+    }
+}
+
+/**
+ * 执行受控位移门 CD(α)
+ */
+void QuantumCircuit::execute_conditional_displacement(const GateParams& gate) {
+    // CD(α) = exp[σ_z ⊗ (α a† - α* a)]
+    // 分离型：Branch 0 (σ_z = +1): D(+α), Branch 1 (σ_z = -1): D(-α)
+
+    int control_qubit = gate.target_qubits[0];
+    int target_qumode = gate.target_qumodes[0];
+    std::complex<double> alpha = gate.params.empty() ? std::complex<double>(0.0, 0.0) : gate.params[0];
+
+    // 需要遍历HDD，找到控制位为|0⟩和|1⟩的分支，分别应用不同的位移
+    // 这需要扩展HDD遍历逻辑，暂时使用简化的实现
+    throw std::runtime_error("CD门暂未完全实现");
+}
+
+/**
+ * 执行其他混合门 (占位符实现)
+ */
+void QuantumCircuit::execute_conditional_squeezing(const GateParams& gate) {
+    throw std::runtime_error("CS门暂未实现");
+}
+
+void QuantumCircuit::execute_conditional_beam_splitter(const GateParams& gate) {
+    throw std::runtime_error("CBS门暂未实现");
+}
+
+void QuantumCircuit::execute_rabi_interaction(const GateParams& gate) {
+    throw std::runtime_error("RB门暂未实现");
+}
+
+void QuantumCircuit::execute_jaynes_cummings(const GateParams& gate) {
+    throw std::runtime_error("JC门暂未实现");
+}
+
+void QuantumCircuit::execute_anti_jaynes_cummings(const GateParams& gate) {
+    throw std::runtime_error("AJC门暂未实现");
+}
+
+void QuantumCircuit::execute_selective_qubit_rotation(const GateParams& gate) {
+    throw std::runtime_error("SQR门暂未实现");
+}
+
+/**
  * 收集需要更新的状态ID
  */
 std::vector<int> QuantumCircuit::collect_target_states(const GateParams& gate) {
@@ -699,5 +918,50 @@ namespace Gates {
 
     GateParams ControlledSqueezing(int control_qubit, int target_qumode, std::complex<double> xi) {
         return GateParams(GateType::CONTROLLED_SQUEEZING, {control_qubit}, {target_qumode}, {xi});
+    }
+
+    // Qubit门
+    GateParams Hadamard(int qubit) {
+        return GateParams(GateType::HADAMARD, {qubit});
+    }
+
+    GateParams PauliX(int qubit) {
+        return GateParams(GateType::PAULI_X, {qubit});
+    }
+
+    GateParams PauliY(int qubit) {
+        return GateParams(GateType::PAULI_Y, {qubit});
+    }
+
+    GateParams PauliZ(int qubit) {
+        return GateParams(GateType::PAULI_Z, {qubit});
+    }
+
+    GateParams RotationX(int qubit, double theta) {
+        return GateParams(GateType::ROTATION_X, {qubit}, {}, {theta});
+    }
+
+    GateParams RotationY(int qubit, double theta) {
+        return GateParams(GateType::ROTATION_Y, {qubit}, {}, {theta});
+    }
+
+    GateParams RotationZ(int qubit, double theta) {
+        return GateParams(GateType::ROTATION_Z, {qubit}, {}, {theta});
+    }
+
+    GateParams PhaseGateS(int qubit) {
+        return GateParams(GateType::PHASE_GATE_S, {qubit});
+    }
+
+    GateParams PhaseGateT(int qubit) {
+        return GateParams(GateType::PHASE_GATE_T, {qubit});
+    }
+
+    GateParams CNOT(int control, int target) {
+        return GateParams(GateType::CNOT, {control, target});
+    }
+
+    GateParams CZ(int control, int target) {
+        return GateParams(GateType::CZ, {control, target});
     }
 }

@@ -12,27 +12,7 @@
  * 门操作类型枚举
  */
 enum class GateType {
-    // Level 0: 对角门
-    PHASE_ROTATION,
-    KERR_GATE,
-    CONDITIONAL_PARITY,
-
-    // Level 1: 梯算符门
-    CREATION_OPERATOR,
-    ANNIHILATION_OPERATOR,
-
-    // Level 2: 单模门
-    DISPLACEMENT,
-    SQUEEZING,
-
-    // Level 3: 双模门
-    BEAM_SPLITTER,
-
-    // Level 4: 混合控制门
-    CONTROLLED_DISPLACEMENT,
-    CONTROLLED_SQUEEZING,
-
-    // Qubit门
+    // CPU端纯Qubit门
     HADAMARD,
     PAULI_X,
     PAULI_Y,
@@ -40,7 +20,33 @@ enum class GateType {
     ROTATION_X,
     ROTATION_Y,
     ROTATION_Z,
-    CNOT
+    PHASE_GATE_S,    // S门
+    PHASE_GATE_T,    // T门
+    CNOT,
+    CZ,
+
+    // GPU端纯Qumode门 (Level 0-3)
+    PHASE_ROTATION,  // R(θ) - 相位旋转
+    KERR_GATE,       // Kerr门
+    CONDITIONAL_PARITY, // 条件奇偶
+    CREATION_OPERATOR,
+    ANNIHILATION_OPERATOR,
+    DISPLACEMENT,    // D(α) - 位移门
+    SQUEEZING,       // S(ξ) - 挤压门
+    BEAM_SPLITTER,   // BS(θ,φ) - 光束分裂器
+
+    // CPU+GPU混合门 (分离型)
+    CONDITIONAL_DISPLACEMENT,     // CD(α)
+    CONDITIONAL_SQUEEZING,        // CS(ξ)
+    CONDITIONAL_BEAM_SPLITTER,    // CBS(θ,φ)
+    CONDITIONAL_TWO_MODE_SQUEEZING, // CTMS
+    CONDITIONAL_SUM,              // SUM门
+
+    // CPU+GPU混合门 (混合型)
+    RABI_INTERACTION,             // RB(θ)
+    JAYNES_CUMMINGS,              // JC(θ,φ)
+    ANTI_JAYNES_CUMMINGS,         // AJC(θ,φ)
+    SELECTIVE_QUBIT_ROTATION      // SQR(θ,φ)
 };
 
 /**
@@ -233,23 +239,39 @@ private:
  * 便捷函数：创建常用门操作
  */
 namespace Gates {
-    // Level 0 门
-    GateParams PhaseRotation(int qubit, double theta);
+    // CPU端纯Qubit门
+    GateParams Hadamard(int qubit);
+    GateParams PauliX(int qubit);
+    GateParams PauliY(int qubit);
+    GateParams PauliZ(int qubit);
+    GateParams RotationX(int qubit, double theta);
+    GateParams RotationY(int qubit, double theta);
+    GateParams RotationZ(int qubit, double theta);
+    GateParams PhaseGateS(int qubit);
+    GateParams PhaseGateT(int qubit);
+    GateParams CNOT(int control, int target);
+    GateParams CZ(int control, int target);
+
+    // GPU端纯Qumode门
+    GateParams PhaseRotation(int qumode, double theta);
     GateParams KerrGate(int qumode, double chi);
     GateParams ConditionalParity(int qumode, double parity);
-
-    // Level 1 门
     GateParams CreationOperator(int qumode);
     GateParams AnnihilationOperator(int qumode);
-
-    // Level 2 门
     GateParams Displacement(int qumode, std::complex<double> alpha);
     GateParams Squeezing(int qumode, std::complex<double> xi);
-
-    // Level 3 门
     GateParams BeamSplitter(int qumode1, int qumode2, double theta, double phi = 0.0);
 
-    // Level 4 门
-    GateParams ControlledDisplacement(int control_qubit, int target_qumode, std::complex<double> alpha);
-    GateParams ControlledSqueezing(int control_qubit, int target_qumode, std::complex<double> xi);
+    // CPU+GPU混合门 (分离型)
+    GateParams ConditionalDisplacement(int control_qubit, int target_qumode, std::complex<double> alpha);
+    GateParams ConditionalSqueezing(int control_qubit, int target_qumode, std::complex<double> xi);
+    GateParams ConditionalBeamSplitter(int control_qubit, int target_qumode1, int target_qumode2, double theta, double phi = 0.0);
+    GateParams ConditionalTwoModeSqueezing(int control_qubit, int target_qumode1, int target_qumode2, std::complex<double> xi);
+    GateParams ConditionalSUM(int control_qubit, int target_qumode1, int target_qumode2, double theta, double phi = 0.0);
+
+    // CPU+GPU混合门 (混合型)
+    GateParams RabiInteraction(int control_qubit, int target_qumode, double theta);
+    GateParams JaynesCummings(int control_qubit, int target_qumode, double theta, double phi = 0.0);
+    GateParams AntiJaynesCummings(int control_qubit, int target_qumode, double theta, double phi = 0.0);
+    GateParams SelectiveQubitRotation(int target_qubit, int control_qumode, const std::vector<double>& theta_vec, const std::vector<double>& phi_vec);
 }

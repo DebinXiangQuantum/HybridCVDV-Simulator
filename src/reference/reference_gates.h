@@ -148,6 +148,57 @@ Matrix create_squeezing_matrix(int dim, Complex xi);
 Matrix create_beam_splitter_matrix(int dim1, int dim2, double theta, double phi);
 
 /**
+ * CPU端纯Qubit门参考实现
+ */
+class QubitGates {
+public:
+    /**
+     * 泡利-X门 (NOT门)
+     */
+    static Vector apply_pauli_x(const Vector& input);
+
+    /**
+     * 泡利-Y门
+     */
+    static Vector apply_pauli_y(const Vector& input);
+
+    /**
+     * 泡利-Z门
+     */
+    static Vector apply_pauli_z(const Vector& input);
+
+    /**
+     * 阿达马门 (Hadamard)
+     */
+    static Vector apply_hadamard(const Vector& input);
+
+    /**
+     * 绕X轴旋转 Rx(θ)
+     */
+    static Vector apply_rotation_x(const Vector& input, double theta);
+
+    /**
+     * 绕Y轴旋转 Ry(θ)
+     */
+    static Vector apply_rotation_y(const Vector& input, double theta);
+
+    /**
+     * 绕Z轴旋转 Rz(θ)
+     */
+    static Vector apply_rotation_z(const Vector& input, double theta);
+
+    /**
+     * S门 (Z^{1/2})
+     */
+    static Vector apply_phase_s(const Vector& input);
+
+    /**
+     * T门 (Z^{1/4})
+     */
+    static Vector apply_phase_t(const Vector& input);
+};
+
+/**
  * Level 4: 混合控制门参考实现
  */
 class HybridControlGates {
@@ -172,12 +223,71 @@ public:
                                             Reference::Complex xi);
 
     /**
+     * 受控光束分裂器 CBS(θ,φ)
+     */
+    static Vector apply_controlled_beam_splitter(int control_state, const Vector& target_state,
+                                                 double theta, double phi);
+
+    /**
+     * 受控双模挤压 CTMS(ξ)
+     */
+    static Vector apply_controlled_two_mode_squeezing(int control_state, const Vector& target_state,
+                                                     Reference::Complex xi);
+
+    /**
+     * 受控SUM门
+     */
+    static Vector apply_controlled_sum(int control_state, const Vector& target_state,
+                                      double theta, double phi);
+
+    /**
+     * Rabi振荡门 RB(θ)
+     * Qubit-Qumode相互作用: σx ⊗ (a + a†)
+     */
+    static Vector apply_rabi_interaction(const Vector& qubit_state, const Vector& qumode_state, double theta);
+
+    /**
+     * Jaynes-Cummings相互作用 JC(θ,φ)
+     * |1⟩⟨0| ⊗ a + |0⟩⟨1| ⊗ a†
+     */
+    static Vector apply_jaynes_cummings(const Vector& qubit_state, const Vector& qumode_state, double theta, double phi);
+
+    /**
+     * Anti-Jaynes-Cummings相互作用 AJC(θ,φ)
+     * |0⟩⟨1| ⊗ a + |1⟩⟨0| ⊗ a†
+     */
+    static Vector apply_anti_jaynes_cummings(const Vector& qubit_state, const Vector& qumode_state, double theta, double phi);
+
+    /**
+     * 选择性Qubit旋转 SQR(θ,φ)
+     * 根据Qumode光子数选择性旋转Qubit
+     */
+    static Vector apply_selective_qubit_rotation(const Vector& qubit_state, const Vector& qumode_state,
+                                                 const std::vector<double>& theta_vec, const std::vector<double>& phi_vec);
+
+    /**
      * 通用混合控制门
      * 支持任意控制条件和目标操作
      */
     static Vector apply_hybrid_control_gate(int control_state, const Vector& target_state,
                                            const std::string& gate_type,
                                            const std::vector<Reference::Complex>& params);
+};
+
+/**
+ * 双模门扩展
+ */
+class TwoModeGatesExtended : public TwoModeGates {
+public:
+    /**
+     * 双模挤压门 TMS(ξ)
+     */
+    static Vector apply_two_mode_squeezing(const Vector& input, Reference::Complex xi);
+
+    /**
+     * SUM门 (求和门)
+     */
+    static Vector apply_sum_gate(const Vector& input, double theta, double phi);
 };
 
 } // namespace Reference
