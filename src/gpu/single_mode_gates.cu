@@ -57,7 +57,10 @@ __global__ void apply_displacement_kernel(
 __global__ void apply_ell_spmv_kernel(
     cuDoubleComplex* state_data,
     int d_trunc,
-    FockELLOperator* ell_op,
+    const cuDoubleComplex* ell_val,
+    const int* ell_col,
+    int ell_dim,
+    int ell_bandwidth,
     const int* target_indices,
     int batch_size
 ) {
@@ -67,7 +70,7 @@ __global__ void apply_ell_spmv_kernel(
     int state_idx = target_indices[batch_id];
     int row = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (row >= ell_op->dim) return;
+    if (row >= ell_dim) return;
 
     cuDoubleComplex* psi_in = &state_data[state_idx * d_trunc];
     cuDoubleComplex* psi_out = psi_in;  // 原地操作
@@ -76,12 +79,12 @@ __global__ void apply_ell_spmv_kernel(
     cuDoubleComplex sum = make_cuDoubleComplex(0.0, 0.0);
 
     // 遍历该行的非零元素
-    for (int k = 0; k < ell_op->max_bandwidth; ++k) {
-        int col_idx = ell_op->ell_col[row * ell_op->max_bandwidth + k];
+    for (int k = 0; k < ell_bandwidth; ++k) {
+        int col_idx = ell_col[row * ell_bandwidth + k];
 
         if (col_idx == -1) break;  // 该行结束
 
-        cuDoubleComplex val = ell_op->ell_val[row * ell_op->max_bandwidth + k];
+        cuDoubleComplex val = ell_val[row * ell_bandwidth + k];
         cuDoubleComplex psi_val = psi_in[col_idx];
 
         // 累加：sum += val * psi_in[col]
@@ -98,12 +101,15 @@ __global__ void apply_ell_spmv_kernel(
 __global__ void apply_ell_spmv_shared_kernel(
     cuDoubleComplex* state_data,
     int d_trunc,
-    FockELLOperator* ell_op,
+    const cuDoubleComplex* ell_val,
+    const int* ell_col,
+    int ell_dim,
+    int ell_bandwidth,
     const int* target_indices,
     int batch_size
 ) {
     extern __shared__ cuDoubleComplex shared_ell_val[];
-    int* shared_ell_col = (int*)&shared_ell_val[ell_op->dim * ell_op->max_bandwidth];
+    int* shared_ell_col = (int*)&shared_ell_val[ell_dim * ell_bandwidth];
 
     int batch_id = blockIdx.y;
     if (batch_id >= batch_size) return;
@@ -113,24 +119,24 @@ __global__ void apply_ell_spmv_shared_kernel(
     cuDoubleComplex* psi_out = psi_in;
 
     // 将ELL算符加载到共享内存
-    int total_elements = ell_op->dim * ell_op->max_bandwidth;
+    int total_elements = ell_dim * ell_bandwidth;
     for (int i = threadIdx.x; i < total_elements; i += blockDim.x) {
-        shared_ell_val[i] = ell_op->ell_val[i];
-        shared_ell_col[i] = ell_op->ell_col[i];
+        shared_ell_val[i] = ell_val[i];
+        shared_ell_col[i] = ell_col[i];
     }
     __syncthreads();
 
     int row = blockIdx.x * blockDim.x + threadIdx.x;
-    if (row >= ell_op->dim) return;
+    if (row >= ell_dim) return;
 
     // 计算该行的贡献
     cuDoubleComplex sum = make_cuDoubleComplex(0.0, 0.0);
-    for (int k = 0; k < ell_op->max_bandwidth; ++k) {
-        int col_idx = shared_ell_col[row * ell_op->max_bandwidth + k];
+    for (int k = 0; k < ell_bandwidth; ++k) {
+        int col_idx = shared_ell_col[row * ell_bandwidth + k];
 
         if (col_idx == -1) break;
 
-        cuDoubleComplex val = shared_ell_val[row * ell_op->max_bandwidth + k];
+        cuDoubleComplex val = shared_ell_val[row * ell_bandwidth + k];
         cuDoubleComplex psi_val = psi_in[col_idx];
 
         sum = cuCadd(sum, cuCmul(val, psi_val));
@@ -148,51 +154,76 @@ __global__ void apply_ell_spmv_shared_kernel(
  * 其中 L 是Laguerre多项式
  */
 __global__ void apply_displacement_direct_kernel(
-    cuDoubleComplex* state_data,
+    const cuDoubleComplex* in_data,
+    cuDoubleComplex* out_data,
     int d_trunc,
-    const int* target_indices,
-    int batch_size,
     cuDoubleComplex alpha
 ) {
-    int batch_id = blockIdx.y;
-    if (batch_id >= batch_size) return;
-
-    int state_idx = target_indices[batch_id];
     int n = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (n >= d_trunc) return;
 
-    cuDoubleComplex* psi_in = &state_data[state_idx * d_trunc];
-    cuDoubleComplex* psi_out = psi_in;
+    const cuDoubleComplex* psi_in = in_data;
+    cuDoubleComplex* psi_out = out_data;
 
     // 计算Displacement矩阵的第n行
     cuDoubleComplex sum = make_cuDoubleComplex(0.0, 0.0);
-    double alpha_norm_sq = cuCreal(cuCmul(alpha, cuConj(alpha)));
+    double alpha_real = cuCreal(alpha);
+    double alpha_imag = cuCimag(alpha);
+    double alpha_norm_sq = alpha_real*alpha_real + alpha_imag*alpha_imag;
     double exp_factor = exp(-alpha_norm_sq / 2.0);
 
-    // 简化的位移门实现 - 只处理主要的矩阵元素
-    // 对于小的位移参数，主要的贡献来自对角线和相邻元素
-    int start_m = max(0, n - 2);
-    int end_m = min(d_trunc - 1, n + 2);
+    for (int m = 0; m < d_trunc; ++m) {
+        cuDoubleComplex term_val;
+        int min_nm = min(n, m);
+        int max_nm = max(n, m);
+        int diff = max_nm - min_nm; // |n-m|
 
-    for (int m = start_m; m <= end_m; ++m) {
-        double coeff = 0.0;
-
-        if (n == m) {
-            // 对角线元素: <n|D|n> = e^(-|α|²/2)
-            coeff = exp_factor;
-        } else if (n == m + 1) {
-            // <n|D|n-1> = e^(-|α|²/2) * √n * Re(α)
-            coeff = exp_factor * sqrt((double)n) * cuCreal(alpha);
-        } else if (n == m - 1) {
-            // <n|D|n+1> = e^(-|α|²/2) * √(n+1) * (-Re(α))
-            coeff = -exp_factor * sqrt((double)n + 1.0) * cuCreal(alpha);
+        // 计算因子 √(min!/max!)
+        double sqrt_fact_ratio = 1.0;
+        for (int k = min_nm + 1; k <= max_nm; ++k) {
+            sqrt_fact_ratio /= sqrt((double)k);
         }
 
-        if (coeff != 0.0) {
-            cuDoubleComplex matrix_elem = make_cuDoubleComplex(coeff, 0.0);
-            sum = cuCadd(sum, cuCmul(matrix_elem, psi_in[m]));
+        // 计算幂次项
+        cuDoubleComplex power_term = make_cuDoubleComplex(1.0, 0.0);
+        if (n >= m) {
+            // n >= m: D_{nm} = coeff * α^(n-m) * L
+            for(int k=0; k<diff; ++k) power_term = cuCmul(power_term, alpha);
+        } else {
+            // m > n: D_{nm} = coeff * (-conj(α))^(m-n) * L
+            cuDoubleComplex minus_conj_alpha = make_cuDoubleComplex(-alpha_real, alpha_imag);
+            for(int k=0; k<diff; ++k) power_term = cuCmul(power_term, minus_conj_alpha);
         }
+
+        // 计算拉盖尔多项式 L_lower^{(diff)}(|α|^2) where lower = min(n, m)
+        double laguerre = 0.0;
+        double x = alpha_norm_sq;
+        double x_pow_j = 1.0; // x^0
+        double fact_j = 1.0;  // 0!
+
+        for (int j = 0; j <= min_nm; ++j) {
+            if (j > 0) {
+                x_pow_j *= x;
+                fact_j *= j;
+            }
+
+            // binom(max_nm, min_nm - j)
+            double binom = 1.0;
+            for (int i = 0; i < min_nm - j; ++i) {
+                binom = binom * (max_nm - i) / (i + 1);
+            }
+
+            double term = binom * x_pow_j / fact_j;
+            if (j % 2 == 1) term = -term;
+
+            laguerre += term;
+        }
+
+        double real_part = exp_factor * sqrt_fact_ratio * laguerre;
+        term_val = cuCmul(power_term, make_cuDoubleComplex(real_part, 0.0));
+
+        sum = cuCadd(sum, cuCmul(term_val, psi_in[m]));
     }
 
     psi_out[n] = sum;
@@ -212,11 +243,15 @@ void apply_single_mode_gate(CVStatePool* state_pool, FockELLOperator* ell_op,
 
     if (shared_mem_size < 48 * 1024) {  // 48KB shared memory limit
         apply_ell_spmv_shared_kernel<<<grid_dim, block_dim, shared_mem_size>>>(
-            state_pool->data, state_pool->d_trunc, ell_op, target_indices, batch_size
+            state_pool->data, state_pool->total_dim,
+            ell_op->ell_val, ell_op->ell_col, ell_op->dim, ell_op->max_bandwidth,
+            target_indices, batch_size
         );
     } else {
         apply_ell_spmv_kernel<<<grid_dim, block_dim>>>(
-            state_pool->data, state_pool->d_trunc, ell_op, target_indices, batch_size
+            state_pool->data, state_pool->total_dim,
+            ell_op->ell_val, ell_op->ell_col, ell_op->dim, ell_op->max_bandwidth,
+            target_indices, batch_size
         );
     }
 
@@ -232,18 +267,56 @@ void apply_single_mode_gate(CVStatePool* state_pool, FockELLOperator* ell_op,
  */
 void apply_displacement_gate(CVStatePool* state_pool, const int* target_indices,
                            int batch_size, cuDoubleComplex alpha) {
-    dim3 block_dim(256);
-    dim3 grid_dim((state_pool->d_trunc + block_dim.x - 1) / block_dim.x, batch_size);
-
-    // 使用直接计算版本
-    apply_displacement_direct_kernel<<<grid_dim, block_dim>>>(
-        state_pool->data, state_pool->d_trunc, target_indices, batch_size, alpha
-    );
-
-    cudaError_t err = cudaGetLastError();
+    // 将目标索引从设备复制到主机
+    std::vector<int> host_indices(batch_size);
+    cudaError_t err = cudaMemcpy(host_indices.data(), target_indices,
+                                 batch_size * sizeof(int), cudaMemcpyDeviceToHost);
     if (err != cudaSuccess) {
-        throw std::runtime_error("Displacement kernel launch failed: " +
-                                std::string(cudaGetErrorString(err)));
+        throw std::runtime_error("无法复制目标索引到主机: " + std::string(cudaGetErrorString(err)));
+    }
+
+    // 对于动态张量积管理，为每个状态单独处理
+    for (int i = 0; i < batch_size; ++i) {
+        int state_id = host_indices[i];
+        int state_dim = state_pool->get_state_dim(state_id);
+
+        if (state_dim <= 0) continue;
+
+        cuDoubleComplex* state_ptr = state_pool->get_state_ptr(state_id);
+        if (!state_ptr) continue;
+
+        dim3 block_dim(256);
+        dim3 grid_dim((state_dim + block_dim.x - 1) / block_dim.x, 1);
+
+        // 创建临时缓冲区用于输出
+        cuDoubleComplex* temp_buffer = nullptr;
+        cudaError_t err = cudaMalloc(&temp_buffer, state_dim * sizeof(cuDoubleComplex));
+        if (err != cudaSuccess) {
+            throw std::runtime_error("无法分配临时缓冲区: " + std::string(cudaGetErrorString(err)));
+        }
+
+        // 调用内核，传递输入和输出指针
+        apply_displacement_direct_kernel<<<grid_dim, block_dim>>>(
+            state_ptr, temp_buffer, state_dim, alpha
+        );
+
+        err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            cudaFree(temp_buffer);
+            throw std::runtime_error("Displacement gate kernel launch failed: " +
+                                    std::string(cudaGetErrorString(err)));
+        }
+
+        // 复制结果回原位置
+        err = cudaMemcpy(state_ptr, temp_buffer, state_dim * sizeof(cuDoubleComplex), cudaMemcpyDeviceToDevice);
+        cudaFree(temp_buffer);
+
+        if (err != cudaSuccess) {
+            throw std::runtime_error("无法复制结果: " + std::string(cudaGetErrorString(err)));
+        }
+
+        // 同步GPU操作
+        cudaDeviceSynchronize();
     }
 }
 

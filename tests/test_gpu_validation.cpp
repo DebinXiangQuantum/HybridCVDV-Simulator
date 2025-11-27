@@ -583,6 +583,10 @@ int run_actual_gpu_tests() {
         std::vector<cuDoubleComplex> gpu_result(dim);
         state_pool.download_state(gpu_state_id, gpu_result);
 
+        // 调试输出
+        std::cout << "   CPU结果[0]: " << cpu_result[0].real() << " + " << cpu_result[0].imag() << "i" << std::endl;
+        std::cout << "   GPU结果[0]: " << gpu_result[0].x << " + " << gpu_result[0].y << "i" << std::endl;
+
         // 计算误差
         double error = 0.0;
         for (size_t i = 0; i < dim; ++i) {

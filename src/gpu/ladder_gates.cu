@@ -180,10 +180,10 @@ __global__ void apply_ladder_operator_warp_kernel(
  */
 void apply_creation_operator(CVStatePool* state_pool, const int* target_indices, int batch_size) {
     dim3 block_dim(256);
-    dim3 grid_dim((state_pool->d_trunc + block_dim.x - 1) / block_dim.x, batch_size);
+    dim3 grid_dim((state_pool->total_dim + block_dim.x - 1) / block_dim.x, batch_size);
 
     apply_creation_operator_kernel<<<grid_dim, block_dim>>>(
-        state_pool->data, state_pool->d_trunc, target_indices, batch_size
+        state_pool->data, state_pool->total_dim, target_indices, batch_size
     );
 
     cudaError_t err = cudaGetLastError();
@@ -198,10 +198,10 @@ void apply_creation_operator(CVStatePool* state_pool, const int* target_indices,
  */
 void apply_annihilation_operator(CVStatePool* state_pool, const int* target_indices, int batch_size) {
     dim3 block_dim(256);
-    dim3 grid_dim((state_pool->d_trunc + block_dim.x - 1) / block_dim.x, batch_size);
+    dim3 grid_dim((state_pool->total_dim + block_dim.x - 1) / block_dim.x, batch_size);
 
     apply_annihilation_operator_kernel<<<grid_dim, block_dim>>>(
-        state_pool->data, state_pool->d_trunc, target_indices, batch_size
+        state_pool->data, state_pool->total_dim, target_indices, batch_size
     );
 
     cudaError_t err = cudaGetLastError();

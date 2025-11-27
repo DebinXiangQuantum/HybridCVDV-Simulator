@@ -18,7 +18,7 @@ protected:
     void SetUp() override {
         d_trunc = 8;
         max_states = 4;
-        pool = new CVStatePool(d_trunc, max_states);
+        pool = new CVStatePool(d_trunc, max_states, 1);  // 无内存限制
 
         // 初始化测试状态
         state_id = pool->allocate_state();

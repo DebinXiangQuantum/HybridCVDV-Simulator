@@ -254,7 +254,7 @@ void apply_beam_splitter(CVStatePool* state_pool, const int* target_indices,
 
     // 使用Block per Subspace版本
     apply_two_mode_gate_kernel<<<grid_dim, block_dim, shared_mem_size>>>(
-        state_pool->data, state_pool->d_trunc, target_indices, batch_size, max_photon_number, theta, phi
+        state_pool->data, state_pool->total_dim, target_indices, batch_size, max_photon_number, theta, phi
     );
 
     cudaError_t err = cudaGetLastError();
@@ -279,7 +279,7 @@ void apply_beam_splitter_fast(CVStatePool* state_pool, const int* target_indices
     dim3 grid_dim(max_photon_number, 1, batch_size);
 
     apply_two_mode_gate_fast_kernel<<<grid_dim, block_dim, shared_mem_size>>>(
-        state_pool->data, state_pool->d_trunc, target_indices, batch_size, max_photon_number
+        state_pool->data, state_pool->total_dim, target_indices, batch_size, max_photon_number
     );
 
     cudaError_t err = cudaGetLastError();

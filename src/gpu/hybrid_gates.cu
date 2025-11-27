@@ -26,7 +26,7 @@
 
 __global__ void apply_controlled_displacement_kernel(
     cuDoubleComplex* all_states_data,
-    int d_trunc,
+    int total_dim,
     int capacity,
     const int* target_state_ids,
     int num_states,
@@ -35,16 +35,16 @@ __global__ void apply_controlled_displacement_kernel(
 ) {
     int batch_idx = blockIdx.y;
     if (batch_idx >= num_states) return;
-    
+
     int state_id = target_state_ids[batch_idx];
     // 验证状态ID有效性
     if (state_id < 0 || state_id >= capacity) return;
-    
-    int n = blockIdx.x * blockDim.x + threadIdx.x;
-    if (n >= d_trunc) return;
 
-    cuDoubleComplex* psi = &all_states_data[state_id * d_trunc];
-    cuDoubleComplex* psi_out = &temp_buffer[blockIdx.y * d_trunc];
+    int n = blockIdx.x * blockDim.x + threadIdx.x;
+    if (n >= total_dim) return;
+
+    cuDoubleComplex* psi = &all_states_data[state_id * total_dim];
+    cuDoubleComplex* psi_out = &temp_buffer[blockIdx.y * total_dim];
     
     cuDoubleComplex sum = make_cuDoubleComplex(0.0, 0.0);
     
@@ -53,7 +53,7 @@ __global__ void apply_controlled_displacement_kernel(
     double alpha_norm_sq = alpha_real*alpha_real + alpha_imag*alpha_imag;
     double prefactor = exp(-alpha_norm_sq / 2.0);
 
-    for (int m = 0; m < d_trunc; ++m) {
+    for (int m = 0; m < total_dim; ++m) {
         // Compute D_nm = <n|D(alpha)|m>
         double sqrt_fact_ratio = 1.0;
         if (n > m) {
@@ -99,7 +99,7 @@ __global__ void apply_controlled_displacement_kernel(
 
 __global__ void copy_back_hybrid_kernel(
     cuDoubleComplex* all_states_data,
-    int d_trunc,
+    int total_dim,
     int capacity,
     const int* target_state_ids,
     int num_states,
@@ -107,15 +107,15 @@ __global__ void copy_back_hybrid_kernel(
 ) {
     int batch_idx = blockIdx.y;
     if (batch_idx >= num_states) return;
-    
+
     int state_id = target_state_ids[batch_idx];
     // 验证状态ID有效性
     if (state_id < 0 || state_id >= capacity) return;
-    
+
     int n = blockIdx.x * blockDim.x + threadIdx.x;
-    if (n >= d_trunc) return;
-    
-    all_states_data[state_id * d_trunc + n] = temp_buffer[batch_idx * d_trunc + n];
+    if (n >= total_dim) return;
+
+    all_states_data[state_id * total_dim + n] = temp_buffer[batch_idx * total_dim + n];
 }
 
 void apply_controlled_displacement(CVStatePool* state_pool,
@@ -136,22 +136,22 @@ void apply_controlled_displacement(CVStatePool* state_pool,
                controlled_states.size() * sizeof(int), cudaMemcpyHostToDevice));
 
     cuDoubleComplex* temp_buffer = nullptr;
-    size_t buffer_size = controlled_states.size() * state_pool->d_trunc * sizeof(cuDoubleComplex);
+    size_t buffer_size = controlled_states.size() * state_pool->total_dim * sizeof(cuDoubleComplex);
     CHECK_CUDA(cudaMalloc(&temp_buffer, buffer_size));
 
     dim3 block_dim(256);
-    dim3 grid_dim((state_pool->d_trunc + block_dim.x - 1) / block_dim.x, controlled_states.size());
+    dim3 grid_dim((state_pool->total_dim + block_dim.x - 1) / block_dim.x, controlled_states.size());
 
     apply_controlled_displacement_kernel<<<grid_dim, block_dim>>>(
-        state_pool->data, state_pool->d_trunc, state_pool->capacity, 
+        state_pool->data, state_pool->total_dim, state_pool->capacity,
         d_state_ids, controlled_states.size(), alpha, temp_buffer
     );
-    
+
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
-    
+
     copy_back_hybrid_kernel<<<grid_dim, block_dim>>>(
-        state_pool->data, state_pool->d_trunc, state_pool->capacity,
+        state_pool->data, state_pool->total_dim, state_pool->capacity,
         d_state_ids, controlled_states.size(), temp_buffer
     );
     CHECK_CUDA(cudaGetLastError());
@@ -167,17 +167,17 @@ void apply_controlled_displacement(CVStatePool* state_pool,
 
 __global__ void apply_controlled_rotation_kernel(
     cuDoubleComplex* all_states_data,
-    int d_trunc,
+    int total_dim,
     const int* target_state_ids,
     int num_states,
     double theta // This should be theta (for Branch 1) or -theta (for Branch 0, if handled)
 ) {
     int state_id = target_state_ids[blockIdx.y];
     int n = blockIdx.x * blockDim.x + threadIdx.x;
-    
-    if (n >= d_trunc) return;
-    
-    cuDoubleComplex* psi = &all_states_data[state_id * d_trunc];
+
+    if (n >= total_dim) return;
+
+    cuDoubleComplex* psi = &all_states_data[state_id * total_dim];
     
     // CR(theta) = exp[-i theta/2 sigma_z n]
     // For Q=1 (sigma_z=-1): exp[+i theta/2 n]
@@ -199,10 +199,10 @@ void apply_controlled_rotation(CVStatePool* state_pool,
     CHECK_CUDA(cudaMemcpy(d_ids, controlled_states.data(), controlled_states.size() * sizeof(int), cudaMemcpyHostToDevice));
     
     dim3 block_dim(256);
-    dim3 grid_dim((state_pool->d_trunc + block_dim.x - 1) / block_dim.x, controlled_states.size());
-    
+    dim3 grid_dim((state_pool->total_dim + block_dim.x - 1) / block_dim.x, controlled_states.size());
+
     apply_controlled_rotation_kernel<<<grid_dim, block_dim>>>(
-        state_pool->data, state_pool->d_trunc, d_ids, controlled_states.size(), theta
+        state_pool->data, state_pool->total_dim, d_ids, controlled_states.size(), theta
     );
     CHECK_CUDA(cudaFree(d_ids));
 }
@@ -219,7 +219,7 @@ void apply_controlled_parity(CVStatePool* state_pool, const std::vector<int>& co
 // Used for Rabi: Basis transform -> Displacement -> Basis transform
 __global__ void batch_mix_rabi_kernel(
     cuDoubleComplex* all_states_data,
-    int d_trunc,
+    int total_dim,
     const int* id0_list,
     const int* id1_list,
     int num_pairs,
@@ -227,14 +227,14 @@ __global__ void batch_mix_rabi_kernel(
 ) {
     int batch_idx = blockIdx.y;
     if (batch_idx >= num_pairs) return;
-    
+
     int id0 = id0_list[batch_idx];
     int id1 = id1_list[batch_idx];
     int n = blockIdx.x * blockDim.x + threadIdx.x;
-    if (n >= d_trunc) return;
-    
-    cuDoubleComplex* p0 = &all_states_data[id0 * d_trunc];
-    cuDoubleComplex* p1 = &all_states_data[id1 * d_trunc];
+    if (n >= total_dim) return;
+
+    cuDoubleComplex* p0 = &all_states_data[id0 * total_dim];
+    cuDoubleComplex* p1 = &all_states_data[id1 * total_dim];
     
     cuDoubleComplex v0 = p0[n];
     cuDoubleComplex v1 = p1[n];
@@ -268,10 +268,10 @@ void apply_rabi_interaction(CVStatePool* state_pool,
     CHECK_CUDA(cudaMemcpy(d_id1, qubit1_states.data(), n * sizeof(int), cudaMemcpyHostToDevice));
     
     dim3 bd(256);
-    dim3 gd((state_pool->d_trunc + bd.x - 1)/bd.x, n);
-    
+    dim3 gd((state_pool->total_dim + bd.x - 1)/bd.x, n);
+
     // 1. Transform to X basis
-    batch_mix_rabi_kernel<<<gd, bd>>>(state_pool->data, state_pool->d_trunc, d_id0, d_id1, n, false);
+    batch_mix_rabi_kernel<<<gd, bd>>>(state_pool->data, state_pool->total_dim, d_id0, d_id1, n, false);
     
     // 2. Apply Displacement D(-i theta) to v0 (|0>+|1>) and D(i theta) to v1 (|0>-|1>)
     // Note: In X basis, sigma_x becomes sigma_z. exp[-i sigma_x H] -> exp[-i sigma_z H].
@@ -283,40 +283,40 @@ void apply_rabi_interaction(CVStatePool* state_pool,
     cuDoubleComplex alpha1 = make_cuDoubleComplex(0.0, theta);
     
     cuDoubleComplex* temp_buffer = nullptr;
-    size_t buffer_size = n * state_pool->d_trunc * sizeof(cuDoubleComplex);
+    size_t buffer_size = n * state_pool->total_dim * sizeof(cuDoubleComplex);
     CHECK_CUDA(cudaMalloc(&temp_buffer, buffer_size));
-    
+
     // Apply to v0
     int num_states = static_cast<int>(n);
     apply_controlled_displacement_kernel<<<gd, bd>>>(
-        state_pool->data, state_pool->d_trunc, state_pool->capacity,
+        state_pool->data, state_pool->total_dim, state_pool->capacity,
         d_id0, num_states, alpha0, temp_buffer);
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
-    
+
     copy_back_hybrid_kernel<<<gd, bd>>>(
-        state_pool->data, state_pool->d_trunc, state_pool->capacity,
+        state_pool->data, state_pool->total_dim, state_pool->capacity,
         d_id0, num_states, temp_buffer);
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
-    
+
     // Apply to v1
     apply_controlled_displacement_kernel<<<gd, bd>>>(
-        state_pool->data, state_pool->d_trunc, state_pool->capacity,
+        state_pool->data, state_pool->total_dim, state_pool->capacity,
         d_id1, num_states, alpha1, temp_buffer);
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
-    
+
     copy_back_hybrid_kernel<<<gd, bd>>>(
-        state_pool->data, state_pool->d_trunc, state_pool->capacity,
+        state_pool->data, state_pool->total_dim, state_pool->capacity,
         d_id1, num_states, temp_buffer);
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
-    
+
     CHECK_CUDA(cudaFree(temp_buffer));
-    
+
     // 3. Transform back
-    batch_mix_rabi_kernel<<<gd, bd>>>(state_pool->data, state_pool->d_trunc, d_id0, d_id1, n, true);
+    batch_mix_rabi_kernel<<<gd, bd>>>(state_pool->data, state_pool->total_dim, d_id0, d_id1, n, true);
     
     CHECK_CUDA(cudaFree(d_id0));
     CHECK_CUDA(cudaFree(d_id1));
@@ -328,7 +328,7 @@ void apply_rabi_interaction(CVStatePool* state_pool,
 
 __global__ void apply_jc_kernel(
     cuDoubleComplex* all_states_data,
-    int d_trunc,
+    int total_dim,
     const int* id0_list,
     const int* id1_list,
     int num_pairs,
@@ -337,18 +337,18 @@ __global__ void apply_jc_kernel(
 ) {
     int batch_idx = blockIdx.y;
     if (batch_idx >= num_pairs) return;
-    
+
     int id0 = id0_list[batch_idx];
     int id1 = id1_list[batch_idx];
-    
+
     // Thread n handles subspace coupling |1, n> and |0, n+1>
     int n = blockIdx.x * blockDim.x + threadIdx.x;
-    
+
     // Check bounds. We need to access v0[n+1].
-    if (n >= d_trunc - 1) return;
-    
-    cuDoubleComplex* v0 = &all_states_data[id0 * d_trunc];
-    cuDoubleComplex* v1 = &all_states_data[id1 * d_trunc];
+    if (n >= total_dim - 1) return;
+
+    cuDoubleComplex* v0 = &all_states_data[id0 * total_dim];
+    cuDoubleComplex* v1 = &all_states_data[id1 * total_dim];
     
     double omega = theta * sqrt((double)(n + 1));
     double cos_w = cos(omega);
@@ -401,9 +401,9 @@ void apply_jaynes_cummings(CVStatePool* state_pool,
     CHECK_CUDA(cudaMemcpy(d1, qubit1_states.data(), n * sizeof(int), cudaMemcpyHostToDevice));
     
     dim3 bd(256);
-    dim3 gd((state_pool->d_trunc + bd.x - 1)/bd.x, n);
-    
-    apply_jc_kernel<<<gd, bd>>>(state_pool->data, state_pool->d_trunc, d0, d1, n, theta, phi);
+    dim3 gd((state_pool->total_dim + bd.x - 1)/bd.x, n);
+
+    apply_jc_kernel<<<gd, bd>>>(state_pool->data, state_pool->total_dim, d0, d1, n, theta, phi);
     
     CHECK_CUDA(cudaFree(d0));
     CHECK_CUDA(cudaFree(d1));
@@ -415,7 +415,7 @@ void apply_jaynes_cummings(CVStatePool* state_pool,
 
 __global__ void apply_ajc_kernel(
     cuDoubleComplex* all_states_data,
-    int d_trunc,
+    int total_dim,
     const int* id0_list,
     const int* id1_list,
     int num_pairs,
@@ -427,10 +427,10 @@ __global__ void apply_ajc_kernel(
     int id0 = id0_list[batch_idx];
     int id1 = id1_list[batch_idx];
     int n = blockIdx.x * blockDim.x + threadIdx.x;
-    if (n >= d_trunc - 1) return;
-    
-    cuDoubleComplex* v0 = &all_states_data[id0 * d_trunc];
-    cuDoubleComplex* v1 = &all_states_data[id1 * d_trunc];
+    if (n >= total_dim - 1) return;
+
+    cuDoubleComplex* v0 = &all_states_data[id0 * total_dim];
+    cuDoubleComplex* v1 = &all_states_data[id1 * total_dim];
     
     // Couples |0, n> and |1, n+1>
     double omega = theta * sqrt((double)(n + 1));
@@ -465,8 +465,8 @@ void apply_anti_jaynes_cummings(CVStatePool* state_pool,
     CHECK_CUDA(cudaMemcpy(d1, qubit1_states.data(), n * sizeof(int), cudaMemcpyHostToDevice));
     
     dim3 bd(256);
-    dim3 gd((state_pool->d_trunc + bd.x - 1)/bd.x, n);
-    apply_ajc_kernel<<<gd, bd>>>(state_pool->data, state_pool->d_trunc, d0, d1, n, theta, phi);
+    dim3 gd((state_pool->total_dim + bd.x - 1)/bd.x, n);
+    apply_ajc_kernel<<<gd, bd>>>(state_pool->data, state_pool->total_dim, d0, d1, n, theta, phi);
     CHECK_CUDA(cudaFree(d0));
     CHECK_CUDA(cudaFree(d1));
 }
@@ -477,7 +477,7 @@ void apply_anti_jaynes_cummings(CVStatePool* state_pool,
 
 __global__ void apply_sqr_kernel(
     cuDoubleComplex* all_states_data,
-    int d_trunc,
+    int total_dim,
     const int* id0_list,
     const int* id1_list,
     int num_pairs,
@@ -489,10 +489,10 @@ __global__ void apply_sqr_kernel(
     int id0 = id0_list[batch_idx];
     int id1 = id1_list[batch_idx];
     int n = blockIdx.x * blockDim.x + threadIdx.x;
-    if (n >= d_trunc) return;
-    
-    cuDoubleComplex* v0 = &all_states_data[id0 * d_trunc];
-    cuDoubleComplex* v1 = &all_states_data[id1 * d_trunc];
+    if (n >= total_dim) return;
+
+    cuDoubleComplex* v0 = &all_states_data[id0 * total_dim];
+    cuDoubleComplex* v1 = &all_states_data[id1 * total_dim];
     
     double theta = thetas[n];
     double phi = phis[n];
@@ -531,17 +531,17 @@ void apply_sqr(CVStatePool* state_pool,
     
     CHECK_CUDA(cudaMalloc(&d0, n_pairs * sizeof(int)));
     CHECK_CUDA(cudaMalloc(&d1, n_pairs * sizeof(int)));
-    CHECK_CUDA(cudaMalloc(&d_thetas, state_pool->d_trunc * sizeof(double)));
-    CHECK_CUDA(cudaMalloc(&d_phis, state_pool->d_trunc * sizeof(double)));
-    
+    CHECK_CUDA(cudaMalloc(&d_thetas, state_pool->total_dim * sizeof(double)));
+    CHECK_CUDA(cudaMalloc(&d_phis, state_pool->total_dim * sizeof(double)));
+
     CHECK_CUDA(cudaMemcpy(d0, qubit0_states.data(), n_pairs * sizeof(int), cudaMemcpyHostToDevice));
     CHECK_CUDA(cudaMemcpy(d1, qubit1_states.data(), n_pairs * sizeof(int), cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpy(d_thetas, thetas.data(), state_pool->d_trunc * sizeof(double), cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpy(d_phis, phis.data(), state_pool->d_trunc * sizeof(double), cudaMemcpyHostToDevice));
-    
+    CHECK_CUDA(cudaMemcpy(d_thetas, thetas.data(), state_pool->total_dim * sizeof(double), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(d_phis, phis.data(), state_pool->total_dim * sizeof(double), cudaMemcpyHostToDevice));
+
     dim3 bd(256);
-    dim3 gd((state_pool->d_trunc + bd.x - 1)/bd.x, n_pairs);
-    apply_sqr_kernel<<<gd, bd>>>(state_pool->data, state_pool->d_trunc, d0, d1, n_pairs, d_thetas, d_phis);
+    dim3 gd((state_pool->total_dim + bd.x - 1)/bd.x, n_pairs);
+    apply_sqr_kernel<<<gd, bd>>>(state_pool->data, state_pool->total_dim, d0, d1, n_pairs, d_thetas, d_phis);
     
     CHECK_CUDA(cudaFree(d0));
     CHECK_CUDA(cudaFree(d1));
@@ -555,7 +555,7 @@ void apply_sqr(CVStatePool* state_pool,
 
 __global__ void copy_states_kernel(
     cuDoubleComplex* all_states_data,
-    int d_trunc,
+    int total_dim,
     const int* source_ids,
     const int* dest_ids,
     int num_copies
@@ -565,10 +565,10 @@ __global__ void copy_states_kernel(
     int src_id = source_ids[copy_id];
     int dst_id = dest_ids[copy_id];
     int n = blockIdx.x * blockDim.x + threadIdx.x;
-    if (n >= d_trunc) return;
-    
-    all_states_data[dst_id * d_trunc + n] = 
-        all_states_data[src_id * d_trunc + n];
+    if (n >= total_dim) return;
+
+    all_states_data[dst_id * total_dim + n] =
+        all_states_data[src_id * total_dim + n];
 }
 
 void copy_states(CVStatePool* state_pool,
@@ -583,8 +583,8 @@ void copy_states(CVStatePool* state_pool,
     CHECK_CUDA(cudaMemcpy(d_dst, dest_ids.data(), dest_ids.size() * sizeof(int), cudaMemcpyHostToDevice));
     
     dim3 bd(256);
-    dim3 gd((state_pool->d_trunc + bd.x - 1)/bd.x, source_ids.size());
-    copy_states_kernel<<<gd, bd>>>(state_pool->data, state_pool->d_trunc, d_src, d_dst, source_ids.size());
+    dim3 gd((state_pool->total_dim + bd.x - 1)/bd.x, source_ids.size());
+    copy_states_kernel<<<gd, bd>>>(state_pool->data, state_pool->total_dim, d_src, d_dst, source_ids.size());
     
     CHECK_CUDA(cudaFree(d_src));
     CHECK_CUDA(cudaFree(d_dst));

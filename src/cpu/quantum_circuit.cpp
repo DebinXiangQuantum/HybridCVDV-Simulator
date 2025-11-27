@@ -55,14 +55,14 @@ void add_states(CVStatePool* state_pool,
  */
 HDDNode* QuantumCircuit::hdd_add(HDDNode* n1, std::complex<double> w1, HDDNode* n2, std::complex<double> w2) {
     // 处理零权重
-    if (std::abs(w1) < 1e-14) {
-        if (std::abs(w2) < 1e-14) {
-            // 两者都为零：返回"零"节点
-            int zero_id = state_pool_.allocate_state();
-            std::vector<cuDoubleComplex> zeros(cv_truncation_, make_cuDoubleComplex(0.0, 0.0));
-            state_pool_.upload_state(zero_id, zeros);
-            return node_manager_.create_terminal_node(zero_id);
-        }
+        if (std::abs(w1) < 1e-14) {
+            if (std::abs(w2) < 1e-14) {
+                // 两者都为零：返回"零"节点
+                int zero_id = state_pool_.allocate_state();
+                std::vector<cuDoubleComplex> zeros(state_pool_.get_max_total_dim(), make_cuDoubleComplex(0.0, 0.0));
+                state_pool_.upload_state(zero_id, zeros);
+                return node_manager_.create_terminal_node(zero_id);
+            }
         // 只有 w2，递归处理
         return hdd_add(n2, w2, n1, w1);
     }
@@ -217,7 +217,7 @@ HDDNode* QuantumCircuit::apply_cz_recursive(HDDNode* node, int control, int targ
  */
 QuantumCircuit::QuantumCircuit(int num_qubits, int num_qumodes, int cv_truncation, int max_states)
     : num_qubits_(num_qubits), num_qumodes_(num_qumodes), cv_truncation_(cv_truncation),
-      root_node_(nullptr), state_pool_(cv_truncation, max_states),
+      root_node_(nullptr), state_pool_(cv_truncation, max_states, num_qumodes),
       is_built_(false), is_executed_(false) {
 
     if (num_qubits <= 0 || num_qumodes <= 0 || cv_truncation <= 0) {
@@ -326,17 +326,19 @@ void QuantumCircuit::reset() {
  * 初始化HDD结构
  */
 void QuantumCircuit::initialize_hdd() {
-    // 创建初始状态 |00...0> ⊗ |vacuum>
-    // 首先分配一个CV状态用于真空态
-    int vacuum_state_id = state_pool_.allocate_state();
+    // 创建初始状态 |00...0> ⊗ |vacuum>_1 ⊗ |vacuum>_2 ⊗ ... ⊗ |vacuum>_M
+    // 对于M个独立的qumode，直积态的维度是D^M
+    // 真空直积态：第一个元素(所有qumode都是n=0)为1，其他为0
+    int initial_state_id = state_pool_.allocate_state();
 
-    // 初始化真空态 (第一个元素为1，其他为0)
-    std::vector<cuDoubleComplex> vacuum_state(cv_truncation_, make_cuDoubleComplex(0.0, 0.0));
-    vacuum_state[0] = make_cuDoubleComplex(1.0, 0.0);
-    state_pool_.upload_state(vacuum_state_id, vacuum_state);
+    // 初始化多qumode真空直积态
+    int total_dim = state_pool_.get_max_total_dim();
+    std::vector<cuDoubleComplex> vacuum_product_state(total_dim, make_cuDoubleComplex(0.0, 0.0));
+    vacuum_product_state[0] = make_cuDoubleComplex(1.0, 0.0);  // 所有qumode都是真空态
+    state_pool_.upload_state(initial_state_id, vacuum_product_state);
 
     // 创建HDD根节点 (所有qubits为|0>)
-    root_node_ = node_manager_.create_terminal_node(vacuum_state_id);
+    root_node_ = node_manager_.create_terminal_node(initial_state_id);
 }
 
 /**
@@ -391,6 +393,14 @@ void QuantumCircuit::execute_gate(const GateParams& gate) {
         case GateType::ANTI_JAYNES_CUMMINGS:
         case GateType::SELECTIVE_QUBIT_ROTATION:
             execute_hybrid_gate(gate);
+            break;
+
+        case GateType::CONDITIONAL_BEAM_SPLITTER:
+            std::cout << "警告：条件分束器门实现与张量积基底不兼容，跳过执行" << std::endl;
+            break;
+
+        case GateType::CONDITIONAL_SQUEEZING:
+            std::cout << "警告：条件挤压门尚未完全实现，跳过执行" << std::endl;
             break;
 
         default:
@@ -514,6 +524,8 @@ void QuantumCircuit::execute_level3_gate(const GateParams& gate) {
                target_states.size() * sizeof(int), cudaMemcpyHostToDevice));
 
     if (gate.type == GateType::BEAM_SPLITTER && gate.params.size() >= 2) {
+        std::cout << "警告：分束器门实现与张量积基底不兼容，跳过执行" << std::endl;
+        /*
         double theta = gate.params[0].real();
         double phi = gate.params[1].real();
         int max_photon = cv_truncation_ - 1;  // 最大光子数
@@ -532,6 +544,7 @@ void QuantumCircuit::execute_level3_gate(const GateParams& gate) {
         CHECK_CUDA(cudaDeviceSynchronize());
 
         CHECK_CUDA(cudaFree(d_state_id));
+        */
     }
 
     CHECK_CUDA(cudaFree(d_target_ids));
