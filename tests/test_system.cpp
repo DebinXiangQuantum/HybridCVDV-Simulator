@@ -91,13 +91,14 @@ TEST_F(SystemTest, MemoryManagement) {
 
 TEST_F(SystemTest, ComplexCircuit) {
     // 创建一个更复杂的电路
-    circuit->add_gates({
+    std::vector<GateParams> gates = {
         Gates::PhaseRotation(0, M_PI / 4.0),
         Gates::Displacement(0, std::complex<double>(0.2, 0.1)),
         Gates::BeamSplitter(0, 1, M_PI / 3.0),
-        Gates::ControlledDisplacement(0, 1, std::complex<double>(0.1, 0.0)),
+        Gates::ConditionalDisplacement(0, 1, std::complex<double>(0.1, 0.0)),
         Gates::Squeezing(1, std::complex<double>(0.05, 0.0))
-    });
+    };
+    circuit->add_gates(gates);
 
     circuit->execute();
 

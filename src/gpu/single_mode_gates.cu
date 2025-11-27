@@ -4,10 +4,13 @@
 #include "fock_ell_operator.h"
 
 /**
- * 简化的位移门内核 (用于测试)
+ * 位移门内核 D(α) = exp(α a† - α* a)
+ * 使用ELL格式SpMV实现
  */
-__global__ void apply_displacement_simple_kernel(
-    CVStatePool* state_pool,
+__global__ void apply_displacement_kernel(
+    cuDoubleComplex* state_data,
+    int d_trunc,
+    FockELLOperator* ell_op,
     const int* target_indices,
     int batch_size
 ) {
@@ -17,14 +20,25 @@ __global__ void apply_displacement_simple_kernel(
     int state_idx = target_indices[batch_id];
     int n = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (n >= state_pool->d_trunc) return;
+    if (n >= d_trunc) return;
 
-    // 获取状态向量指针
-    cuDoubleComplex* psi = &state_pool->data[state_idx * state_pool->d_trunc];
+    // 获取输入和输出状态向量指针
+    cuDoubleComplex* psi_in = &state_data[state_idx * d_trunc];
+    cuDoubleComplex* psi_out = psi_in; // 原地更新
 
-    // 简化的测试：只读取内存，不写入
-    cuDoubleComplex current_val = psi[n];
-    // 不做任何修改
+    // ELL格式SpMV
+    cuDoubleComplex sum = make_cuDoubleComplex(0.0, 0.0);
+
+    for (int k = 0; k < ell_op->max_bandwidth; ++k) {
+        int col = ell_op->ell_col[n * ell_op->max_bandwidth + k];
+        if (col == -1) break; // ELL填充
+
+        cuDoubleComplex val = ell_op->ell_val[n * ell_op->max_bandwidth + k];
+        cuDoubleComplex input_val = psi_in[col];
+
+        sum = cuCadd(sum, cuCmul(val, input_val));
+    }
+    psi_out[n] = sum;
 }
 
 /**
@@ -41,7 +55,8 @@ __global__ void apply_displacement_simple_kernel(
  * 实现单模门的通用应用
  */
 __global__ void apply_ell_spmv_kernel(
-    CVStatePool* state_pool,
+    cuDoubleComplex* state_data,
+    int d_trunc,
     FockELLOperator* ell_op,
     const int* target_indices,
     int batch_size
@@ -54,7 +69,7 @@ __global__ void apply_ell_spmv_kernel(
 
     if (row >= ell_op->dim) return;
 
-    cuDoubleComplex* psi_in = &state_pool->data[state_idx * state_pool->d_trunc];
+    cuDoubleComplex* psi_in = &state_data[state_idx * d_trunc];
     cuDoubleComplex* psi_out = psi_in;  // 原地操作
 
     // 初始化结果
@@ -81,7 +96,8 @@ __global__ void apply_ell_spmv_kernel(
  * 对于小矩阵，可以将ELL算符加载到共享内存中
  */
 __global__ void apply_ell_spmv_shared_kernel(
-    CVStatePool* state_pool,
+    cuDoubleComplex* state_data,
+    int d_trunc,
     FockELLOperator* ell_op,
     const int* target_indices,
     int batch_size
@@ -93,7 +109,7 @@ __global__ void apply_ell_spmv_shared_kernel(
     if (batch_id >= batch_size) return;
 
     int state_idx = target_indices[batch_id];
-    cuDoubleComplex* psi_in = &state_pool->data[state_idx * state_pool->d_trunc];
+    cuDoubleComplex* psi_in = &state_data[state_idx * d_trunc];
     cuDoubleComplex* psi_out = psi_in;
 
     // 将ELL算符加载到共享内存
@@ -131,8 +147,9 @@ __global__ void apply_ell_spmv_shared_kernel(
  * 矩阵元素：<n|D(α)|m> = √(n!/m!) * (α)^(n-m) * exp(-|α|²/2) * L_m^(n-m)(|α|²)
  * 其中 L 是Laguerre多项式
  */
-__global__ void apply_displacement_kernel(
-    CVStatePool* state_pool,
+__global__ void apply_displacement_direct_kernel(
+    cuDoubleComplex* state_data,
+    int d_trunc,
     const int* target_indices,
     int batch_size,
     cuDoubleComplex alpha
@@ -143,9 +160,9 @@ __global__ void apply_displacement_kernel(
     int state_idx = target_indices[batch_id];
     int n = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (n >= state_pool->d_trunc) return;
+    if (n >= d_trunc) return;
 
-    cuDoubleComplex* psi_in = &state_pool->data[state_idx * state_pool->d_trunc];
+    cuDoubleComplex* psi_in = &state_data[state_idx * d_trunc];
     cuDoubleComplex* psi_out = psi_in;
 
     // 计算Displacement矩阵的第n行
@@ -156,7 +173,7 @@ __global__ void apply_displacement_kernel(
     // 简化的位移门实现 - 只处理主要的矩阵元素
     // 对于小的位移参数，主要的贡献来自对角线和相邻元素
     int start_m = max(0, n - 2);
-    int end_m = min(state_pool->d_trunc - 1, n + 2);
+    int end_m = min(d_trunc - 1, n + 2);
 
     for (int m = start_m; m <= end_m; ++m) {
         double coeff = 0.0;
@@ -195,11 +212,11 @@ void apply_single_mode_gate(CVStatePool* state_pool, FockELLOperator* ell_op,
 
     if (shared_mem_size < 48 * 1024) {  // 48KB shared memory limit
         apply_ell_spmv_shared_kernel<<<grid_dim, block_dim, shared_mem_size>>>(
-            state_pool, ell_op, target_indices, batch_size
+            state_pool->data, state_pool->d_trunc, ell_op, target_indices, batch_size
         );
     } else {
         apply_ell_spmv_kernel<<<grid_dim, block_dim>>>(
-            state_pool, ell_op, target_indices, batch_size
+            state_pool->data, state_pool->d_trunc, ell_op, target_indices, batch_size
         );
     }
 
@@ -218,9 +235,9 @@ void apply_displacement_gate(CVStatePool* state_pool, const int* target_indices,
     dim3 block_dim(256);
     dim3 grid_dim((state_pool->d_trunc + block_dim.x - 1) / block_dim.x, batch_size);
 
-    // 使用简化的版本进行测试
-    apply_displacement_simple_kernel<<<grid_dim, block_dim>>>(
-        state_pool, target_indices, batch_size
+    // 使用直接计算版本
+    apply_displacement_direct_kernel<<<grid_dim, block_dim>>>(
+        state_pool->data, state_pool->d_trunc, target_indices, batch_size, alpha
     );
 
     cudaError_t err = cudaGetLastError();

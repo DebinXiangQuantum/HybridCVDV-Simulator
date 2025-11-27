@@ -1,3 +1,176 @@
+这是针对 **Hybrid Tensor-DD (HTDD)** 架构中 **CPU 端纯 Qubit 门** 的详细技术实现文档。
+
+在 HTDD 架构中，纯 Qubit 门的操作**完全在 CPU 上进行**，本质上是对决策图（DD）的 **路径重连 (Rewiring)** 和 **权重更新 (Reweighing)**。只有当涉及到节点合并（Merge）判断时，才可能需要比对 GPU 上的 Tensor 指针（或 ID）。
+
+---
+
+# CPU 端纯 Qubit 门实现规范
+
+**适用范围**: 作用于 Qubit $q_t$ 的门，不直接涉及 Qumode。
+**核心数据结构**:
+*   `Node`: {`id`, `ptr_low`, `ptr_high`, `w_low`, `w_high`}
+*   `Apply(U, Node)`: 递归函数，将矩阵 $U$ 应用于以 `Node` 为根的子树。
+
+---
+
+## 1. 基础原语：DD 线性组合 (DD Linear Combination)
+
+大多数单比特叠加门（如 H, Rx, Ry）会将一个节点分裂为两个分支的线性组合。我们需要一个核心函数来实现 $Result = \alpha \cdot A + \beta \cdot B$。
+
+**函数**: `DD_Add(Node A, Weight alpha, Node B, Weight beta)`
+
+**逻辑**:
+1.  **基准情况 (Base Case)**:
+    *   如果 $A$ 和 $B$ 都是终端节点 (Terminal)，且 `A.tensor_id == B.tensor_id`:
+        *   返回新的终端节点，指向 `tensor_id`，权重为 $alpha + beta$。
+    *   *注意*: 如果 `A.tensor_id != B.tensor_id`，这意味着物理上 Qumode 状态不同。在 Qubit 门操作中，这通常意味着无法合并，必须保持为两个独立的分支（或者若发生在最底层，则需新建一个父节点来表示叠加）。
+    *   如果 $A$ 是 0 节点：返回 $B$，权重乘 $\beta$。
+    *   如果 $B$ 是 0 节点：返回 $A$，权重乘 $\alpha$。
+
+2.  **递归步骤**:
+    *   设 $top\_level = \max(A.level, B.level)$。
+    *   对齐层级：若 $A.level < top\_level$，则 $A$ 视为在其父节点的对应分支上延续。
+    *   计算新的子节点：
+        $$ Low_{new} = \text{DD\_Add}(A.low, \alpha \cdot A.w_{low}, B.low, \beta \cdot B.w_{low}) $$
+        $$ High_{new} = \text{DD\_Add}(A.high, \alpha \cdot A.w_{high}, B.high, \beta \cdot B.w_{high}) $$
+    *   **查找/创建节点**: 在 Unique Table 中查找是否存在 `{top_level, Low_{new}, High_{new}}`。若无则创建。
+
+---
+
+## 2. 单比特门：泡利门与相位门 (Permutation & Phase)
+
+这类门只改变权重或交换分支，不改变图的拓扑复杂性（不增加节点数），**计算极快**。
+
+### 2.1 Pauli-X (NOT Gate)
+**矩阵**: $\begin{pmatrix} 0 & 1 \\ 1 & 0 \end{pmatrix}$
+**操作**: 交换左右孩子。
+
+*   **逻辑**: 对于目标层级 $q_t$ 的节点 $u$:
+    $$ \text{NewNode} = \text{FindOrAdd}(u.level, u.high, u.low) $$
+    *   新左权重 $w'_{low} = u.w_{high}$
+    *   新右权重 $w'_{high} = u.w_{low}$
+
+### 2.2 Pauli-Z
+**矩阵**: $\begin{pmatrix} 1 & 0 \\ 0 & -1 \end{pmatrix}$
+**操作**: 改变右孩子相位的符号。
+
+*   **逻辑**:
+    $$ w'_{low} = u.w_{low} $$
+    $$ w'_{high} = -1 \cdot u.w_{high} $$
+
+### 2.3 Pauli-Y
+**矩阵**: $\begin{pmatrix} 0 & -i \\ i & 0 \end{pmatrix}$
+**操作**: 交换并乘相位。
+
+*   **逻辑**:
+    $$ w'_{low} = -i \cdot u.w_{high} $$
+    $$ w'_{high} = i \cdot u.w_{low} $$
+
+### 2.4 Phase Gate (S) & T Gate & RZ
+**矩阵**: $P(\phi) = \begin{pmatrix} 1 & 0 \\ 0 & e^{i\phi} \end{pmatrix}$
+*   **S Gate**: $\phi = \pi/2 \Rightarrow e^{i\phi} = i$
+*   **T Gate**: $\phi = \pi/4 \Rightarrow e^{i\phi} = e^{i\pi/4}$
+*   **RZ($\theta$)**: $e^{-i\theta/2} \begin{pmatrix} e^{i\theta/2} & 0 \\ 0 & e^{-i\theta/2} \end{pmatrix} \equiv \begin{pmatrix} 1 & 0 \\ 0 & e^{-i\theta} \end{pmatrix}$ (忽略全局相位)
+
+**操作**: 仅修改右分支权重。
+*   **逻辑**:
+    $$ w'_{high} = u.w_{high} \cdot e^{i\phi} $$
+
+---
+
+## 3. 单比特门：叠加门 (Superposition)
+
+这类门会混合 $|0\rangle$ 和 $|1\rangle$ 分支，通常需要调用 `DD_Add`。
+
+### 3.1 Hadamard (H)
+**矩阵**: $\frac{1}{\sqrt{2}} \begin{pmatrix} 1 & 1 \\ 1 & -1 \end{pmatrix}$
+
+**操作**:
+在目标层级 $q_t$，原节点的两个分支是 $Low_{old}$ (权重 $w_l$) 和 $High_{old}$ (权重 $w_h$)。
+新的分支是它们的线性组合：
+1.  **新左支**:
+    $$ \text{Branch}_{L} = \text{DD\_Add}(Low_{old}, \frac{w_l}{\sqrt{2}}, High_{old}, \frac{w_h}{\sqrt{2}}) $$
+2.  **新右支**:
+    $$ \text{Branch}_{R} = \text{DD\_Add}(Low_{old}, \frac{w_l}{\sqrt{2}}, High_{old}, -\frac{w_h}{\sqrt{2}}) $$
+3.  **重组**: 创建新节点指向 $\text{Branch}_{L}$ 和 $\text{Branch}_{R}$。
+
+### 3.2 RX($\theta$)
+**矩阵**: $\begin{pmatrix} \cos\frac{\theta}{2} & -i\sin\frac{\theta}{2} \\ -i\sin\frac{\theta}{2} & \cos\frac{\theta}{2} \end{pmatrix}$
+
+**操作**:
+$$ \text{Branch}_{L} = \text{DD\_Add}(Low_{old}, \cos\frac{\theta}{2} \cdot w_l, High_{old}, -i\sin\frac{\theta}{2} \cdot w_h) $$
+$$ \text{Branch}_{R} = \text{DD\_Add}(Low_{old}, -i\sin\frac{\theta}{2} \cdot w_l, High_{old}, \cos\frac{\theta}{2} \cdot w_h) $$
+
+### 3.3 RY($\theta$)
+**矩阵**: $\begin{pmatrix} \cos\frac{\theta}{2} & -\sin\frac{\theta}{2} \\ \sin\frac{\theta}{2} & \cos\frac{\theta}{2} \end{pmatrix}$
+
+**操作**:
+$$ \text{Branch}_{L} = \text{DD\_Add}(Low_{old}, \cos\frac{\theta}{2} \cdot w_l, High_{old}, -\sin\frac{\theta}{2} \cdot w_h) $$
+$$ \text{Branch}_{R} = \text{DD\_Add}(Low_{old}, \sin\frac{\theta}{2} \cdot w_l, High_{old}, \cos\frac{\theta}{2} \cdot w_h) $$
+
+---
+
+## 4. 双比特门 (Two-Qubit Gates)
+
+### 4.1 CNOT (CX)
+**定义**: 控制位 $q_c$，目标位 $q_t$。
+**逻辑**: 这是一个递归操作。设当前遍历到的节点为 $u$，层级为 $lvl$。
+
+**Case A: $lvl > q_c$ 和 $q_t$ (当前节点在控制和目标之上)**
+*   **递归**:
+    $$ Low_{new} = \text{ApplyCX}(u.low) $$
+    $$ High_{new} = \text{ApplyCX}(u.high) $$
+    返回新建节点 $\{Low_{new}, High_{new}\}$。
+
+**Case B: $lvl == q_c$ (当前是控制节点)**
+*   **逻辑**:
+    *   $|0\rangle$ 分支 (Left): 不变 (Identity)。$Low_{new} = u.low$。
+    *   $|1\rangle$ 分支 (Right): 对目标应用 X 门。$High_{new} = \text{ApplyX}(u.high, q_t)$。
+
+**Case C: $q_c > lvl > q_t$ (当前在控制之下，目标之上)**
+*   **递归**: 同 Case A，继续向下传递操作。虽然当前节点不是控制位，但操作需要穿透它作用于下方。
+    *   *优化*: 使用 Compute Table 缓存结果 `Cache(u, CX_c_t)`。
+
+**Case D: $lvl == q_t$ (当前是目标节点)**
+*   **注意**: 这种情况只会在 `ApplyX` 递归调用中遇到，或者如果在非控制路径上遇到了 $q_t$。但在标准 CX 逻辑中，如果没经过 $q_c$ 的 $|1\rangle$ 分支，是不会对 $q_t$ 操作的。
+*   如果是 `ApplyX` 调用到了这里，则执行 **2.1 Pauli-X** 逻辑（交换左右子树）。
+
+### 4.2 CZ (Controlled-Z)
+同 CNOT，但在 $lvl == q_c$ 的 $|1\rangle$ 分支上，调用 `ApplyZ(u.high, q_t)`。
+
+---
+
+## 5. 实现细节与优化
+
+### 5.1 归一化 (Normalization)
+每次 `DD_Add` 或创建新节点后，必须进行归一化以保证 Canonical Form（规范型），这是去重合并的基础。
+
+**规则**:
+设节点有权重 $w_L, w_R$。
+1.  提取公共因子 $w_{norm}$ (例如 $w_L$ 的模，或者 $w_L$ 本身，或者 $\sqrt{|w_L|^2 + |w_R|^2}$)。
+    *   推荐策略: 使得 $w_L' = 1$。即 $w_{norm} = w_L$。
+2.  新权重: $w_L' = 1, w_R' = w_R / w_L$。
+3.  $w_{norm}$ 返回给父节点。
+
+### 5.2 计算缓存 (Compute Table)
+CPU 性能的关键。
+*   **Key**: `{Operation_Type, Node_ID, Parameters}`
+*   **Value**: `{Result_Node_ID, Result_Weight}`
+*   **流程**: 每次执行 `Apply(U, Node)` 或 `DD_Add` 前，先查表。若命中直接返回。
+
+### 5.3 与 GPU Tensor 的交互 (Terminal Node)
+当 DD 递归到达终端节点（Terminal, level = -1）时，节点存储的是 `Tensor_ID`。
+
+*   **Qubit 门操作**:
+    *   通常 Qubit 门只重组路径，不修改 Tensor。
+    *   **特例**: `Hadamard` 作用于末端 Qubit。
+        *   输入: 指向 $T_0$。
+        *   输出: 创建新节点，左指 $T_0$ ($w=1/\sqrt{2}$)，右指 $T_0$ ($w=1/\sqrt{2}$)。
+        *   **不需要** 调用 GPU 加法。这只是逻辑上的叠加。
+*   **唯一需要 GPU 介入的 Qubit 操作**: **测量 (Measurement)** 或 **部分迹 (Partial Trace)**。
+    *   这需要计算 Tensor 的内积 $\langle T_a | T_b \rangle$ 来确定分支概率。
+
+
 这是一个针对 **Hybrid Tensor-DD (HTDD)** 架构的混合门（Hybrid Gates）技术实现指南。
 
 该文档基于你提供的门列表，给出了在 **CPU (DD 控制层)** 和 **GPU (物理计算层)** 上的具体计算公式。

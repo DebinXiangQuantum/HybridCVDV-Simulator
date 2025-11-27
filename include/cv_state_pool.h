@@ -2,6 +2,7 @@
 
 #include <cuda_runtime.h>
 #include <cuComplex.h>
+
 #include <vector>
 #include <memory>
 #include <atomic>

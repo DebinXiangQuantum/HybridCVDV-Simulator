@@ -1,4 +1,5 @@
 #include "cv_state_pool.h"
+#include <cuda_runtime.h>
 #include <iostream>
 #include <algorithm>
 #include <cstring>

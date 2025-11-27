@@ -50,8 +50,16 @@ else()
     target_compile_definitions(cuda_mock INTERFACE CUDA_FOUND=0)
 endif()
 
-# 查找Google Test (如果需要的话)
-find_package(GTest QUIET)
+# Google Test - 自动下载和安装 (使用Gitee镜像)
+include(FetchContent)
+FetchContent_Declare(
+    googletest
+    GIT_REPOSITORY https://gitee.com/mirrors/googletest.git
+    GIT_TAG v1.14.0
+)
+# 防止googletest项目覆盖我们的编译设置
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googletest)
 
 # 包含目录
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -118,14 +126,24 @@ if(CUDA_FOUND)
 endif()
 
 # 主库
-add_library(${PROJECT_NAME} STATIC
-    ${CORE_SOURCES}
-    ${GPU_SOURCES}
-    ${CPU_SOURCES}
-    ${SCHEDULER_SOURCES}
-    ${MEMORY_SOURCES}
-    ${REFERENCE_SOURCES}
-)
+if(CUDA_FOUND)
+    add_library(${PROJECT_NAME} STATIC
+        ${CORE_SOURCES}
+        ${GPU_SOURCES}
+        ${CPU_SOURCES}
+        ${SCHEDULER_SOURCES}
+        ${MEMORY_SOURCES}
+        ${REFERENCE_SOURCES}
+    )
+else()
+    add_library(${PROJECT_NAME} STATIC
+        ${CORE_SOURCES}
+        ${CPU_SOURCES}
+        ${SCHEDULER_SOURCES}
+        ${MEMORY_SOURCES}
+        ${REFERENCE_SOURCES}
+    )
+endif()
 
 # 链接CUDA运行时
 if(CUDA_FOUND)
@@ -161,18 +179,16 @@ if(CUDA_FOUND)
     target_link_libraries(${PROJECT_NAME}_examples ${CUDA_LIBRARIES})
 endif()
 
-# 测试 (如果找到GTest)
-if(GTest_FOUND)
+# 测试 (使用自动下载的GoogleTest)
     enable_testing()
 
     set(TEST_SOURCES
         tests/test_cv_state_pool.cpp
         tests/test_fock_ell_operator.cpp
+        tests/test_all_gates.cpp
         tests/test_diagonal_gates.cpp
         tests/test_ladder_gates.cpp
-        tests/test_single_mode_gates.cpp
-        tests/test_two_mode_gates.cpp
-        tests/test_hybrid_gates.cpp
+        tests/test_hdd_node.cpp
         tests/test_system.cpp
     )
 
@@ -180,7 +196,6 @@ if(GTest_FOUND)
     target_link_libraries(${PROJECT_NAME}_tests ${PROJECT_NAME} GTest::gtest_main)
     include(GoogleTest)
     gtest_discover_tests(${PROJECT_NAME}_tests)
-endif()
 
 # 安装目标
 install(TARGETS ${PROJECT_NAME} ${PROJECT_NAME}_main ${PROJECT_NAME}_examples
@@ -197,4 +212,4 @@ message(STATUS "Version: ${PROJECT_VERSION}")
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "CUDA found: ${CUDA_FOUND}")
 message(STATUS "CUDA version: ${CUDA_VERSION_STRING}")
-message(STATUS "GTest found: ${GTest_FOUND}")
+message(STATUS "GTest: Auto-downloaded and configured")

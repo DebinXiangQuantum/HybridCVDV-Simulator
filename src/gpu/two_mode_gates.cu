@@ -67,7 +67,8 @@ __host__ __device__ cuDoubleComplex compute_bs_matrix_element(int k, int i, int 
  * 每个CUDA Block处理一个光子数子空间
  */
 __global__ void apply_two_mode_gate_kernel(
-    CVStatePool* state_pool,
+    cuDoubleComplex* state_data,
+    int d_trunc,
     const int* target_indices,
     int batch_size,
     int max_photon_number,  // 最大总光子数
@@ -84,7 +85,7 @@ __global__ void apply_two_mode_gate_kernel(
     if (batch_id >= batch_size) return;
 
     int state_idx = target_indices[batch_id];
-    cuDoubleComplex* psi = &state_pool->data[state_idx * state_pool->d_trunc];
+    cuDoubleComplex* psi = &state_data[state_idx * d_trunc];
 
     // 计算当前block处理的子空间
     int subspace_k = blockIdx.x;  // 总光子数k
@@ -111,7 +112,7 @@ __global__ void apply_two_mode_gate_kernel(
         // 计算全局索引：对于总光子数k，状态索引为 k*(k+1)/2 + i
         // 这里简化为：状态按光子数分组存储
         int global_idx = subspace_k * (subspace_k + 1) / 2 + tid;
-        if (global_idx < state_pool->d_trunc) {
+        if (global_idx < d_trunc) {
             sub_vec_in[tid] = psi[global_idx];
         } else {
             sub_vec_in[tid] = make_cuDoubleComplex(0.0, 0.0);
@@ -138,7 +139,7 @@ __global__ void apply_two_mode_gate_kernel(
     // 将结果写回全局内存
     if (tid < sub_dim) {
         int global_idx = subspace_k * (subspace_k + 1) / 2 + tid;
-        if (global_idx < state_pool->d_trunc) {
+        if (global_idx < d_trunc) {
             psi[global_idx] = sub_vec_out[tid];
         }
     }
@@ -152,7 +153,8 @@ __global__ void apply_two_mode_gate_kernel(
 __constant__ cuDoubleComplex bs_matrix_const[MAX_SUBSPACE_DIM * MAX_SUBSPACE_DIM];
 
 __global__ void apply_two_mode_gate_fast_kernel(
-    CVStatePool* state_pool,
+    cuDoubleComplex* state_data,
+    int d_trunc,
     const int* target_indices,
     int batch_size,
     int max_photon_number
@@ -163,7 +165,7 @@ __global__ void apply_two_mode_gate_fast_kernel(
     if (batch_id >= batch_size) return;
 
     int state_idx = target_indices[batch_id];
-    cuDoubleComplex* psi = &state_pool->data[state_idx * state_pool->d_trunc];
+    cuDoubleComplex* psi = &state_data[state_idx * d_trunc];
 
     int subspace_k = blockIdx.x;
     if (subspace_k >= max_photon_number) return;
@@ -174,7 +176,7 @@ __global__ void apply_two_mode_gate_fast_kernel(
     // 加载输入向量到共享内存
     if (tid < sub_dim) {
         int global_idx = subspace_k * (subspace_k + 1) / 2 + tid;
-        shared_vec[tid] = (global_idx < state_pool->d_trunc) ? psi[global_idx] :
+        shared_vec[tid] = (global_idx < d_trunc) ? psi[global_idx] :
                          make_cuDoubleComplex(0.0, 0.0);
         shared_vec[sub_dim + tid] = make_cuDoubleComplex(0.0, 0.0);  // 输出向量
     }
@@ -199,7 +201,7 @@ __global__ void apply_two_mode_gate_fast_kernel(
     // 写回结果
     if (tid < sub_dim) {
         int global_idx = subspace_k * (subspace_k + 1) / 2 + tid;
-        if (global_idx < state_pool->d_trunc) {
+        if (global_idx < d_trunc) {
             psi[global_idx] = shared_vec[sub_dim + tid];
         }
     }
@@ -252,7 +254,7 @@ void apply_beam_splitter(CVStatePool* state_pool, const int* target_indices,
 
     // 使用Block per Subspace版本
     apply_two_mode_gate_kernel<<<grid_dim, block_dim, shared_mem_size>>>(
-        state_pool, target_indices, batch_size, max_photon_number, theta, phi
+        state_pool->data, state_pool->d_trunc, target_indices, batch_size, max_photon_number, theta, phi
     );
 
     cudaError_t err = cudaGetLastError();
@@ -277,7 +279,7 @@ void apply_beam_splitter_fast(CVStatePool* state_pool, const int* target_indices
     dim3 grid_dim(max_photon_number, 1, batch_size);
 
     apply_two_mode_gate_fast_kernel<<<grid_dim, block_dim, shared_mem_size>>>(
-        state_pool, target_indices, batch_size, max_photon_number
+        state_pool->data, state_pool->d_trunc, target_indices, batch_size, max_photon_number
     );
 
     cudaError_t err = cudaGetLastError();
@@ -290,8 +292,8 @@ void apply_beam_splitter_fast(CVStatePool* state_pool, const int* target_indices
 /**
  * 主机端接口：应用通用双模混合门
  */
-void apply_two_mode_gate(CVStatePool& state_pool, const int* target_indices,
+void apply_two_mode_gate(CVStatePool* state_pool, const int* target_indices,
                         int batch_size, double param1, double param2, int max_photon_number) {
-    apply_beam_splitter(&state_pool, target_indices, batch_size,
+    apply_beam_splitter(state_pool, target_indices, batch_size,
                        param1, param2, max_photon_number);
 }

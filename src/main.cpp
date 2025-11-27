@@ -52,7 +52,7 @@ int main(int argc, char* argv[]) {
             QuantumCircuit circuit2(2, 2, 16, 32);
             circuit2.add_gates({
                 Gates::PhaseRotation(0, M_PI / 4.0),                        // Qubit旋转
-                Gates::ControlledDisplacement(0, 0, std::complex<double>(0.4, 0.0)), // 受控位移
+                Gates::ConditionalDisplacement(0, 0, std::complex<double>(0.4, 0.0)), // 受控位移
                 Gates::CreationOperator(1),                                 // 光子创建
                 Gates::KerrGate(1, 0.1)                                    // Kerr非线性
             });

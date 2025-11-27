@@ -18,7 +18,8 @@
  * 简化的Kerr门内核
  */
 __global__ void apply_kerr_simple_kernel(
-    CVStatePool* state_pool,
+    cuDoubleComplex* state_data,
+    int d_trunc,
     const int* target_indices,
     int batch_size,
     double chi
@@ -29,21 +30,22 @@ __global__ void apply_kerr_simple_kernel(
     int state_idx = target_indices[batch_id];
     int n = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (n >= state_pool->d_trunc) return;
+    if (n >= d_trunc) return;
 
     // 获取状态向量指针
-    cuDoubleComplex* psi = &state_pool->data[state_idx * state_pool->d_trunc];
+    cuDoubleComplex* psi = &state_data[state_idx * d_trunc];
 
-    // 简化的测试：只读取内存，不写入
-    cuDoubleComplex current_val = psi[n];
-    // 不做任何修改
+    // 简化的测试：只读取内存，不写入（确保内存可访问）
+    (void)psi[n];  // 读取但不使用，验证内存可访问性
 }
 
 /**
- * 简化的相位旋转门内核 (避免函数指针)
+ * 相位旋转门内核 R(θ) = exp(-i θ n)
+ * 公式：ψ_out[n] = ψ_in[n] · exp(-i θ n)
  */
-__global__ void apply_phase_rotation_simple_kernel(
-    CVStatePool* state_pool,
+__global__ void apply_phase_rotation_kernel(
+    cuDoubleComplex* state_data,
+    int d_trunc,
     const int* target_indices,
     int batch_size,
     double theta
@@ -54,29 +56,32 @@ __global__ void apply_phase_rotation_simple_kernel(
     int state_idx = target_indices[batch_id];
     int n = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (n >= state_pool->d_trunc) return;
+    if (n >= d_trunc) return;
 
     // 获取状态向量指针
-    cuDoubleComplex* psi = &state_pool->data[state_idx * state_pool->d_trunc];
+    cuDoubleComplex* psi = &state_data[state_idx * d_trunc];
 
-    // 最简单的测试：什么都不做，只是检查内存访问
-    if (n < state_pool->d_trunc) {
-        // 什么都不做，只是检查能否访问内存
-        cuDoubleComplex temp = psi[n];
-        // 不做任何修改
-    }
+    // 计算相位因子: exp(-i * theta * n)
+    double phase = -theta * static_cast<double>(n);
+    cuDoubleComplex phase_factor = make_cuDoubleComplex(cos(phase), sin(phase));
+
+    // 应用相位旋转
+    cuDoubleComplex current_val = psi[n];
+    psi[n] = cuCmul(current_val, phase_factor);
 }
 
 /**
  * 通用对角门应用内核
- * @param state_pool CV状态池
+ * @param state_data CV状态池数据
+ * @param d_trunc 截断维度
  * @param target_indices 需要更新的状态ID列表
  * @param batch_size 批处理大小
  * @param phase_func 相位函数指针 (设备端函数)
  * @param params 门参数
  */
 __global__ void apply_diagonal_gate_kernel(
-    CVStatePool* state_pool,
+    cuDoubleComplex* state_data,
+    int d_trunc,
     const int* target_indices,
     int batch_size,
     double (*phase_func)(int, double),  // 相位函数: f(n, param)
@@ -89,10 +94,10 @@ __global__ void apply_diagonal_gate_kernel(
     int state_idx = target_indices[batch_id];
     int n = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (n >= state_pool->d_trunc) return;
+    if (n >= d_trunc) return;
 
     // 获取状态向量指针
-    cuDoubleComplex* psi = &state_pool->data[state_idx * state_pool->d_trunc];
+    cuDoubleComplex* psi = &state_data[state_idx * d_trunc];
 
     // 计算相位因子 e^(-i * phase)
     double phase = phase_func(n, param);
@@ -141,9 +146,9 @@ void apply_phase_rotation(CVStatePool* state_pool, const int* target_indices,
     dim3 block_dim(256);
     dim3 grid_dim((state_pool->d_trunc + block_dim.x - 1) / block_dim.x, batch_size);
 
-    // 使用简化的内核，避免函数指针
-    apply_phase_rotation_simple_kernel<<<grid_dim, block_dim>>>(
-        state_pool, target_indices, batch_size, theta
+    // 使用正确的相位旋转内核
+    apply_phase_rotation_kernel<<<grid_dim, block_dim>>>(
+        state_pool->data, state_pool->d_trunc, target_indices, batch_size, theta
     );
 
     cudaError_t err = cudaGetLastError();
@@ -163,7 +168,7 @@ void apply_kerr_gate(CVStatePool* state_pool, const int* target_indices,
 
     // 使用简化的内核
     apply_kerr_simple_kernel<<<grid_dim, block_dim>>>(
-        state_pool, target_indices, batch_size, chi
+        state_pool->data, state_pool->d_trunc, target_indices, batch_size, chi
     );
 
     cudaError_t err = cudaGetLastError();
@@ -182,7 +187,7 @@ void apply_conditional_parity(CVStatePool* state_pool, const int* target_indices
     dim3 grid_dim((state_pool->d_trunc + block_dim.x - 1) / block_dim.x, batch_size);
 
     apply_diagonal_gate_kernel<<<grid_dim, block_dim>>>(
-        state_pool, target_indices, batch_size,
+        state_pool->data, state_pool->d_trunc, target_indices, batch_size,
         conditional_parity_func, parity
     );
 
