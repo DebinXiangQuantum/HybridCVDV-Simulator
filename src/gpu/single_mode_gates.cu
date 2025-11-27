@@ -4,10 +4,12 @@
 #include "fock_ell_operator.h"
 
 /**
- * 简化的位移门内核 (用于测试)
+ * 位移门内核 D(α) = exp(α a† - α* a)
+ * 使用ELL格式SpMV实现
  */
-__global__ void apply_displacement_simple_kernel(
+__global__ void apply_displacement_kernel(
     CVStatePool* state_pool,
+    FockELLOperator* ell_op,
     const int* target_indices,
     int batch_size
 ) {
@@ -19,12 +21,24 @@ __global__ void apply_displacement_simple_kernel(
 
     if (n >= state_pool->d_trunc) return;
 
-    // 获取状态向量指针
-    cuDoubleComplex* psi = &state_pool->data[state_idx * state_pool->d_trunc];
+    // 获取输入和输出状态向量指针
+    cuDoubleComplex* psi_in = &state_pool->data[state_idx * state_pool->d_trunc];
+    cuDoubleComplex* psi_out = psi_in; // 原地更新
 
-    // 简化的测试：只读取内存，不写入
-    cuDoubleComplex current_val = psi[n];
-    // 不做任何修改
+    // ELL格式SpMV
+    cuDoubleComplex sum = make_cuDoubleComplex(0.0, 0.0);
+
+    for (int k = 0; k < ell_op->max_nnz_per_row; ++k) {
+        int col = ell_op->ell_cols[n * ell_op->max_nnz_per_row + k];
+        if (col == -1) break; // ELL填充
+
+        cuDoubleComplex val = ell_op->ell_vals[n * ell_op->max_nnz_per_row + k];
+        cuDoubleComplex input_val = psi_in[col];
+
+        sum = cuCadd(sum, cuCmul(val, input_val));
+    }
+
+    psi_out[n] = sum;
 }
 
 /**
