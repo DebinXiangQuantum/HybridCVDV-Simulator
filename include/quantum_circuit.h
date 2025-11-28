@@ -4,6 +4,7 @@
 #include <complex>
 #include <memory>
 #include <string>
+#include <map>
 #include "cv_state_pool.h"
 #include "fock_ell_operator.h"
 #include "hdd_node.h"
