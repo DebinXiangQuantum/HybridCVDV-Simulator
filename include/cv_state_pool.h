@@ -2,6 +2,7 @@
 
 #include <cuda_runtime.h>
 #include <cuComplex.h>
+
 #include <vector>
 #include <memory>
 #include <atomic>
@@ -85,6 +86,18 @@ struct CVStatePool {
      * @return 是否有效
      */
     bool is_valid_state(int state_id) const;
+
+    /**
+     * 重置状态池
+     * 重置所有分配，恢复为空闲状态
+     */
+    void reset();
+
+    /**
+     * 获取所有活跃的状态ID
+     * @return 活跃状态ID的向量
+     */
+    std::vector<int> get_active_state_ids() const;
 
 private:
     // 禁用拷贝构造和赋值

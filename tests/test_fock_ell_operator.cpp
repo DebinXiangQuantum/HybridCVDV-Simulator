@@ -78,11 +78,16 @@ TEST_F(FockELLOperatorTest, BuildFromDenseDiagonal) {
 
 TEST_F(FockELLOperatorTest, BuildFromDiagonals) {
     // 创建带状矩阵：主对角线 + 次对角线
-    std::vector<std::vector<cuDoubleComplex>> diagonals = {
-        {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0},  // 主对角线
-        {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7},        // 上对角线
-        {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7}         // 下对角线
-    };
+    std::vector<std::vector<cuDoubleComplex>> diagonals(3);
+    diagonals[0] = {cuDoubleComplex{1.0, 0.0}, cuDoubleComplex{2.0, 0.0}, cuDoubleComplex{3.0, 0.0},
+                    cuDoubleComplex{4.0, 0.0}, cuDoubleComplex{5.0, 0.0}, cuDoubleComplex{6.0, 0.0},
+                    cuDoubleComplex{7.0, 0.0}, cuDoubleComplex{8.0, 0.0}};  // 主对角线
+    diagonals[1] = {cuDoubleComplex{0.1, 0.0}, cuDoubleComplex{0.2, 0.0}, cuDoubleComplex{0.3, 0.0},
+                    cuDoubleComplex{0.4, 0.0}, cuDoubleComplex{0.5, 0.0}, cuDoubleComplex{0.6, 0.0},
+                    cuDoubleComplex{0.7, 0.0}};  // 上对角线
+    diagonals[2] = {cuDoubleComplex{0.1, 0.0}, cuDoubleComplex{0.2, 0.0}, cuDoubleComplex{0.3, 0.0},
+                    cuDoubleComplex{0.4, 0.0}, cuDoubleComplex{0.5, 0.0}, cuDoubleComplex{0.6, 0.0},
+                    cuDoubleComplex{0.7, 0.0}};  // 下对角线
     std::vector<int> offsets = {0, 1, -1};
 
     ell_op->build_from_diagonals(diagonals, offsets);

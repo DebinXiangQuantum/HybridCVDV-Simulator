@@ -6,6 +6,49 @@
 namespace Reference {
 
 // ===== 工具函数实现 =====
+// 添加缺失的工具函数
+Matrix transpose(const Matrix& mat) {
+    if (mat.empty()) return {};
+    int rows = mat.size();
+    int cols = mat[0].size();
+    Matrix result(cols, Vector(rows));
+    for (int i = 0; i < rows; ++i) {
+        for (int j = 0; j < cols; ++j) {
+            result[j][i] = mat[i][j];
+        }
+    }
+    return result;
+}
+
+Matrix kronecker_product(const Matrix& A, const Matrix& B) {
+    int a_rows = A.size();
+    int a_cols = A[0].size();
+    int b_rows = B.size();
+    int b_cols = B[0].size();
+
+    Matrix result(a_rows * b_rows, Vector(a_cols * b_cols, Complex(0.0, 0.0)));
+
+    for (int i = 0; i < a_rows; ++i) {
+        for (int j = 0; j < a_cols; ++j) {
+            for (int k = 0; k < b_rows; ++k) {
+                for (int l = 0; l < b_cols; ++l) {
+                    result[i * b_rows + k][j * b_cols + l] = A[i][j] * B[k][l];
+                }
+            }
+        }
+    }
+    return result;
+}
+
+Vector tensor_product(const Vector& a, const Vector& b) {
+    Vector result(a.size() * b.size());
+    for (size_t i = 0; i < a.size(); ++i) {
+        for (size_t j = 0; j < b.size(); ++j) {
+            result[i * b.size() + j] = a[i] * b[j];
+        }
+    }
+    return result;
+}
 
 // ===== 辅助矩阵函数 =====
 
@@ -382,6 +425,155 @@ Vector HybridControlGates::apply_hybrid_control_gate(int control_state, const Ve
     } else {
         throw std::invalid_argument("不支持的混合控制门类型: " + gate_type);
     }
+}
+
+// ===== Qubit门参考实现 =====
+
+Vector QubitGates::apply_pauli_x(const Vector& input) {
+    // X = [[0, 1], [1, 0]]
+    if (input.size() != 2) {
+        throw std::invalid_argument("Pauli-X门需要2维状态向量");
+    }
+    return {input[1], input[0]};
+}
+
+Vector QubitGates::apply_pauli_y(const Vector& input) {
+    // Y = [[0, -i], [i, 0]]
+    if (input.size() != 2) {
+        throw std::invalid_argument("Pauli-Y门需要2维状态向量");
+    }
+    return {Complex(0.0, -1.0) * input[1], Complex(0.0, 1.0) * input[0]};
+}
+
+Vector QubitGates::apply_pauli_z(const Vector& input) {
+    // Z = [[1, 0], [0, -1]]
+    if (input.size() != 2) {
+        throw std::invalid_argument("Pauli-Z门需要2维状态向量");
+    }
+    return {input[0], -input[1]};
+}
+
+Vector QubitGates::apply_hadamard(const Vector& input) {
+    // H = 1/√2 * [[1, 1], [1, -1]]
+    if (input.size() != 2) {
+        throw std::invalid_argument("Hadamard门需要2维状态向量");
+    }
+    double inv_sqrt2 = 1.0 / std::sqrt(2.0);
+    return {inv_sqrt2 * (input[0] + input[1]), inv_sqrt2 * (input[0] - input[1])};
+}
+
+Vector QubitGates::apply_rotation_x(const Vector& input, double theta) {
+    // Rx(θ) = [[cos(θ/2), -i*sin(θ/2)], [-i*sin(θ/2), cos(θ/2)]]
+    if (input.size() != 2) {
+        throw std::invalid_argument("Rx门需要2维状态向量");
+    }
+    double cos_half = std::cos(theta / 2.0);
+    double sin_half = std::sin(theta / 2.0);
+    Complex i_sin = Complex(0.0, -sin_half);
+    return {
+        cos_half * input[0] + i_sin * input[1],
+        i_sin * input[0] + cos_half * input[1]
+    };
+}
+
+Vector QubitGates::apply_rotation_y(const Vector& input, double theta) {
+    // Ry(θ) = [[cos(θ/2), -sin(θ/2)], [sin(θ/2), cos(θ/2)]]
+    if (input.size() != 2) {
+        throw std::invalid_argument("Ry门需要2维状态向量");
+    }
+    double cos_half = std::cos(theta / 2.0);
+    double sin_half = std::sin(theta / 2.0);
+    return {
+        cos_half * input[0] - sin_half * input[1],
+        sin_half * input[0] + cos_half * input[1]
+    };
+}
+
+Vector QubitGates::apply_rotation_z(const Vector& input, double theta) {
+    // Rz(θ) = [[e^(-iθ/2), 0], [0, e^(iθ/2)]]
+    if (input.size() != 2) {
+        throw std::invalid_argument("Rz门需要2维状态向量");
+    }
+    Complex phase_neg = std::exp(Complex(0.0, -theta / 2.0));
+    Complex phase_pos = std::exp(Complex(0.0, theta / 2.0));
+    return {phase_neg * input[0], phase_pos * input[1]};
+}
+
+Vector QubitGates::apply_phase_s(const Vector& input) {
+    // S = [[1, 0], [0, i]]
+    if (input.size() != 2) {
+        throw std::invalid_argument("S门需要2维状态向量");
+    }
+    return {input[0], Complex(0.0, 1.0) * input[1]};
+}
+
+Vector QubitGates::apply_phase_t(const Vector& input) {
+    // T = [[1, 0], [0, e^(iπ/4)]]
+    if (input.size() != 2) {
+        throw std::invalid_argument("T门需要2维状态向量");
+    }
+    Complex phase = std::exp(Complex(0.0, M_PI / 4.0));
+    return {input[0], phase * input[1]};
+}
+
+// ===== 扩展的混合控制门实现 =====
+
+Vector HybridControlGates::apply_controlled_beam_splitter(int control_state, const Vector& target_state,
+                                                         double theta, double phi) {
+    // CBS(θ,φ) = exp[-i θ/2 σ_z ⊗ (e^{iφ} a† b + e^{-iφ} a b†)]
+    // 这是一个复杂的双模门，暂时使用简化的实现
+    return target_state; // 占位符
+}
+
+Vector HybridControlGates::apply_controlled_two_mode_squeezing(int control_state, const Vector& target_state,
+                                                             Complex xi) {
+    // CTMS(ξ) = exp[1/2 σ_z ⊗ (ξ* a† b† - ξ* a b)]
+    // 这是一个复杂的双模门，暂时使用简化的实现
+    return target_state; // 占位符
+}
+
+Vector HybridControlGates::apply_controlled_sum(int control_state, const Vector& target_state,
+                                              double theta, double phi) {
+    // SUM门定义较为复杂，暂时使用简化的实现
+    return target_state; // 占位符
+}
+
+Vector HybridControlGates::apply_rabi_interaction(const Vector& qubit_state, const Vector& qumode_state, double theta) {
+    // RB(θ) = exp[-i σ_x ⊗ (θ a† + θ* a)]
+    // 这是一个复杂的混合门，暂时使用简化的实现
+    return tensor_product(qubit_state, qumode_state); // 占位符
+}
+
+Vector HybridControlGates::apply_jaynes_cummings(const Vector& qubit_state, const Vector& qumode_state, double theta, double phi) {
+    // JC(θ,φ) = exp[-iθ(e^{iφ} σ- a† + e^{-iφ} σ+ a)]
+    // 这是一个复杂的混合门，暂时使用简化的实现
+    return tensor_product(qubit_state, qumode_state); // 占位符
+}
+
+Vector HybridControlGates::apply_anti_jaynes_cummings(const Vector& qubit_state, const Vector& qumode_state, double theta, double phi) {
+    // AJC(θ,φ) = exp[-iθ(e^{iφ} σ+ a† + e^{-iφ} σ- a)]
+    // 这是一个复杂的混合门，暂时使用简化的实现
+    return tensor_product(qubit_state, qumode_state); // 占位符
+}
+
+Vector HybridControlGates::apply_selective_qubit_rotation(const Vector& qubit_state, const Vector& qumode_state,
+                                                         const std::vector<double>& theta_vec, const std::vector<double>& phi_vec) {
+    // SQR根据光子数选择性旋转Qubit
+    // 这是一个非常复杂的门，暂时使用简化的实现
+    return tensor_product(qubit_state, qumode_state); // 占位符
+}
+
+// ===== 双模门扩展实现 =====
+
+Vector TwoModeGatesExtended::apply_two_mode_squeezing(const Vector& input, Complex xi) {
+    // TMS(ξ) = exp[1/2 (ξ* a† b† - ξ a b)]
+    // 暂时使用简化的实现
+    return input; // 占位符
+}
+
+Vector TwoModeGatesExtended::apply_sum_gate(const Vector& input, double theta, double phi) {
+    // SUM门定义较为复杂，暂时使用简化的实现
+    return input; // 占位符
 }
 
 } // namespace Reference
