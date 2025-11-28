@@ -12,6 +12,22 @@ CVStatePool::CVStatePool(int trunc_dim, int max_states, int num_qumodes, size_t 
     : d_trunc(trunc_dim), capacity(max_states), active_count(0),
       max_total_dim(1), total_dim(1), total_memory_size(0), max_memory_size(max_memory_mb * 1024ULL * 1024ULL) {
 
+    // 检查CUDA设备是否可用
+    int device_count = 0;
+    cudaError_t device_check = cudaGetDeviceCount(&device_count);
+    if (device_check != cudaSuccess || device_count == 0) {
+        throw std::runtime_error("CUDA设备不可用: " + std::string(cudaGetErrorString(device_check)));
+    }
+    
+    // 设置CUDA设备（使用默认设备0）
+    cudaError_t set_device_err = cudaSetDevice(0);
+    if (set_device_err != cudaSuccess) {
+        throw std::runtime_error("无法设置CUDA设备: " + std::string(cudaGetErrorString(set_device_err)));
+    }
+    
+    // 清除之前的CUDA错误状态
+    cudaGetLastError();
+
     // 计算总维度：D^num_qumodes
     for (int i = 0; i < num_qumodes; ++i) {
         max_total_dim *= d_trunc;
@@ -26,6 +42,8 @@ CVStatePool::CVStatePool(int trunc_dim, int max_states, int num_qumodes, size_t 
     size_t initial_data_size = static_cast<size_t>(capacity) * max_total_dim * sizeof(cuDoubleComplex);
     cudaError_t err = cudaMalloc(&data, initial_data_size);
     if (err != cudaSuccess) {
+        // 清除错误状态
+        cudaGetLastError();
         throw std::runtime_error("无法分配GPU内存用于状态池: " + std::string(cudaGetErrorString(err)));
     }
     total_memory_size = initial_data_size;
@@ -118,20 +136,37 @@ CVStatePool::CVStatePool(int trunc_dim, int max_states, int num_qumodes, size_t 
  * 释放所有GPU内存
  */
 CVStatePool::~CVStatePool() {
+    // 清除之前的CUDA错误状态，避免影响释放操作
+    cudaGetLastError();
+    
+    // 安全释放GPU内存，忽略错误（设备可能已不可用）
     if (data) {
-        cudaFree(data);
+        cudaError_t err = cudaFree(data);
+        if (err != cudaSuccess && err != cudaErrorProfilerNotInitialized) {
+            // 只在非初始化错误时输出警告
+            std::cerr << "警告：释放状态池数据内存失败: " << cudaGetErrorString(err) << std::endl;
+        }
         data = nullptr;
     }
     if (free_list) {
-        cudaFree(free_list);
+        cudaError_t err = cudaFree(free_list);
+        if (err != cudaSuccess && err != cudaErrorProfilerNotInitialized) {
+            std::cerr << "警告：释放空闲列表内存失败: " << cudaGetErrorString(err) << std::endl;
+        }
         free_list = nullptr;
     }
     if (state_dims) {
-        cudaFree(state_dims);
+        cudaError_t err = cudaFree(state_dims);
+        if (err != cudaSuccess && err != cudaErrorProfilerNotInitialized) {
+            std::cerr << "警告：释放状态维度内存失败: " << cudaGetErrorString(err) << std::endl;
+        }
         state_dims = nullptr;
     }
     if (state_offsets) {
-        cudaFree(state_offsets);
+        cudaError_t err = cudaFree(state_offsets);
+        if (err != cudaSuccess && err != cudaErrorProfilerNotInitialized) {
+            std::cerr << "警告：释放状态偏移量内存失败: " << cudaGetErrorString(err) << std::endl;
+        }
         state_offsets = nullptr;
     }
 
@@ -409,14 +444,21 @@ int CVStatePool::tensor_product(int state1_id, int state2_id) {
     // 复制现有数据到新内存
     err = cudaMemcpy(new_data, data, total_memory_size, cudaMemcpyDeviceToDevice);
     if (err != cudaSuccess) {
-        cudaFree(new_data);
+        cudaError_t free_err = cudaFree(new_data);
+        if (free_err != cudaSuccess) {
+            std::cerr << "警告：释放新分配的内存失败: " << cudaGetErrorString(free_err) << std::endl;
+        }
         free_state(new_state_id);
         std::cerr << "无法复制现有数据: " << cudaGetErrorString(err) << std::endl;
         return -1;
     }
 
     // 释放旧内存，更新指针
-    cudaFree(data);
+    cudaError_t free_err = cudaFree(data);
+    if (free_err != cudaSuccess) {
+        std::cerr << "警告：释放旧内存失败: " << cudaGetErrorString(free_err) << std::endl;
+        // 继续执行，因为新内存已分配成功
+    }
     data = new_data;
     total_memory_size = new_total_memory;
 
@@ -445,72 +487,6 @@ int CVStatePool::tensor_product(int state1_id, int state2_id) {
     std::cout << "创建张量积: 状态" << state1_id << " (dim=" << dim1 << ") ⊗ 状态"
               << state2_id << " (dim=" << dim2 << ") -> 状态" << new_state_id
               << " (dim=" << new_dim << ")" << std::endl;
-
-    return new_state_id;
-}
-
-/**
- * 复制状态 (Deep Copy)
- */
-int CVStatePool::duplicate_state(int state_id) {
-    if (!is_valid_state(state_id)) {
-        return -1;
-    }
-
-    int dim = get_state_dim(state_id);
-    size_t size_bytes = static_cast<size_t>(dim) * sizeof(cuDoubleComplex);
-
-    // 检查内存限制
-    if (max_memory_size > 0 && total_memory_size + size_bytes > max_memory_size) {
-        return -1;
-    }
-
-    int new_state_id = allocate_state();
-    if (new_state_id == -1) return -1;
-
-    // 如果新分配的内存块在当前data末尾之外，可能需要重新分配
-    // 但这里假设allocate_state只是复用ID，内存是根据offset管理的
-    // 等等，allocate_state不分配内存，只是返回ID。
-    // 我们需要管理offset。
-
-    // 简单的内存管理：追加到末尾
-    size_t new_offset = total_memory_size / sizeof(cuDoubleComplex);
-    size_t new_total_memory = total_memory_size + size_bytes;
-
-    cuDoubleComplex* new_data = nullptr;
-    cudaError_t err = cudaMalloc(&new_data, new_total_memory);
-    if (err != cudaSuccess) {
-        free_state(new_state_id);
-        return -1;
-    }
-
-    // 复制旧数据
-    err = cudaMemcpy(new_data, data, total_memory_size, cudaMemcpyDeviceToDevice);
-    if (err != cudaSuccess) {
-        cudaFree(new_data);
-        free_state(new_state_id);
-        return -1;
-    }
-
-    // 复制目标状态到新位置
-    size_t old_offset;
-    cudaMemcpy(&old_offset, state_offsets + state_id, sizeof(size_t), cudaMemcpyDeviceToHost);
-    
-    err = cudaMemcpy(new_data + new_offset, data + old_offset, size_bytes, cudaMemcpyDeviceToDevice);
-    if (err != cudaSuccess) {
-        cudaFree(new_data);
-        free_state(new_state_id);
-        return -1;
-    }
-
-    // 更新data指针
-    cudaFree(data);
-    data = new_data;
-    total_memory_size = new_total_memory;
-
-    // 更新新状态元数据
-    cudaMemcpy(state_dims + new_state_id, &dim, sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(state_offsets + new_state_id, &new_offset, sizeof(size_t), cudaMemcpyHostToDevice);
 
     return new_state_id;
 }

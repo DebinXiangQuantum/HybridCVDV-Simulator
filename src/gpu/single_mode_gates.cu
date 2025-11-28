@@ -53,10 +53,12 @@ __global__ void apply_displacement_kernel(
 /**
  * ELL格式稀疏矩阵向量乘法内核
  * 实现单模门的通用应用
+ * 使用动态状态偏移量支持不同维度的状态
  */
 __global__ void apply_ell_spmv_kernel(
     cuDoubleComplex* state_data,
-    int d_trunc,
+    const size_t* state_offsets,
+    const int* state_dims,
     const cuDoubleComplex* ell_val,
     const int* ell_col,
     int ell_dim,
@@ -71,8 +73,17 @@ __global__ void apply_ell_spmv_kernel(
     int row = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (row >= ell_dim) return;
+    
+    // 获取状态的偏移量和维度
+    size_t offset = state_offsets[state_idx];
+    int state_dim = state_dims[state_idx];
+    
+    // 验证维度匹配
+    if (state_dim < ell_dim) {
+        return;  // 状态维度不足，跳过
+    }
 
-    cuDoubleComplex* psi_in = &state_data[state_idx * d_trunc];
+    cuDoubleComplex* psi_in = &state_data[offset];
     cuDoubleComplex* psi_out = psi_in;  // 原地操作
 
     // 初始化结果
@@ -83,6 +94,9 @@ __global__ void apply_ell_spmv_kernel(
         int col_idx = ell_col[row * ell_bandwidth + k];
 
         if (col_idx == -1) break;  // 该行结束
+        
+        // 验证列索引在有效范围内
+        if (col_idx >= state_dim) continue;
 
         cuDoubleComplex val = ell_val[row * ell_bandwidth + k];
         cuDoubleComplex psi_val = psi_in[col_idx];
@@ -97,10 +111,12 @@ __global__ void apply_ell_spmv_kernel(
 /**
  * 优化版本：使用共享内存的ELL-SpMV
  * 对于小矩阵，可以将ELL算符加载到共享内存中
+ * 使用动态状态偏移量支持不同维度的状态
  */
 __global__ void apply_ell_spmv_shared_kernel(
     cuDoubleComplex* state_data,
-    int d_trunc,
+    const size_t* state_offsets,
+    const int* state_dims,
     const cuDoubleComplex* ell_val,
     const int* ell_col,
     int ell_dim,
@@ -115,7 +131,17 @@ __global__ void apply_ell_spmv_shared_kernel(
     if (batch_id >= batch_size) return;
 
     int state_idx = target_indices[batch_id];
-    cuDoubleComplex* psi_in = &state_data[state_idx * d_trunc];
+    
+    // 获取状态的偏移量和维度
+    size_t offset = state_offsets[state_idx];
+    int state_dim = state_dims[state_idx];
+    
+    // 验证维度匹配
+    if (state_dim < ell_dim) {
+        return;  // 状态维度不足，跳过
+    }
+    
+    cuDoubleComplex* psi_in = &state_data[offset];
     cuDoubleComplex* psi_out = psi_in;
 
     // 将ELL算符加载到共享内存
@@ -134,7 +160,10 @@ __global__ void apply_ell_spmv_shared_kernel(
     for (int k = 0; k < ell_bandwidth; ++k) {
         int col_idx = shared_ell_col[row * ell_bandwidth + k];
 
-        if (col_idx == -1) break;
+        if (col_idx == -1) break;  // 该行结束
+        
+        // 验证列索引在有效范围内
+        if (col_idx >= state_dim) continue;
 
         cuDoubleComplex val = shared_ell_val[row * ell_bandwidth + k];
         cuDoubleComplex psi_val = psi_in[col_idx];
@@ -234,6 +263,29 @@ __global__ void apply_displacement_direct_kernel(
  */
 void apply_single_mode_gate(CVStatePool* state_pool, FockELLOperator* ell_op,
                            const int* target_indices, int batch_size) {
+    // 验证输入参数
+    if (!state_pool || !ell_op || !target_indices || batch_size <= 0) {
+        throw std::runtime_error("apply_single_mode_gate: 无效的输入参数");
+    }
+    
+    // 检查ELL算符是否有效（允许空算符，但不允许空指针）
+    if (!ell_op->ell_val || !ell_op->ell_col || ell_op->dim <= 0 || ell_op->max_bandwidth <= 0) {
+        throw std::runtime_error("apply_single_mode_gate: ELL算符无效或未初始化");
+    }
+    
+    // 检查状态池数据指针
+    if (!state_pool->data || !state_pool->state_offsets || !state_pool->state_dims) {
+        throw std::runtime_error("apply_single_mode_gate: 状态池未正确初始化");
+    }
+    
+    // 验证每个目标状态的维度是否匹配ELL算符维度
+    for (int i = 0; i < batch_size; ++i) {
+        int state_id = target_indices[i];
+        if (state_id < 0 || state_id >= state_pool->capacity) {
+            throw std::runtime_error("apply_single_mode_gate: 无效的状态ID: " + std::to_string(state_id));
+        }
+    }
+    
     dim3 block_dim(256);
     dim3 grid_dim((ell_op->dim + block_dim.x - 1) / block_dim.x, batch_size);
 
@@ -241,15 +293,18 @@ void apply_single_mode_gate(CVStatePool* state_pool, FockELLOperator* ell_op,
     size_t shared_mem_size = ell_op->dim * ell_op->max_bandwidth *
                            (sizeof(cuDoubleComplex) + sizeof(int));
 
+    // 清除之前的CUDA错误
+    cudaGetLastError();
+    
     if (shared_mem_size < 48 * 1024) {  // 48KB shared memory limit
         apply_ell_spmv_shared_kernel<<<grid_dim, block_dim, shared_mem_size>>>(
-            state_pool->data, state_pool->total_dim,
+            state_pool->data, state_pool->state_offsets, state_pool->state_dims,
             ell_op->ell_val, ell_op->ell_col, ell_op->dim, ell_op->max_bandwidth,
             target_indices, batch_size
         );
     } else {
         apply_ell_spmv_kernel<<<grid_dim, block_dim>>>(
-            state_pool->data, state_pool->total_dim,
+            state_pool->data, state_pool->state_offsets, state_pool->state_dims,
             ell_op->ell_val, ell_op->ell_col, ell_op->dim, ell_op->max_bandwidth,
             target_indices, batch_size
         );
