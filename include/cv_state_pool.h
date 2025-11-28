@@ -121,6 +121,13 @@ struct CVStatePool {
     int get_max_total_dim() const { return max_total_dim; }
 
     /**
+     * 复制状态 (Deep Copy)
+     * @param state_id 源状态ID
+     * @return 新状态ID
+     */
+    int duplicate_state(int state_id);
+
+    /**
      * 创建两个状态的张量积
      * @param state1_id 第一个状态ID
      * @param state2_id 第二个状态ID

@@ -395,14 +395,6 @@ void QuantumCircuit::execute_gate(const GateParams& gate) {
             execute_hybrid_gate(gate);
             break;
 
-        case GateType::CONDITIONAL_BEAM_SPLITTER:
-            std::cout << "警告：条件分束器门实现与张量积基底不兼容，跳过执行" << std::endl;
-            break;
-
-        case GateType::CONDITIONAL_SQUEEZING:
-            std::cout << "警告：条件挤压门尚未完全实现，跳过执行" << std::endl;
-            break;
-
         default:
             throw std::runtime_error("不支持的门类型");
     }

@@ -4,6 +4,7 @@
 #include <complex>
 #include <memory>
 #include <string>
+#include <map>
 #include "cv_state_pool.h"
 #include "fock_ell_operator.h"
 #include "hdd_node.h"
@@ -140,6 +141,23 @@ public:
      */
     CVStatePool& get_state_pool() { return state_pool_; }
     const CVStatePool& get_state_pool() const { return state_pool_; }
+
+    // 动态张量积管理
+    struct StateConfig {
+        std::vector<int> state_ids; // 每个mode对应的物理状态ID
+    };
+    std::map<int, StateConfig> state_configs_;
+    int next_config_id_ = 0;
+
+    int register_state_config(const std::vector<int>& ids);
+    StateConfig get_state_config(int config_id);
+    
+    // 辅助：获取某mode所在的物理状态ID和该状态包含的modes
+    struct PhysicalStateInfo {
+        int physical_id;
+        std::vector<int> contained_modes; // 包含的mode索引列表 (0..M-1)
+    };
+    PhysicalStateInfo get_physical_state_info(int config_id, int qumode_index);
 
     /**
      * 获取HDD根节点

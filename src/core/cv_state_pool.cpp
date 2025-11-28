@@ -448,3 +448,69 @@ int CVStatePool::tensor_product(int state1_id, int state2_id) {
 
     return new_state_id;
 }
+
+/**
+ * 复制状态 (Deep Copy)
+ */
+int CVStatePool::duplicate_state(int state_id) {
+    if (!is_valid_state(state_id)) {
+        return -1;
+    }
+
+    int dim = get_state_dim(state_id);
+    size_t size_bytes = static_cast<size_t>(dim) * sizeof(cuDoubleComplex);
+
+    // 检查内存限制
+    if (max_memory_size > 0 && total_memory_size + size_bytes > max_memory_size) {
+        return -1;
+    }
+
+    int new_state_id = allocate_state();
+    if (new_state_id == -1) return -1;
+
+    // 如果新分配的内存块在当前data末尾之外，可能需要重新分配
+    // 但这里假设allocate_state只是复用ID，内存是根据offset管理的
+    // 等等，allocate_state不分配内存，只是返回ID。
+    // 我们需要管理offset。
+
+    // 简单的内存管理：追加到末尾
+    size_t new_offset = total_memory_size / sizeof(cuDoubleComplex);
+    size_t new_total_memory = total_memory_size + size_bytes;
+
+    cuDoubleComplex* new_data = nullptr;
+    cudaError_t err = cudaMalloc(&new_data, new_total_memory);
+    if (err != cudaSuccess) {
+        free_state(new_state_id);
+        return -1;
+    }
+
+    // 复制旧数据
+    err = cudaMemcpy(new_data, data, total_memory_size, cudaMemcpyDeviceToDevice);
+    if (err != cudaSuccess) {
+        cudaFree(new_data);
+        free_state(new_state_id);
+        return -1;
+    }
+
+    // 复制目标状态到新位置
+    size_t old_offset;
+    cudaMemcpy(&old_offset, state_offsets + state_id, sizeof(size_t), cudaMemcpyDeviceToHost);
+    
+    err = cudaMemcpy(new_data + new_offset, data + old_offset, size_bytes, cudaMemcpyDeviceToDevice);
+    if (err != cudaSuccess) {
+        cudaFree(new_data);
+        free_state(new_state_id);
+        return -1;
+    }
+
+    // 更新data指针
+    cudaFree(data);
+    data = new_data;
+    total_memory_size = new_total_memory;
+
+    // 更新新状态元数据
+    cudaMemcpy(state_dims + new_state_id, &dim, sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(state_offsets + new_state_id, &new_offset, sizeof(size_t), cudaMemcpyHostToDevice);
+
+    return new_state_id;
+}
