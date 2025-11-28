@@ -96,7 +96,7 @@ __global__ void apply_ell_spmv_kernel(
         if (col_idx == -1) break;  // 该行结束
         
         // 验证列索引在有效范围内
-        if (col_idx >= state_dim) continue;
+        if (col_idx < 0 || col_idx >= state_dim || col_idx >= ell_dim) continue;
 
         cuDoubleComplex val = ell_val[row * ell_bandwidth + k];
         cuDoubleComplex psi_val = psi_in[col_idx];
@@ -163,7 +163,7 @@ __global__ void apply_ell_spmv_shared_kernel(
         if (col_idx == -1) break;  // 该行结束
         
         // 验证列索引在有效范围内
-        if (col_idx >= state_dim) continue;
+        if (col_idx < 0 || col_idx >= state_dim || col_idx >= ell_dim) continue;
 
         cuDoubleComplex val = shared_ell_val[row * ell_bandwidth + k];
         cuDoubleComplex psi_val = psi_in[col_idx];
@@ -210,8 +210,19 @@ __global__ void apply_displacement_direct_kernel(
 
         // 计算因子 √(min!/max!)
         double sqrt_fact_ratio = 1.0;
-        for (int k = min_nm + 1; k <= max_nm; ++k) {
-            sqrt_fact_ratio /= sqrt((double)k);
+        if (max_nm > min_nm) {
+            for (int k = min_nm + 1; k <= max_nm; ++k) {
+                if (k > 0) {
+                    sqrt_fact_ratio /= sqrt((double)k);
+                }
+            }
+        } else if (max_nm < min_nm) {
+            // 这种情况不应该发生，但为了安全起见
+            for (int k = max_nm + 1; k <= min_nm; ++k) {
+                if (k > 0) {
+                    sqrt_fact_ratio *= sqrt((double)k);
+                }
+            }
         }
 
         // 计算幂次项
@@ -239,10 +250,18 @@ __global__ void apply_displacement_direct_kernel(
 
             // binom(max_nm, min_nm - j)
             double binom = 1.0;
-            for (int i = 0; i < min_nm - j; ++i) {
-                binom = binom * (max_nm - i) / (i + 1);
+            int binom_iters = min_nm - j;
+            if (binom_iters > 0 && binom_iters <= max_nm) {
+                for (int i = 0; i < binom_iters; ++i) {
+                    binom = binom * (max_nm - i) / (i + 1);
+                }
+            } else if (binom_iters < 0) {
+                binom = 0.0;  // 无效的二项式系数
             }
 
+            // 避免除零错误
+            if (fact_j == 0.0) fact_j = 1.0;
+            
             double term = binom * x_pow_j / fact_j;
             if (j % 2 == 1) term = -term;
 
@@ -322,6 +341,11 @@ void apply_single_mode_gate(CVStatePool* state_pool, FockELLOperator* ell_op,
  */
 void apply_displacement_gate(CVStatePool* state_pool, const int* target_indices,
                            int batch_size, cuDoubleComplex alpha) {
+    // 验证输入参数
+    if (!state_pool || !target_indices || batch_size <= 0) {
+        throw std::runtime_error("apply_displacement_gate: 无效的输入参数");
+    }
+    
     // 将目标索引从设备复制到主机
     std::vector<int> host_indices(batch_size);
     cudaError_t err = cudaMemcpy(host_indices.data(), target_indices,
@@ -330,25 +354,51 @@ void apply_displacement_gate(CVStatePool* state_pool, const int* target_indices,
         throw std::runtime_error("无法复制目标索引到主机: " + std::string(cudaGetErrorString(err)));
     }
 
+    // 清除之前的CUDA错误
+    cudaGetLastError();
+
     // 对于动态张量积管理，为每个状态单独处理
     for (int i = 0; i < batch_size; ++i) {
         int state_id = host_indices[i];
+        
+        // 验证状态ID
+        if (!state_pool->is_valid_state(state_id)) {
+            std::cerr << "警告：跳过无效的状态ID: " << state_id << std::endl;
+            continue;
+        }
+        
         int state_dim = state_pool->get_state_dim(state_id);
-
-        if (state_dim <= 0) continue;
+        if (state_dim <= 0 || state_dim > state_pool->get_max_total_dim()) {
+            std::cerr << "警告：状态维度无效: " << state_dim << std::endl;
+            continue;
+        }
 
         cuDoubleComplex* state_ptr = state_pool->get_state_ptr(state_id);
-        if (!state_ptr) continue;
+        if (!state_ptr) {
+            std::cerr << "警告：无法获取状态指针，状态ID: " << state_id << std::endl;
+            continue;
+        }
 
         dim3 block_dim(256);
         dim3 grid_dim((state_dim + block_dim.x - 1) / block_dim.x, 1);
+        
+        // 确保grid维度有效
+        if (grid_dim.x == 0) {
+            std::cerr << "警告：grid维度为0，跳过状态ID: " << state_id << std::endl;
+            continue;
+        }
 
         // 创建临时缓冲区用于输出
         cuDoubleComplex* temp_buffer = nullptr;
-        cudaError_t err = cudaMalloc(&temp_buffer, state_dim * sizeof(cuDoubleComplex));
+        err = cudaMalloc(&temp_buffer, state_dim * sizeof(cuDoubleComplex));
         if (err != cudaSuccess) {
-            throw std::runtime_error("无法分配临时缓冲区: " + std::string(cudaGetErrorString(err)));
+            std::cerr << "警告：无法分配临时缓冲区，状态ID: " << state_id 
+                      << ", 错误: " << cudaGetErrorString(err) << std::endl;
+            continue;
         }
+
+        // 清除之前的CUDA错误
+        cudaGetLastError();
 
         // 调用内核，传递输入和输出指针
         apply_displacement_direct_kernel<<<grid_dim, block_dim>>>(
@@ -362,17 +412,28 @@ void apply_displacement_gate(CVStatePool* state_pool, const int* target_indices,
                                     std::string(cudaGetErrorString(err)));
         }
 
-        // 复制结果回原位置
-        err = cudaMemcpy(state_ptr, temp_buffer, state_dim * sizeof(cuDoubleComplex), cudaMemcpyDeviceToDevice);
-        cudaFree(temp_buffer);
-
+        // 同步以确保内核完成
+        err = cudaDeviceSynchronize();
         if (err != cudaSuccess) {
-            throw std::runtime_error("无法复制结果: " + std::string(cudaGetErrorString(err)));
+            cudaFree(temp_buffer);
+            throw std::runtime_error("GPU同步失败: " + std::string(cudaGetErrorString(err)));
         }
 
-        // 同步GPU操作
-        cudaDeviceSynchronize();
+        // 复制结果回原位置
+        err = cudaMemcpy(state_ptr, temp_buffer, state_dim * sizeof(cuDoubleComplex), cudaMemcpyDeviceToDevice);
+        if (err != cudaSuccess) {
+            cudaFree(temp_buffer);
+            throw std::runtime_error("无法复制结果: " + std::string(cudaGetErrorString(err)));
+        }
+        
+        cudaFree(temp_buffer);
+        if (cudaGetLastError() != cudaSuccess) {
+            // 忽略释放错误，继续执行
+        }
     }
+    
+    // 最终同步
+    cudaDeviceSynchronize();
 }
 
 /**

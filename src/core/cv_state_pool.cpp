@@ -291,6 +291,10 @@ cuDoubleComplex* CVStatePool::get_state_ptr(int state_id) {
     if (!is_valid_state(state_id)) {
         return nullptr;
     }
+    
+    if (!data || !state_offsets || !state_dims) {
+        return nullptr;
+    }
 
     size_t offset;
     cudaError_t err = cudaMemcpy(&offset, state_offsets + state_id,
@@ -298,6 +302,22 @@ cuDoubleComplex* CVStatePool::get_state_ptr(int state_id) {
     if (err != cudaSuccess) {
         return nullptr;
     }
+    
+    // 验证偏移量在有效范围内
+    int state_dim = get_state_dim(state_id);
+    if (state_dim <= 0) {
+        return nullptr;
+    }
+    
+    // 计算最大有效偏移量（以元素为单位）
+    size_t max_valid_offset = total_memory_size / sizeof(cuDoubleComplex);
+    if (offset >= max_valid_offset || offset + state_dim > max_valid_offset) {
+        std::cerr << "警告：状态偏移量超出范围，state_id=" << state_id 
+                  << ", offset=" << offset << ", dim=" << state_dim 
+                  << ", max_offset=" << max_valid_offset << std::endl;
+        return nullptr;
+    }
+    
     return data + offset;
 }
 
@@ -308,6 +328,10 @@ const cuDoubleComplex* CVStatePool::get_state_ptr(int state_id) const {
     if (!is_valid_state(state_id)) {
         return nullptr;
     }
+    
+    if (!data || !state_offsets || !state_dims) {
+        return nullptr;
+    }
 
     size_t offset;
     cudaError_t err = cudaMemcpy(&offset, state_offsets + state_id,
@@ -315,6 +339,22 @@ const cuDoubleComplex* CVStatePool::get_state_ptr(int state_id) const {
     if (err != cudaSuccess) {
         return nullptr;
     }
+    
+    // 验证偏移量在有效范围内
+    int state_dim = get_state_dim(state_id);
+    if (state_dim <= 0) {
+        return nullptr;
+    }
+    
+    // 计算最大有效偏移量（以元素为单位）
+    size_t max_valid_offset = total_memory_size / sizeof(cuDoubleComplex);
+    if (offset >= max_valid_offset || offset + state_dim > max_valid_offset) {
+        std::cerr << "警告：状态偏移量超出范围，state_id=" << state_id 
+                  << ", offset=" << offset << ", dim=" << state_dim 
+                  << ", max_offset=" << max_valid_offset << std::endl;
+        return nullptr;
+    }
+    
     return data + offset;
 }
 
