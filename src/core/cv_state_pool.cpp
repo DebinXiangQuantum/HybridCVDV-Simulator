@@ -13,9 +13,16 @@ CVStatePool::CVStatePool(int trunc_dim, int max_states, int num_qumodes, size_t 
       max_total_dim(1), total_dim(1), total_memory_size(0), max_memory_size(max_memory_mb * 1024ULL * 1024ULL) {
 
     // 检查CUDA设备是否可用
-    cudaError_t device_check = cudaGetDeviceCount(nullptr);
-    if (device_check != cudaSuccess) {
+    int device_count = 0;
+    cudaError_t device_check = cudaGetDeviceCount(&device_count);
+    if (device_check != cudaSuccess || device_count == 0) {
         throw std::runtime_error("CUDA设备不可用: " + std::string(cudaGetErrorString(device_check)));
+    }
+    
+    // 设置CUDA设备（使用默认设备0）
+    cudaError_t set_device_err = cudaSetDevice(0);
+    if (set_device_err != cudaSuccess) {
+        throw std::runtime_error("无法设置CUDA设备: " + std::string(cudaGetErrorString(set_device_err)));
     }
     
     // 清除之前的CUDA错误状态

@@ -490,12 +490,30 @@ void QuantumCircuit::execute_level2_gate(const GateParams& gate) {
     } else {
         // 使用ELL格式的通用实现
         FockELLOperator* ell_op = prepare_ell_operator(gate);
-        if (ell_op) {
+        if (ell_op && ell_op->ell_val && ell_op->ell_col && ell_op->dim > 0) {
+            // 确保ELL算符已上传到GPU
+            ell_op->upload_to_gpu();
+            
+            // 清除之前的CUDA错误
+            cudaGetLastError();
+            
             apply_single_mode_gate(&state_pool_, ell_op, d_target_ids, target_states.size());
+            
+            // 检查GPU内核执行错误
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                delete ell_op;
+                CHECK_CUDA(cudaFree(d_target_ids));
+                throw std::runtime_error("GPU单模门执行失败: " + std::string(cudaGetErrorString(err)));
+            }
+            
             // 在删除ELL操作符之前，确保GPU操作完成
-            CHECK_CUDA(cudaGetLastError());
             CHECK_CUDA(cudaDeviceSynchronize());
             delete ell_op;
+        } else {
+            // ELL算符为空或无效
+            std::cerr << "警告：单模门ELL算符无效，跳过执行" << std::endl;
+            if (ell_op) delete ell_op;
         }
     }
 
@@ -894,15 +912,34 @@ void QuantumCircuit::apply_squeezing_to_state(int state_id, std::complex<double>
     // 注意：目前single_mode_gates.cu中的挤压门实现可能不完整
     // 这里调用通用单模门，需要ELL算符
     FockELLOperator* ell_op = prepare_squeezing_ell_operator(xi);
-    if (ell_op) {
+    if (ell_op && ell_op->ell_val && ell_op->ell_col && ell_op->dim > 0) {
+        // 确保ELL算符已上传到GPU
+        ell_op->upload_to_gpu();
+        
         int* d_state_id = nullptr;
         CHECK_CUDA(cudaMalloc(&d_state_id, sizeof(int)));
         CHECK_CUDA(cudaMemcpy(d_state_id, &state_id, sizeof(int), cudaMemcpyHostToDevice));
 
+        // 清除之前的CUDA错误
+        cudaGetLastError();
+        
         apply_single_mode_gate(&state_pool_, ell_op, d_state_id, 1);
-
+        
+        // 检查GPU内核执行错误
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            cudaFree(d_state_id);
+            delete ell_op;
+            throw std::runtime_error("GPU挤压门执行失败: " + std::string(cudaGetErrorString(err)));
+        }
+        
+        CHECK_CUDA(cudaDeviceSynchronize());
         CHECK_CUDA(cudaFree(d_state_id));
         delete ell_op;
+    } else {
+        // ELL算符为空或无效，跳过操作或使用占位符
+        std::cerr << "警告：挤压门ELL算符无效，跳过执行" << std::endl;
+        if (ell_op) delete ell_op;
     }
 }
 
