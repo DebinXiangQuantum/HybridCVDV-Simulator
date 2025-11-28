@@ -30,8 +30,8 @@ struct CVStatePool {
     int total_dim = 0;      // 别名，用于向后兼容
 
     // 动态张量积管理
-    int* state_dims = nullptr;    // 每个状态的当前维度 [capacity]
-    int* state_offsets = nullptr; // 每个状态在data中的偏移量 [capacity]
+    int* state_dims = nullptr;       // 每个状态的当前维度 [capacity]
+    size_t* state_offsets = nullptr; // 每个状态在data中的偏移量 [capacity] (元素偏移量)
 
     // 内存管理
     size_t total_memory_size = 0;  // 已分配的总内存大小
