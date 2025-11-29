@@ -10,8 +10,8 @@ class CVStatePoolTest : public ::testing::Test {
 protected:
     void SetUp() override {
         // 测试参数
-        d_trunc = 16;
-        max_states = 8;
+        d_trunc = 32;
+        max_states = 256;
         pool = new CVStatePool(d_trunc, max_states);
     }
 

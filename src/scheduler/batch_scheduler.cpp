@@ -407,11 +407,29 @@ void RuntimeScheduler::schedule_gate(const GateParams& gate) {
 
         if (auto_flush_enabled_ && instruction_fusion_.buffer_size() >= 5) {
             auto fused_gates = instruction_fusion_.fuse_instructions();
-            schedule_gates(fused_gates);
+            
+            // Submit fused gates to batch scheduler
+            for (const auto& g : fused_gates) {
+                std::vector<int> target_states;
+                const CVStatePool& pool = circuit_->get_state_pool();
+                for (int i = 0; i < pool.active_count; ++i) {
+                    target_states.push_back(i);
+                }
+                BatchTask task(g.type, target_states, g.params);
+                batch_scheduler_.add_task(task);
+            }
+            
             instruction_fusion_.clear();
         }
     } else {
-        schedule_gate(gate);
+        // Submit directly to batch scheduler
+        std::vector<int> target_states;
+        const CVStatePool& pool = circuit_->get_state_pool();
+        for (int i = 0; i < pool.active_count; ++i) {
+            target_states.push_back(i);
+        }
+        BatchTask task(gate.type, target_states, gate.params);
+        batch_scheduler_.add_task(task);
     }
 }
 
@@ -430,7 +448,17 @@ void RuntimeScheduler::schedule_gates(const std::vector<GateParams>& gates) {
 void RuntimeScheduler::execute_all() {
     if (fusion_enabled_) {
         auto fused_gates = instruction_fusion_.fuse_instructions();
-        schedule_gates(fused_gates);
+        
+        for (const auto& g : fused_gates) {
+            std::vector<int> target_states;
+            const CVStatePool& pool = circuit_->get_state_pool();
+            for (int i = 0; i < pool.active_count; ++i) {
+                target_states.push_back(i);
+            }
+            BatchTask task(g.type, target_states, g.params);
+            batch_scheduler_.add_task(task);
+        }
+        
         instruction_fusion_.clear();
     }
 

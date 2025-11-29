@@ -6,8 +6,8 @@
 #include <cuda_runtime.h>
 
 // 声明外部函数
-extern void apply_creation_operator(CVStatePool& pool, const int* targets, int batch_size);
-extern void apply_annihilation_operator(CVStatePool& pool, const int* targets, int batch_size);
+extern void apply_creation_operator(CVStatePool* pool, const int* targets, int batch_size);
+extern void apply_annihilation_operator(CVStatePool* pool, const int* targets, int batch_size);
 
 /**
  * 梯算符门操作单元测试
@@ -66,6 +66,38 @@ protected:
         EXPECT_LT(error_metrics.relative_error, max_allowed_error);
         EXPECT_LT(error_metrics.fidelity_deviation, max_allowed_error);
     }
+
+    /**
+     * 辅助函数：调用GPU门函数，处理target_indices的GPU内存分配
+     */
+    template <typename Func, typename... Args>
+    void call_gpu_gate(Func func, const std::vector<int>& targets, Args... args) {
+        int* d_targets;
+        cudaError_t err = cudaMalloc(&d_targets, targets.size() * sizeof(int));
+        if (err != cudaSuccess) {
+            FAIL() << "Failed to allocate device memory for targets: " << cudaGetErrorString(err);
+            return;
+        }
+        
+        err = cudaMemcpy(d_targets, targets.data(), targets.size() * sizeof(int), cudaMemcpyHostToDevice);
+        if (err != cudaSuccess) {
+            cudaFree(d_targets);
+            FAIL() << "Failed to copy targets to device: " << cudaGetErrorString(err);
+            return;
+        }
+        
+        func(pool, d_targets, targets.size(), args...);
+        
+        // 同步并检查错误
+        cudaDeviceSynchronize();
+        err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            cudaFree(d_targets);
+            FAIL() << "GPU kernel execution failed: " << cudaGetErrorString(err);
+        }
+        
+        cudaFree(d_targets);
+    }
 };
 
 TEST_F(LadderGatesTest, CreationOperatorVacuum) {
@@ -78,8 +110,7 @@ TEST_F(LadderGatesTest, CreationOperatorVacuum) {
     auto ref_result = Reference::LadderGates::apply_creation_operator(ref_input);
 
     // GPU实现
-    int target_ids[] = {state_id};
-    apply_creation_operator(*pool, target_ids, 1);
+    call_gpu_gate(apply_creation_operator, {state_id});
 
     std::vector<cuDoubleComplex> gpu_result;
     pool->download_state(state_id, gpu_result);
@@ -99,8 +130,7 @@ TEST_F(LadderGatesTest, CreationOperatorFockState) {
     auto ref_result = Reference::LadderGates::apply_creation_operator(ref_input);
 
     // GPU实现
-    int target_ids[] = {state_id};
-    apply_creation_operator(*pool, target_ids, 1);
+    call_gpu_gate(apply_creation_operator, {state_id});
 
     std::vector<cuDoubleComplex> gpu_result;
     pool->download_state(state_id, gpu_result);
@@ -119,14 +149,23 @@ TEST_F(LadderGatesTest, AnnihilationOperatorVacuum) {
     auto ref_result = Reference::LadderGates::apply_annihilation_operator(ref_input);
 
     // GPU实现
-    int target_ids[] = {state_id};
-    apply_annihilation_operator(*pool, target_ids, 1);
+    call_gpu_gate(apply_annihilation_operator, {state_id});
 
     std::vector<cuDoubleComplex> gpu_result;
     pool->download_state(state_id, gpu_result);
 
     // 对比误差
-    compare_with_reference(gpu_result, ref_result);
+    // 对于真空态湮灭，结果应为零向量，保真度未定义或为0，因此跳过保真度检查
+    // 仅检查L2误差（确保结果为零向量）
+    auto ref_result_vec = to_reference_vector(gpu_result);
+    auto error_metrics = Reference::compute_error_metrics(ref_result, ref_result_vec);
+    
+    std::cout << "误差指标:" << std::endl;
+    std::cout << "  L2误差: " << error_metrics.l2_error << std::endl;
+    std::cout << "  最大误差: " << error_metrics.max_error << std::endl;
+    
+    EXPECT_LT(error_metrics.l2_error, 1e-10);
+    EXPECT_LT(error_metrics.max_error, 1e-10);
 }
 
 TEST_F(LadderGatesTest, AnnihilationOperatorFockState) {
@@ -140,8 +179,7 @@ TEST_F(LadderGatesTest, AnnihilationOperatorFockState) {
     auto ref_result = Reference::LadderGates::apply_annihilation_operator(ref_input);
 
     // GPU实现
-    int target_ids[] = {state_id};
-    apply_annihilation_operator(*pool, target_ids, 1);
+    call_gpu_gate(apply_annihilation_operator, {state_id});
 
     std::vector<cuDoubleComplex> gpu_result;
     pool->download_state(state_id, gpu_result);
@@ -159,13 +197,11 @@ TEST_F(LadderGatesTest, CreationAnnihilationCommutation) {
     pool->upload_state(state_id, fock_state);
 
     // 先应用a，再应用a†
-    int target_ids[] = {state_id};
-
     // a|2⟩ = √2|1⟩
-    apply_annihilation_operator(*pool, target_ids, 1);
+    call_gpu_gate(apply_annihilation_operator, {state_id});
 
     // a†(a|2⟩) = a†(√2|1⟩) = √2 * √2 |2⟩ = 2|2⟩
-    apply_creation_operator(*pool, target_ids, 1);
+    call_gpu_gate(apply_creation_operator, {state_id});
 
     std::vector<cuDoubleComplex> gpu_result;
     pool->download_state(state_id, gpu_result);
@@ -190,8 +226,7 @@ TEST_F(LadderGatesTest, BatchProcessing) {
     state2[1] = make_cuDoubleComplex(1.0, 0.0);  // |1⟩状态
     pool->upload_state(state_id2, state2);
 
-    int target_ids[] = {state_id, state_id2};
-    apply_creation_operator(*pool, target_ids, 2);
+    call_gpu_gate(apply_creation_operator, {state_id, state_id2});
 
     // 验证第一个状态: a†|0⟩ = |1⟩
     std::vector<cuDoubleComplex> result1;

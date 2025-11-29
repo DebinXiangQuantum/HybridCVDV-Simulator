@@ -7,9 +7,9 @@ set(ENV{LD_LIBRARY_PATH} "$ENV{CUDA_HOME}/lib64:$ENV{LD_LIBRARY_PATH}")
 # 设置CUDA架构 (必须在project()之前)
 set(CMAKE_CUDA_ARCHITECTURES 60 70 80)
 
-# 指定CUDA主机编译器为GCC 9 (兼容CUDA 12.0)
-set(CMAKE_CUDA_HOST_COMPILER "/usr/bin/gcc-9")
-set(CUDA_HOST_COMPILER "/usr/bin/gcc-9")
+# 指定CUDA主机编译器
+set(CMAKE_CUDA_HOST_COMPILER "g++")
+set(CUDA_HOST_COMPILER "g++")
 
 project(HybridCVDV-Simulator VERSION 1.5 LANGUAGES CXX)
 
@@ -50,11 +50,32 @@ else()
     target_compile_definitions(cuda_mock INTERFACE CUDA_FOUND=0)
 endif()
 
-# 查找Google Test (如果需要的话)
+# 查找Google Test (如果需要的话)，如果未找到则自动下载
 find_package(GTest QUIET)
+if(NOT GTest_FOUND)
+    message(STATUS "GTest not found in system, downloading via FetchContent...")
+    include(FetchContent)
+    FetchContent_Declare(
+        googletest
+        GIT_REPOSITORY https://gitee.com/mirrors/googletest.git
+        GIT_TAG        v1.14.0
+    )
+    # 强制使用共享CRT，防止Windows下的链接错误（对Linux无害）
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    
+    FetchContent_MakeAvailable(googletest)
+    
+    # FetchContent 提供的目标通常是 gtest_main，这里创建别名以兼容 GTest::gtest_main
+    if(NOT TARGET GTest::gtest_main)
+        add_library(GTest::gtest_main ALIAS gtest_main)
+    endif()
+    
+    set(GTest_FOUND TRUE)
+endif()
 
 # 包含目录
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src/reference)
 
 # 源文件列表
 set(CORE_SOURCES
@@ -140,16 +161,16 @@ if(CUDA_FOUND)
 endif()
 
 # 验证程序
-add_executable(${PROJECT_NAME}_validation test_validation.cpp)
+add_executable(${PROJECT_NAME}_validation tests/test_validation.cpp)
 target_link_libraries(${PROJECT_NAME}_validation ${PROJECT_NAME})
 
 # GPU验证程序
 if(CUDA_FOUND)
-    add_executable(${PROJECT_NAME}_gpu_validation test_gpu_validation.cpp)
+    add_executable(${PROJECT_NAME}_gpu_validation tests/test_gpu_validation.cpp)
     target_link_libraries(${PROJECT_NAME}_gpu_validation ${PROJECT_NAME} ${CUDA_LIBRARIES})
 else()
     # CPU-only版本的GPU验证程序
-    add_executable(${PROJECT_NAME}_gpu_validation test_gpu_validation.cpp)
+    add_executable(${PROJECT_NAME}_gpu_validation tests/test_gpu_validation.cpp)
     target_link_libraries(${PROJECT_NAME}_gpu_validation ${PROJECT_NAME})
     target_compile_definitions(${PROJECT_NAME}_gpu_validation PRIVATE CPU_ONLY_GPU_TEST)
 endif()
@@ -170,9 +191,7 @@ if(GTest_FOUND)
         tests/test_fock_ell_operator.cpp
         tests/test_diagonal_gates.cpp
         tests/test_ladder_gates.cpp
-        tests/test_single_mode_gates.cpp
-        tests/test_two_mode_gates.cpp
-        tests/test_hybrid_gates.cpp
+        tests/test_gates_implementation.cpp
         tests/test_system.cpp
     )
 

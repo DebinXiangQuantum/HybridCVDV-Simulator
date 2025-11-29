@@ -20,17 +20,19 @@ int main(int argc, char* argv[]) {
 
     try {
         // 创建量子电路: 2 qubits, 2 qumodes, 截断维度16, 最大32个状态
-        QuantumCircuit circuit(2, 2, 16, 32);
+        QuantumCircuit circuit(4, 6, 16, 64);
 
-        std::cout << "创建量子电路: 2 qubits, 2 qumodes, 截断维度=16" << std::endl;
-        std::cout << "初始化状态池: 容量=32" << std::endl << std::endl;
+        std::cout << "创建量子电路: 4 qubits, 6 qumodes, 截断维度=16" << std::endl;
+        std::cout << "初始化状态池: 容量=64" << std::endl << std::endl;
 
         // 示例1: 简单的连续变量操作
         std::cout << "示例1: 连续变量位移和挤压" << std::endl;
         circuit.add_gates({
             Gates::Displacement(0, std::complex<double>(0.5, 0.2)),  // 在qumode 0上应用位移
-            Gates::Squeezing(1, std::complex<double>(0.3, 0.1))      // 在qumode 1上应用挤压
-            // Gates::BeamSplitter(0, 1, M_PI / 3.0)                   // 暂时禁用光束分裂器
+            Gates::Squeezing(1, std::complex<double>(0.3, 0.1)),      // 在qumode 1上应用挤压
+            Gates::BeamSplitter(1, 2, M_PI / 3.0),                   // 光束分裂器
+            Gates::ControlledDisplacement(2, 1, std::complex<double>(0.3, 0.0)),// 受控位移
+            Gates::ControlledSqueezing(1, 1, std::complex<double>(0.3, 0.0))  // 受控挤压
         });
 
         circuit.build();
@@ -49,7 +51,7 @@ int main(int argc, char* argv[]) {
         // 示例2: 混合量子操作
         std::cout << "示例2: Qubit控制的连续变量操作" << std::endl;
         {
-            QuantumCircuit circuit2(2, 2, 16, 32);
+            QuantumCircuit circuit2(4, 2, 16, 32);
             circuit2.add_gates({
                 Gates::PhaseRotation(0, M_PI / 4.0),                        // Qubit旋转
                 Gates::ControlledDisplacement(0, 0, std::complex<double>(0.4, 0.0)), // 受控位移

@@ -1,6 +1,7 @@
 #include <cuda_runtime.h>
 #include <cuComplex.h>
 #include <cmath>
+#include <stdexcept>
 #include "cv_state_pool.h"
 
 /**
@@ -88,7 +89,7 @@ __global__ void apply_two_mode_gate_kernel(
 
     // 计算当前block处理的子空间
     int subspace_k = blockIdx.x;  // 总光子数k
-    int block_size = blockDim.x * blockDim.y;
+    // int block_size = blockDim.x * blockDim.y;
 
     if (subspace_k >= max_photon_number) return;
 
