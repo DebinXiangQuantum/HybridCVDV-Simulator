@@ -5,7 +5,7 @@
 #include <cuda_runtime.h>
 #include <chrono>
 #include "cv_state_pool.h"
-#include "src/reference/reference_gates.h"
+#include "reference_gates.h"
 
 // 声明GPU函数
 extern void apply_phase_rotation(CVStatePool* pool, const int* targets, int batch_size, double theta);
@@ -18,7 +18,8 @@ extern void apply_displacement_gate(CVStatePool* pool, const int* targets, int b
 int run_actual_gpu_tests();
 
 // 辅助函数：调用GPU函数（处理target_indices的GPU内存分配）
-void call_gpu_function(auto gpu_func, CVStatePool* state_pool, int state_id, auto... args) {
+template<typename Func, typename... Args>
+void call_gpu_function(Func gpu_func, CVStatePool* state_pool, int state_id, Args... args) {
     int* d_target_indices = nullptr;
     cudaMalloc(&d_target_indices, sizeof(int));
     cudaMemcpy(d_target_indices, &state_id, sizeof(int), cudaMemcpyHostToDevice);
@@ -581,6 +582,10 @@ int run_actual_gpu_tests() {
         // 下载GPU结果
         std::vector<cuDoubleComplex> gpu_result(dim);
         state_pool.download_state(gpu_state_id, gpu_result);
+
+        // 调试输出
+        std::cout << "   CPU结果[0]: " << cpu_result[0].real() << " + " << cpu_result[0].imag() << "i" << std::endl;
+        std::cout << "   GPU结果[0]: " << gpu_result[0].x << " + " << gpu_result[0].y << "i" << std::endl;
 
         // 计算误差
         double error = 0.0;

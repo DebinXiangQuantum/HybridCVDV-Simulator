@@ -6,8 +6,8 @@
 #include <cuda_runtime.h>
 
 // 声明外部函数
-extern void apply_creation_operator(CVStatePool& pool, const int* targets, int batch_size);
-extern void apply_annihilation_operator(CVStatePool& pool, const int* targets, int batch_size);
+extern void apply_creation_operator(CVStatePool* pool, const int* targets, int batch_size);
+extern void apply_annihilation_operator(CVStatePool* pool, const int* targets, int batch_size);
 
 /**
  * 梯算符门操作单元测试
@@ -17,7 +17,7 @@ protected:
     void SetUp() override {
         d_trunc = 8;
         max_states = 4;
-        pool = new CVStatePool(d_trunc, max_states);
+        pool = new CVStatePool(d_trunc, max_states, 1);  // 无内存限制
 
         // 初始化测试状态
         state_id = pool->allocate_state();
@@ -79,7 +79,7 @@ TEST_F(LadderGatesTest, CreationOperatorVacuum) {
 
     // GPU实现
     int target_ids[] = {state_id};
-    apply_creation_operator(*pool, target_ids, 1);
+    apply_creation_operator(pool, target_ids, 1);
 
     std::vector<cuDoubleComplex> gpu_result;
     pool->download_state(state_id, gpu_result);
@@ -100,7 +100,7 @@ TEST_F(LadderGatesTest, CreationOperatorFockState) {
 
     // GPU实现
     int target_ids[] = {state_id};
-    apply_creation_operator(*pool, target_ids, 1);
+    apply_creation_operator(pool, target_ids, 1);
 
     std::vector<cuDoubleComplex> gpu_result;
     pool->download_state(state_id, gpu_result);
@@ -120,7 +120,7 @@ TEST_F(LadderGatesTest, AnnihilationOperatorVacuum) {
 
     // GPU实现
     int target_ids[] = {state_id};
-    apply_annihilation_operator(*pool, target_ids, 1);
+    apply_annihilation_operator(pool, target_ids, 1);
 
     std::vector<cuDoubleComplex> gpu_result;
     pool->download_state(state_id, gpu_result);
@@ -141,7 +141,7 @@ TEST_F(LadderGatesTest, AnnihilationOperatorFockState) {
 
     // GPU实现
     int target_ids[] = {state_id};
-    apply_annihilation_operator(*pool, target_ids, 1);
+    apply_annihilation_operator(pool, target_ids, 1);
 
     std::vector<cuDoubleComplex> gpu_result;
     pool->download_state(state_id, gpu_result);
@@ -162,10 +162,10 @@ TEST_F(LadderGatesTest, CreationAnnihilationCommutation) {
     int target_ids[] = {state_id};
 
     // a|2⟩ = √2|1⟩
-    apply_annihilation_operator(*pool, target_ids, 1);
+    apply_annihilation_operator(pool, target_ids, 1);
 
     // a†(a|2⟩) = a†(√2|1⟩) = √2 * √2 |2⟩ = 2|2⟩
-    apply_creation_operator(*pool, target_ids, 1);
+    apply_creation_operator(pool, target_ids, 1);
 
     std::vector<cuDoubleComplex> gpu_result;
     pool->download_state(state_id, gpu_result);
@@ -191,7 +191,7 @@ TEST_F(LadderGatesTest, BatchProcessing) {
     pool->upload_state(state_id2, state2);
 
     int target_ids[] = {state_id, state_id2};
-    apply_creation_operator(*pool, target_ids, 2);
+    apply_creation_operator(pool, target_ids, 2);
 
     // 验证第一个状态: a†|0⟩ = |1⟩
     std::vector<cuDoubleComplex> result1;

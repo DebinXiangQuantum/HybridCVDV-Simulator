@@ -11,8 +11,8 @@ protected:
     void SetUp() override {
         // 测试参数
         d_trunc = 16;
-        max_states = 8;
-        pool = new CVStatePool(d_trunc, max_states);
+        max_states = 64;
+        pool = new CVStatePool(d_trunc, max_states, 1);  // 无内存限制
     }
 
     void TearDown() override {

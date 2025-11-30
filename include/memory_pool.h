@@ -1,6 +1,9 @@
 #pragma once
 
+#ifdef __CUDACC__
 #include <cuda_runtime.h>
+#endif
+
 #include <vector>
 #include <queue>
 #include <unordered_map>
