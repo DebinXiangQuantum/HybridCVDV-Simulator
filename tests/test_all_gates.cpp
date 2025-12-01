@@ -259,8 +259,13 @@ TEST_F(GPUGateTest, TestGPUPhaseRotation) {
     auto ref_result = Reference::DiagonalGates::apply_phase_rotation(initial_state, theta);
 
     // 应用GPU门
-    int target_ids[1] = {state_id};
-    apply_phase_rotation(pool, target_ids, 1, theta);
+    int* d_target_ids = nullptr;
+    cudaMalloc(&d_target_ids, sizeof(int));
+    cudaMemcpy(d_target_ids, &state_id, sizeof(int), cudaMemcpyHostToDevice);
+    
+    apply_phase_rotation(pool, d_target_ids, 1, theta);
+    
+    cudaFree(d_target_ids);
 
     // 下载GPU结果
     std::vector<cuDoubleComplex> gpu_result(d_trunc);
@@ -299,8 +304,13 @@ TEST_F(GPUGateTest, TestGPUDisplacement) {
 
     // 应用GPU门
     cuDoubleComplex alpha_cu = make_cuDoubleComplex(alpha.real(), alpha.imag());
-    int target_ids[1] = {state_id};
-    apply_displacement_gate(pool, target_ids, 1, alpha_cu);
+    int* d_target_ids = nullptr;
+    cudaMalloc(&d_target_ids, sizeof(int));
+    cudaMemcpy(d_target_ids, &state_id, sizeof(int), cudaMemcpyHostToDevice);
+
+    apply_displacement_gate(pool, d_target_ids, 1, alpha_cu);
+    
+    cudaFree(d_target_ids);
 
     // 下载GPU结果
     std::vector<cuDoubleComplex> gpu_result(d_trunc);
@@ -319,8 +329,13 @@ TEST_F(GPUGateTest, TestGPUCreationOperator) {
     auto ref_result = Reference::LadderGates::apply_creation_operator(initial_state);
 
     // 应用GPU门
-    int target_ids[1] = {state_id};
-    apply_creation_operator(pool, target_ids, 1);
+    int* d_target_ids = nullptr;
+    cudaMalloc(&d_target_ids, sizeof(int));
+    cudaMemcpy(d_target_ids, &state_id, sizeof(int), cudaMemcpyHostToDevice);
+
+    apply_creation_operator(pool, d_target_ids, 1);
+    
+    cudaFree(d_target_ids);
 
     // 下载GPU结果
     std::vector<cuDoubleComplex> gpu_result(d_trunc);
@@ -345,8 +360,13 @@ TEST_F(GPUGateTest, TestGPUAnnihilationOperator) {
     auto ref_result = Reference::LadderGates::apply_annihilation_operator(initial_state);
 
     // 应用GPU门
-    int target_ids[1] = {new_state};
-    apply_annihilation_operator(pool, target_ids, 1);
+    int* d_target_ids = nullptr;
+    cudaMalloc(&d_target_ids, sizeof(int));
+    cudaMemcpy(d_target_ids, &new_state, sizeof(int), cudaMemcpyHostToDevice);
+
+    apply_annihilation_operator(pool, d_target_ids, 1);
+    
+    cudaFree(d_target_ids);
 
     // 下载GPU结果
     std::vector<cuDoubleComplex> gpu_result(d_trunc);
@@ -463,7 +483,7 @@ TEST_F(GateTest, TestQuantumCircuitWithHybridGates) {
 TEST_F(GateTest, TestAllGatesConstruction) {
     // 测试所有门的构建和基本执行
     try {
-        QuantumCircuit circuit(3, 3, 4, 1024);  // 3 qubits, 3 qumodes
+        QuantumCircuit circuit(3, 3, 8, 1024);  // 3 qubits, 3 qumodes
 
         // 添加所有类型的门
         // Qubit门

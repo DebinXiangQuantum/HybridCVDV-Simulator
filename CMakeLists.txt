@@ -26,6 +26,10 @@ if(CUDA_FOUND)
     set(CMAKE_CUDA_STANDARD 17)
     set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -G")
+    endif()
+
 else()
     message(WARNING "CUDA not found - building CPU-only version")
 endif()

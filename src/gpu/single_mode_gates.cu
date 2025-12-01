@@ -278,6 +278,8 @@ void apply_single_mode_gate(CVStatePool* state_pool, FockELLOperator* ell_op,
         throw std::runtime_error("apply_single_mode_gate: 状态池未正确初始化");
     }
     
+    /* 
+    // 验证已在调用前完成，且target_indices是设备指针，不能在主机端直接访问
     // 验证每个目标状态的维度是否匹配ELL算符维度
     for (int i = 0; i < batch_size; ++i) {
         int state_id = target_indices[i];
@@ -285,6 +287,7 @@ void apply_single_mode_gate(CVStatePool* state_pool, FockELLOperator* ell_op,
             throw std::runtime_error("apply_single_mode_gate: 无效的状态ID: " + std::to_string(state_id));
         }
     }
+    */
     
     dim3 block_dim(256);
     dim3 grid_dim((ell_op->dim + block_dim.x - 1) / block_dim.x, batch_size);
