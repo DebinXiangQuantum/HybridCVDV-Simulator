@@ -10,7 +10,7 @@ class SystemTest : public ::testing::Test {
 protected:
     void SetUp() override {
         circuit = new QuantumCircuit(2, 2, 8, 16);  // 2 qubits, 2 qumodes, 截断8, 最大16状态
-        circuit->build();
+        // 不在这里调用build()，让每个测试自己决定何时构建
     }
 
     void TearDown() override {
@@ -21,6 +21,7 @@ protected:
 };
 
 TEST_F(SystemTest, CircuitInitialization) {
+    circuit->build();  // 先构建电路
     auto stats = circuit->get_stats();
     EXPECT_EQ(stats.num_qubits, 2);
     EXPECT_EQ(stats.num_qumodes, 2);
@@ -34,6 +35,7 @@ TEST_F(SystemTest, AddGates) {
     circuit->add_gate(Gates::Displacement(0, std::complex<double>(0.1, 0.0)));
     circuit->add_gate(Gates::BeamSplitter(0, 1, M_PI / 2.0));
 
+    circuit->build();  // 构建电路
     auto stats = circuit->get_stats();
     EXPECT_EQ(stats.num_gates, 3);
 }
@@ -43,6 +45,7 @@ TEST_F(SystemTest, ExecuteCircuit) {
     circuit->add_gate(Gates::PhaseRotation(0, M_PI));
     circuit->add_gate(Gates::Displacement(0, std::complex<double>(0.1, 0.0)));
 
+    circuit->build();  // 构建电路
     // 执行电路
     circuit->execute();
 
@@ -67,6 +70,7 @@ TEST_F(SystemTest, BatchSchedulerIntegration) {
 }
 
 TEST_F(SystemTest, StatePoolIntegration) {
+    circuit->build();  // 先构建电路
     auto& state_pool = circuit->get_state_pool();
 
     // 验证状态池初始化
@@ -100,6 +104,7 @@ TEST_F(SystemTest, ComplexCircuit) {
     };
     circuit->add_gates(gates);
 
+    circuit->build();  // 构建电路
     circuit->execute();
 
     // 验证电路执行成功
@@ -111,6 +116,7 @@ TEST_F(SystemTest, ComplexCircuit) {
 TEST_F(SystemTest, ResetAndReuse) {
     // 第一次使用
     circuit->add_gate(Gates::PhaseRotation(0, M_PI));
+    circuit->build();  // 构建电路
     circuit->execute();
 
     // 重置并重新使用

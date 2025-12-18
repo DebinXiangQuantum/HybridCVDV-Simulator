@@ -117,24 +117,21 @@ size_t HDDNode::hash_combine(size_t lhs, size_t rhs) const {
  */
 HDDNode* HDDNodeManager::get_or_create_node(int16_t level, HDDNode* low, HDDNode* high,
                                            std::complex<double> w_low, std::complex<double> w_high) {
-    // 创建临时节点计算哈希
-    HDDNode temp_node(level, low, high, w_low, w_high);
-    size_t hash_key = temp_node.unique_id;
+    // 创建新节点（不增加子节点引用）
+    HDDNode* new_node = new HDDNode(level, low, high, w_low, w_high);
+    size_t hash_key = new_node->unique_id;
 
-    // 查找是否已存在
+    // 查找是否已存在相同哈希的节点
     auto it = node_cache_.find(hash_key);
     if (it != node_cache_.end()) {
-        // 找到现有节点，增加引用计数
+        // 找到现有节点，删除新创建的临时节点，返回现有节点
+        delete new_node;
         it->second->increment_ref();
         return it->second;
     }
 
-    // 创建新节点
-    HDDNode* new_node = new HDDNode(level, low, high, w_low, w_high);
-    new_node->unique_id = next_unique_id_.fetch_add(1);
-
-    // 添加到缓存
-    node_cache_[new_node->unique_id] = new_node;
+    // 没有找到，添加新节点到缓存
+    node_cache_[hash_key] = new_node;
 
     return new_node;
 }
@@ -143,22 +140,21 @@ HDDNode* HDDNodeManager::get_or_create_node(int16_t level, HDDNode* low, HDDNode
  * 创建终端节点
  */
 HDDNode* HDDNodeManager::create_terminal_node(int32_t cv_state_id) {
-    HDDNode temp_node(cv_state_id);
-    size_t hash_key = temp_node.unique_id;
+    // 创建新终端节点
+    HDDNode* new_node = new HDDNode(cv_state_id);
+    size_t hash_key = new_node->unique_id;
 
-    // 查找是否已存在
+    // 查找是否已存在相同哈希的节点
     auto it = node_cache_.find(hash_key);
     if (it != node_cache_.end()) {
+        // 找到现有节点，删除新创建的临时节点，返回现有节点
+        delete new_node;
         it->second->increment_ref();
         return it->second;
     }
 
-    // 创建新节点
-    HDDNode* new_node = new HDDNode(cv_state_id);
-    new_node->unique_id = next_unique_id_.fetch_add(1);
-
-    // 添加到缓存
-    node_cache_[new_node->unique_id] = new_node;
+    // 没有找到，添加新节点到缓存
+    node_cache_[hash_key] = new_node;
 
     return new_node;
 }

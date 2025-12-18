@@ -260,6 +260,7 @@ __global__ void apply_displacement_direct_kernel(
 
 /**
  * 主机端接口：应用通用单模门 (ELL格式)
+ * @param target_indices 设备端指针，指向目标状态ID数组
  */
 void apply_single_mode_gate(CVStatePool* state_pool, FockELLOperator* ell_op,
                            const int* target_indices, int batch_size) {
@@ -267,28 +268,17 @@ void apply_single_mode_gate(CVStatePool* state_pool, FockELLOperator* ell_op,
     if (!state_pool || !ell_op || !target_indices || batch_size <= 0) {
         throw std::runtime_error("apply_single_mode_gate: 无效的输入参数");
     }
-    
-    // 检查ELL算符是否有效（允许空算符，但不允许空指针）
+
+    // 检查ELL算符是否有效
     if (!ell_op->ell_val || !ell_op->ell_col || ell_op->dim <= 0 || ell_op->max_bandwidth <= 0) {
         throw std::runtime_error("apply_single_mode_gate: ELL算符无效或未初始化");
     }
-    
+
     // 检查状态池数据指针
     if (!state_pool->data || !state_pool->state_offsets || !state_pool->state_dims) {
         throw std::runtime_error("apply_single_mode_gate: 状态池未正确初始化");
     }
-    
-    /* 
-    // 验证已在调用前完成，且target_indices是设备指针，不能在主机端直接访问
-    // 验证每个目标状态的维度是否匹配ELL算符维度
-    for (int i = 0; i < batch_size; ++i) {
-        int state_id = target_indices[i];
-        if (state_id < 0 || state_id >= state_pool->capacity) {
-            throw std::runtime_error("apply_single_mode_gate: 无效的状态ID: " + std::to_string(state_id));
-        }
-    }
-    */
-    
+
     dim3 block_dim(256);
     dim3 grid_dim((ell_op->dim + block_dim.x - 1) / block_dim.x, batch_size);
 
@@ -298,7 +288,7 @@ void apply_single_mode_gate(CVStatePool* state_pool, FockELLOperator* ell_op,
 
     // 清除之前的CUDA错误
     cudaGetLastError();
-    
+
     if (shared_mem_size < 48 * 1024) {  // 48KB shared memory limit
         apply_ell_spmv_shared_kernel<<<grid_dim, block_dim, shared_mem_size>>>(
             state_pool->data, state_pool->state_offsets, state_pool->state_dims,
@@ -318,19 +308,31 @@ void apply_single_mode_gate(CVStatePool* state_pool, FockELLOperator* ell_op,
         throw std::runtime_error("Single-mode gate kernel launch failed: " +
                                 std::string(cudaGetErrorString(err)));
     }
+
+    // 同步等待内核完成
+    err = cudaDeviceSynchronize();
+    if (err != cudaSuccess) {
+        throw std::runtime_error("Single-mode gate kernel synchronization failed: " +
+                                std::string(cudaGetErrorString(err)));
+    }
 }
 
 /**
  * 主机端接口：应用Displacement门 D(α)
+ * @param target_indices 设备端指针或主机端指针（根据调用者不同）
+ * 注意：这个函数需要特殊处理，因为它直接访问target_indices
  */
 void apply_displacement_gate(CVStatePool* state_pool, const int* target_indices,
                            int batch_size, cuDoubleComplex alpha) {
-    // 将目标索引从设备复制到主机
+    // 将目标索引从设备复制到主机（假设是设备端指针）
     std::vector<int> host_indices(batch_size);
     cudaError_t err = cudaMemcpy(host_indices.data(), target_indices,
                                  batch_size * sizeof(int), cudaMemcpyDeviceToHost);
     if (err != cudaSuccess) {
-        throw std::runtime_error("无法复制目标索引到主机: " + std::string(cudaGetErrorString(err)));
+        // 如果失败，可能是主机端指针，直接使用
+        for (int i = 0; i < batch_size; ++i) {
+            host_indices[i] = target_indices[i];
+        }
     }
 
     // 对于动态张量积管理，为每个状态单独处理
@@ -348,7 +350,7 @@ void apply_displacement_gate(CVStatePool* state_pool, const int* target_indices,
 
         // 创建临时缓冲区用于输出
         cuDoubleComplex* temp_buffer = nullptr;
-        cudaError_t err = cudaMalloc(&temp_buffer, state_dim * sizeof(cuDoubleComplex));
+        err = cudaMalloc(&temp_buffer, state_dim * sizeof(cuDoubleComplex));
         if (err != cudaSuccess) {
             throw std::runtime_error("无法分配临时缓冲区: " + std::string(cudaGetErrorString(err)));
         }
@@ -365,6 +367,14 @@ void apply_displacement_gate(CVStatePool* state_pool, const int* target_indices,
                                     std::string(cudaGetErrorString(err)));
         }
 
+        // 同步GPU操作
+        err = cudaDeviceSynchronize();
+        if (err != cudaSuccess) {
+            cudaFree(temp_buffer);
+            throw std::runtime_error("Displacement gate kernel synchronization failed: " +
+                                    std::string(cudaGetErrorString(err)));
+        }
+
         // 复制结果回原位置
         err = cudaMemcpy(state_ptr, temp_buffer, state_dim * sizeof(cuDoubleComplex), cudaMemcpyDeviceToDevice);
         cudaFree(temp_buffer);
@@ -372,9 +382,6 @@ void apply_displacement_gate(CVStatePool* state_pool, const int* target_indices,
         if (err != cudaSuccess) {
             throw std::runtime_error("无法复制结果: " + std::string(cudaGetErrorString(err)));
         }
-
-        // 同步GPU操作
-        cudaDeviceSynchronize();
     }
 }
 

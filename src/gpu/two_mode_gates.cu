@@ -241,6 +241,7 @@ void prepare_bs_matrix(double theta, double phi, int max_k) {
 
 /**
  * 主机端接口：应用Beam Splitter门 BS(θ,φ)
+ * @param target_indices 设备端指针，指向目标状态ID数组
  */
 void apply_beam_splitter(CVStatePool* state_pool, const int* target_indices,
                         int batch_size, double theta, double phi, int max_photon_number) {
@@ -264,11 +265,16 @@ void apply_beam_splitter(CVStatePool* state_pool, const int* target_indices,
     }
 
     // 确保GPU操作完成
-    cudaDeviceSynchronize();
+    err = cudaDeviceSynchronize();
+    if (err != cudaSuccess) {
+        throw std::runtime_error("Beam Splitter kernel synchronization failed: " +
+                                std::string(cudaGetErrorString(err)));
+    }
 }
 
 /**
  * 主机端接口：应用优化版Beam Splitter门 (使用常量内存)
+ * @param target_indices 设备端指针，指向目标状态ID数组
  */
 void apply_beam_splitter_fast(CVStatePool* state_pool, const int* target_indices,
                              int batch_size, int max_photon_number) {
@@ -285,6 +291,13 @@ void apply_beam_splitter_fast(CVStatePool* state_pool, const int* target_indices
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         throw std::runtime_error("Fast Beam Splitter kernel launch failed: " +
+                                std::string(cudaGetErrorString(err)));
+    }
+
+    // 同步等待内核完成
+    err = cudaDeviceSynchronize();
+    if (err != cudaSuccess) {
+        throw std::runtime_error("Fast Beam Splitter kernel synchronization failed: " +
                                 std::string(cudaGetErrorString(err)));
     }
 }

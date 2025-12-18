@@ -18,10 +18,12 @@
  * 光子创建算符 a† 内核
  * ψ_out[n] = √n · ψ_in[n-1] (n >= 1)
  * ψ_out[0] = 0
+ * 支持动态维度
  */
 __global__ void apply_creation_operator_kernel(
     cuDoubleComplex* state_data,
-    int d_trunc,
+    const size_t* state_offsets,
+    const int* state_dims,
     const int* target_indices,
     int batch_size
 ) {
@@ -31,9 +33,13 @@ __global__ void apply_creation_operator_kernel(
     int state_idx = target_indices[batch_id];
     int n = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (n >= d_trunc) return;
+    // 获取该状态的维度
+    int current_dim = state_dims[state_idx];
+    if (n >= current_dim) return;
 
-    cuDoubleComplex* psi_in = &state_data[state_idx * d_trunc];
+    // 获取状态向量指针 (使用偏移量)
+    size_t offset = state_offsets[state_idx];
+    cuDoubleComplex* psi_in = &state_data[offset];
     cuDoubleComplex* psi_out = psi_in;  // 原地操作
 
     cuDoubleComplex result = make_cuDoubleComplex(0.0, 0.0);
@@ -56,10 +62,12 @@ __global__ void apply_creation_operator_kernel(
  * 光子湮灭算符 a 内核
  * ψ_out[n] = √(n+1) · ψ_in[n+1] (n < D-1)
  * ψ_out[D-1] = 0
+ * 支持动态维度
  */
 __global__ void apply_annihilation_operator_kernel(
     cuDoubleComplex* state_data,
-    int d_trunc,
+    const size_t* state_offsets,
+    const int* state_dims,
     const int* target_indices,
     int batch_size
 ) {
@@ -69,14 +77,18 @@ __global__ void apply_annihilation_operator_kernel(
     int state_idx = target_indices[batch_id];
     int n = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (n >= d_trunc) return;
+    // 获取该状态的维度
+    int current_dim = state_dims[state_idx];
+    if (n >= current_dim) return;
 
-    cuDoubleComplex* psi_in = &state_data[state_idx * d_trunc];
+    // 获取状态向量指针 (使用偏移量)
+    size_t offset = state_offsets[state_idx];
+    cuDoubleComplex* psi_in = &state_data[offset];
     cuDoubleComplex* psi_out = psi_in;  // 原地操作
 
     cuDoubleComplex result = make_cuDoubleComplex(0.0, 0.0);
 
-    if (n < d_trunc - 1) {
+    if (n < current_dim - 1) {
         // ψ_out[n] = √(n+1) · ψ_in[n+1]
         double coeff = sqrt(static_cast<double>(n + 1));
         cuDoubleComplex input_val = psi_in[n + 1];
@@ -177,13 +189,17 @@ __global__ void apply_ladder_operator_warp_kernel(
 
 /**
  * 主机端接口：应用光子创建算符 a†
+ * @param target_indices 设备端指针，指向目标状态ID数组
  */
 void apply_creation_operator(CVStatePool* state_pool, const int* target_indices, int batch_size) {
     dim3 block_dim(256);
-    dim3 grid_dim((state_pool->total_dim + block_dim.x - 1) / block_dim.x, batch_size);
+    dim3 grid_dim((state_pool->max_total_dim + block_dim.x - 1) / block_dim.x, batch_size);
 
     apply_creation_operator_kernel<<<grid_dim, block_dim>>>(
-        state_pool->data, state_pool->total_dim, target_indices, batch_size
+        state_pool->data,
+        state_pool->state_offsets,
+        state_pool->state_dims,
+        target_indices, batch_size
     );
 
     cudaError_t err = cudaGetLastError();
@@ -191,22 +207,40 @@ void apply_creation_operator(CVStatePool* state_pool, const int* target_indices,
         throw std::runtime_error("Creation operator kernel launch failed: " +
                                 std::string(cudaGetErrorString(err)));
     }
+
+    // 同步等待内核完成
+    err = cudaDeviceSynchronize();
+    if (err != cudaSuccess) {
+        throw std::runtime_error("Creation operator kernel synchronization failed: " +
+                                std::string(cudaGetErrorString(err)));
+    }
 }
 
 /**
  * 主机端接口：应用光子湮灭算符 a
+ * @param target_indices 设备端指针，指向目标状态ID数组
  */
 void apply_annihilation_operator(CVStatePool* state_pool, const int* target_indices, int batch_size) {
     dim3 block_dim(256);
-    dim3 grid_dim((state_pool->total_dim + block_dim.x - 1) / block_dim.x, batch_size);
+    dim3 grid_dim((state_pool->max_total_dim + block_dim.x - 1) / block_dim.x, batch_size);
 
     apply_annihilation_operator_kernel<<<grid_dim, block_dim>>>(
-        state_pool->data, state_pool->total_dim, target_indices, batch_size
+        state_pool->data,
+        state_pool->state_offsets,
+        state_pool->state_dims,
+        target_indices, batch_size
     );
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         throw std::runtime_error("Annihilation operator kernel launch failed: " +
+                                std::string(cudaGetErrorString(err)));
+    }
+
+    // 同步等待内核完成
+    err = cudaDeviceSynchronize();
+    if (err != cudaSuccess) {
+        throw std::runtime_error("Annihilation operator kernel synchronization failed: " +
                                 std::string(cudaGetErrorString(err)));
     }
 }

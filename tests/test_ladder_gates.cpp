@@ -9,6 +9,19 @@
 extern void apply_creation_operator(CVStatePool* pool, const int* targets, int batch_size);
 extern void apply_annihilation_operator(CVStatePool* pool, const int* targets, int batch_size);
 
+// 辅助宏：分配设备端目标ID数组
+#define ALLOC_DEVICE_TARGETS(d_ptr, host_array, size) \
+    do { \
+        cudaMalloc(&(d_ptr), (size) * sizeof(int)); \
+        cudaMemcpy((d_ptr), (host_array), (size) * sizeof(int), cudaMemcpyHostToDevice); \
+    } while(0)
+
+#define FREE_DEVICE_TARGETS(d_ptr) \
+    do { \
+        cudaFree(d_ptr); \
+        (d_ptr) = nullptr; \
+    } while(0)
+
 /**
  * 梯算符门操作单元测试
  */
@@ -77,9 +90,14 @@ TEST_F(LadderGatesTest, CreationOperatorVacuum) {
     auto ref_input = to_reference_vector(input_state);
     auto ref_result = Reference::LadderGates::apply_creation_operator(ref_input);
 
-    // GPU实现
-    int target_ids[] = {state_id};
-    apply_creation_operator(pool, target_ids, 1);
+    // GPU实现 - 使用设备端指针
+    int host_target_ids[] = {state_id};
+    int* d_target_ids = nullptr;
+    ALLOC_DEVICE_TARGETS(d_target_ids, host_target_ids, 1);
+
+    apply_creation_operator(pool, d_target_ids, 1);
+
+    FREE_DEVICE_TARGETS(d_target_ids);
 
     std::vector<cuDoubleComplex> gpu_result;
     pool->download_state(state_id, gpu_result);
@@ -98,9 +116,14 @@ TEST_F(LadderGatesTest, CreationOperatorFockState) {
     auto ref_input = to_reference_vector(fock_state);
     auto ref_result = Reference::LadderGates::apply_creation_operator(ref_input);
 
-    // GPU实现
-    int target_ids[] = {state_id};
-    apply_creation_operator(pool, target_ids, 1);
+    // GPU实现 - 使用设备端指针
+    int host_target_ids[] = {state_id};
+    int* d_target_ids = nullptr;
+    ALLOC_DEVICE_TARGETS(d_target_ids, host_target_ids, 1);
+
+    apply_creation_operator(pool, d_target_ids, 1);
+
+    FREE_DEVICE_TARGETS(d_target_ids);
 
     std::vector<cuDoubleComplex> gpu_result;
     pool->download_state(state_id, gpu_result);
@@ -118,9 +141,14 @@ TEST_F(LadderGatesTest, AnnihilationOperatorVacuum) {
     auto ref_input = to_reference_vector(input_state);
     auto ref_result = Reference::LadderGates::apply_annihilation_operator(ref_input);
 
-    // GPU实现
-    int target_ids[] = {state_id};
-    apply_annihilation_operator(pool, target_ids, 1);
+    // GPU实现 - 使用设备端指针
+    int host_target_ids[] = {state_id};
+    int* d_target_ids = nullptr;
+    ALLOC_DEVICE_TARGETS(d_target_ids, host_target_ids, 1);
+
+    apply_annihilation_operator(pool, d_target_ids, 1);
+
+    FREE_DEVICE_TARGETS(d_target_ids);
 
     std::vector<cuDoubleComplex> gpu_result;
     pool->download_state(state_id, gpu_result);
@@ -139,9 +167,14 @@ TEST_F(LadderGatesTest, AnnihilationOperatorFockState) {
     auto ref_input = to_reference_vector(fock_state);
     auto ref_result = Reference::LadderGates::apply_annihilation_operator(ref_input);
 
-    // GPU实现
-    int target_ids[] = {state_id};
-    apply_annihilation_operator(pool, target_ids, 1);
+    // GPU实现 - 使用设备端指针
+    int host_target_ids[] = {state_id};
+    int* d_target_ids = nullptr;
+    ALLOC_DEVICE_TARGETS(d_target_ids, host_target_ids, 1);
+
+    apply_annihilation_operator(pool, d_target_ids, 1);
+
+    FREE_DEVICE_TARGETS(d_target_ids);
 
     std::vector<cuDoubleComplex> gpu_result;
     pool->download_state(state_id, gpu_result);
@@ -159,13 +192,17 @@ TEST_F(LadderGatesTest, CreationAnnihilationCommutation) {
     pool->upload_state(state_id, fock_state);
 
     // 先应用a，再应用a†
-    int target_ids[] = {state_id};
+    int host_target_ids[] = {state_id};
+    int* d_target_ids = nullptr;
+    ALLOC_DEVICE_TARGETS(d_target_ids, host_target_ids, 1);
 
     // a|2⟩ = √2|1⟩
-    apply_annihilation_operator(pool, target_ids, 1);
+    apply_annihilation_operator(pool, d_target_ids, 1);
 
     // a†(a|2⟩) = a†(√2|1⟩) = √2 * √2 |2⟩ = 2|2⟩
-    apply_creation_operator(pool, target_ids, 1);
+    apply_creation_operator(pool, d_target_ids, 1);
+
+    FREE_DEVICE_TARGETS(d_target_ids);
 
     std::vector<cuDoubleComplex> gpu_result;
     pool->download_state(state_id, gpu_result);
@@ -190,8 +227,13 @@ TEST_F(LadderGatesTest, BatchProcessing) {
     state2[1] = make_cuDoubleComplex(1.0, 0.0);  // |1⟩状态
     pool->upload_state(state_id2, state2);
 
-    int target_ids[] = {state_id, state_id2};
-    apply_creation_operator(pool, target_ids, 2);
+    int host_target_ids[] = {state_id, state_id2};
+    int* d_target_ids = nullptr;
+    ALLOC_DEVICE_TARGETS(d_target_ids, host_target_ids, 2);
+
+    apply_creation_operator(pool, d_target_ids, 2);
+
+    FREE_DEVICE_TARGETS(d_target_ids);
 
     // 验证第一个状态: a†|0⟩ = |1⟩
     std::vector<cuDoubleComplex> result1;

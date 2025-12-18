@@ -137,6 +137,19 @@ Vector normalize_vector(const Vector& v) {
 }
 
 double fidelity(const Vector& v1, const Vector& v2) {
+    double norm1 = vector_norm(v1);
+    double norm2 = vector_norm(v2);
+
+    // 如果两个向量都接近零，认为它们是相同的（保真度为1）
+    if (norm1 < 1e-12 && norm2 < 1e-12) {
+        return 1.0;
+    }
+
+    // 如果只有一个向量接近零，保真度为0
+    if (norm1 < 1e-12 || norm2 < 1e-12) {
+        return 0.0;
+    }
+
     Vector n1 = normalize_vector(v1);
     Vector n2 = normalize_vector(v2);
 

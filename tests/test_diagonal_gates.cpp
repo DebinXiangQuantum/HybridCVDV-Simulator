@@ -10,6 +10,19 @@ extern void apply_phase_rotation(CVStatePool* pool, const int* targets, int batc
 extern void apply_kerr_gate(CVStatePool* pool, const int* targets, int batch_size, double chi);
 extern void apply_conditional_parity(CVStatePool* pool, const int* targets, int batch_size, double parity);
 
+// 辅助宏：分配设备端目标ID数组
+#define ALLOC_DEVICE_TARGETS(d_ptr, host_array, size) \
+    do { \
+        cudaMalloc(&(d_ptr), (size) * sizeof(int)); \
+        cudaMemcpy((d_ptr), (host_array), (size) * sizeof(int), cudaMemcpyHostToDevice); \
+    } while(0)
+
+#define FREE_DEVICE_TARGETS(d_ptr) \
+    do { \
+        cudaFree(d_ptr); \
+        (d_ptr) = nullptr; \
+    } while(0)
+
 /**
  * 对角门操作单元测试
  */
@@ -99,9 +112,14 @@ TEST_F(DiagonalGatesTest, PhaseRotationIdentity) {
     auto ref_input = to_reference_vector(original_state);
     auto ref_result = Reference::DiagonalGates::apply_phase_rotation(ref_input, 0.0);
 
-    // GPU实现
-    int target_ids[] = {state_id};
-    apply_phase_rotation(pool, target_ids, 1, 0.0);
+    // GPU实现 - 使用设备端指针
+    int host_target_ids[] = {state_id};
+    int* d_target_ids = nullptr;
+    ALLOC_DEVICE_TARGETS(d_target_ids, host_target_ids, 1);
+
+    apply_phase_rotation(pool, d_target_ids, 1, 0.0);
+
+    FREE_DEVICE_TARGETS(d_target_ids);
 
     std::vector<cuDoubleComplex> gpu_result;
     pool->download_state(state_id, gpu_result);
@@ -120,9 +138,14 @@ TEST_F(DiagonalGatesTest, PhaseRotationPi) {
     auto ref_input = to_reference_vector(input_state);
     auto ref_result = Reference::DiagonalGates::apply_phase_rotation(ref_input, M_PI);
 
-    // GPU实现
-    int target_ids[] = {state_id};
-    apply_phase_rotation(pool, target_ids, 1, M_PI);
+    // GPU实现 - 使用设备端指针
+    int host_target_ids[] = {state_id};
+    int* d_target_ids = nullptr;
+    ALLOC_DEVICE_TARGETS(d_target_ids, host_target_ids, 1);
+
+    apply_phase_rotation(pool, d_target_ids, 1, M_PI);
+
+    FREE_DEVICE_TARGETS(d_target_ids);
 
     std::vector<cuDoubleComplex> gpu_result;
     pool->download_state(state_id, gpu_result);
@@ -142,8 +165,13 @@ TEST_F(DiagonalGatesTest, PhaseRotationPiHalf) {
     auto ref_result = Reference::DiagonalGates::apply_phase_rotation(ref_input, M_PI / 2.0);
 
     // GPU实现
-    int target_ids[] = {state_id};
-    apply_phase_rotation(pool, target_ids, 1, M_PI / 2.0);
+    int host_target_ids[] = {state_id};
+    int* d_target_ids = nullptr;
+    ALLOC_DEVICE_TARGETS(d_target_ids, host_target_ids, 1);
+
+    apply_phase_rotation(pool, d_target_ids, 1, M_PI / 2.0);
+
+    FREE_DEVICE_TARGETS(d_target_ids);
 
     std::vector<cuDoubleComplex> gpu_result;
     pool->download_state(state_id, gpu_result);
@@ -163,8 +191,13 @@ TEST_F(DiagonalGatesTest, KerrGateVacuum) {
     auto ref_result = Reference::DiagonalGates::apply_kerr_gate(ref_input, 1.0);
 
     // GPU实现
-    int target_ids[] = {state_id};
-    apply_kerr_gate(pool, target_ids, 1, 1.0);
+    int host_target_ids[] = {state_id};
+    int* d_target_ids = nullptr;
+    ALLOC_DEVICE_TARGETS(d_target_ids, host_target_ids, 1);
+
+    apply_kerr_gate(pool, d_target_ids, 1, 1.0);
+
+    FREE_DEVICE_TARGETS(d_target_ids);
 
     std::vector<cuDoubleComplex> gpu_result;
     pool->download_state(state_id, gpu_result);
@@ -182,29 +215,46 @@ TEST_F(DiagonalGatesTest, KerrGateFockState) {
 
     // 应用Kerr门: K(χ) |2⟩ = e^{-iχ·2²} |2⟩ = e^{-iχ·4} |2⟩
     double chi = 0.5;
-    int target_ids[] = {state_id};
-    apply_kerr_gate(pool, target_ids, 1, chi);
+    int host_target_ids[] = {state_id};
+    int* d_target_ids = nullptr;
+    ALLOC_DEVICE_TARGETS(d_target_ids, host_target_ids, 1);
+
+    apply_kerr_gate(pool, d_target_ids, 1, chi);
+
+    FREE_DEVICE_TARGETS(d_target_ids);
 
     std::vector<cuDoubleComplex> result_state;
     pool->download_state(state_id, result_state);
 
-    // |2⟩分量应该变成 e^{-iχ·4}
-    double expected_phase = -chi * 4.0;
-    double expected_real = cos(expected_phase);
-    double expected_imag = -sin(expected_phase);  // 注意Kerr门公式中的负号
+    // |2⟩分量应该变成 e^{-iχ·4} = e^{-i·2.0} = cos(2.0) - i·sin(2.0)
+    double phase = chi * 4.0;  // χ * n² = 0.5 * 4
+    double expected_real = cos(phase);
+    double expected_imag = -sin(phase);  // e^(-i*phase) = cos(phase) - i*sin(phase)
 
     EXPECT_NEAR(cuCreal(result_state[2]), expected_real, 1e-10);
     EXPECT_NEAR(cuCimag(result_state[2]), expected_imag, 1e-10);
 
-    // 其他分量应该为0
-    result_state[2] = make_cuDoubleComplex(0.0, 0.0);
+    // 验证归一化
     expect_normalized(result_state);
+
+    // 验证其他分量为0
+    for (int i = 0; i < d_trunc; ++i) {
+        if (i != 2) {
+            EXPECT_NEAR(cuCreal(result_state[i]), 0.0, 1e-10);
+            EXPECT_NEAR(cuCimag(result_state[i]), 0.0, 1e-10);
+        }
+    }
 }
 
 TEST_F(DiagonalGatesTest, ConditionalParityEven) {
     // 测试条件奇偶校验门 (偶数模式)
-    int target_ids[] = {state_id};
-    apply_conditional_parity(pool, target_ids, 1, 0.0);  // 偶数
+    int host_target_ids[] = {state_id};
+    int* d_target_ids = nullptr;
+    ALLOC_DEVICE_TARGETS(d_target_ids, host_target_ids, 1);
+
+    apply_conditional_parity(pool, d_target_ids, 1, 0.0);
+
+    FREE_DEVICE_TARGETS(d_target_ids);  // 偶数
 
     std::vector<cuDoubleComplex> result_state;
     pool->download_state(state_id, result_state);
@@ -218,8 +268,13 @@ TEST_F(DiagonalGatesTest, ConditionalParityEven) {
 
 TEST_F(DiagonalGatesTest, ConditionalParityOdd) {
     // 测试条件奇偶校验门 (奇数模式)
-    int target_ids[] = {state_id};
-    apply_conditional_parity(pool, target_ids, 1, 1.0);  // 奇数
+    int host_target_ids[] = {state_id};
+    int* d_target_ids = nullptr;
+    ALLOC_DEVICE_TARGETS(d_target_ids, host_target_ids, 1);
+
+    apply_conditional_parity(pool, d_target_ids, 1, 1.0);
+
+    FREE_DEVICE_TARGETS(d_target_ids);  // 奇数
 
     std::vector<cuDoubleComplex> result_state;
     pool->download_state(state_id, result_state);
@@ -238,18 +293,25 @@ TEST_F(DiagonalGatesTest, BatchProcessing) {
     state2[1] = make_cuDoubleComplex(1.0, 0.0);  // |1⟩状态
     pool->upload_state(state_id2, state2);
 
-    int target_ids[] = {state_id, state_id2};
-    apply_phase_rotation(pool, target_ids, 2, M_PI);
+    int host_target_ids[] = {state_id, state_id2};
+    int* d_target_ids = nullptr;
+    ALLOC_DEVICE_TARGETS(d_target_ids, host_target_ids, 2);
 
-    // 验证第一个状态
+    apply_phase_rotation(pool, d_target_ids, 2, M_PI);
+
+    FREE_DEVICE_TARGETS(d_target_ids);
+
+    // 验证第一个状态: R(π) |0⟩ = e^{-iπ·0} |0⟩ = |0⟩ (保持不变)
     std::vector<cuDoubleComplex> result1;
     pool->download_state(state_id, result1);
-    EXPECT_NEAR(cuCreal(result1[0]), -1.0, 1e-10);
+    EXPECT_NEAR(cuCreal(result1[0]), 1.0, 1e-10);  // |0⟩态不受影响
+    EXPECT_NEAR(cuCimag(result1[0]), 0.0, 1e-10);
 
     // 验证第二个状态: R(π) |1⟩ = e^{-iπ·1} |1⟩ = -|1⟩
     std::vector<cuDoubleComplex> result2;
     pool->download_state(state_id2, result2);
     EXPECT_NEAR(cuCreal(result2[1]), -1.0, 1e-10);
+    EXPECT_NEAR(cuCimag(result2[1]), 0.0, 1e-10);
 
     pool->free_state(state_id2);
 }
@@ -268,8 +330,13 @@ TEST_F(DiagonalGatesTest, ComplexSuperposition) {
     auto ref_result = Reference::DiagonalGates::apply_phase_rotation(ref_input, M_PI / 4.0);
 
     // GPU实现
-    int target_ids[] = {state_id};
-    apply_phase_rotation(pool, target_ids, 1, M_PI / 4.0);
+    int host_target_ids[] = {state_id};
+    int* d_target_ids = nullptr;
+    ALLOC_DEVICE_TARGETS(d_target_ids, host_target_ids, 1);
+
+    apply_phase_rotation(pool, d_target_ids, 1, M_PI / 4.0);
+
+    FREE_DEVICE_TARGETS(d_target_ids);
 
     std::vector<cuDoubleComplex> gpu_result;
     pool->download_state(state_id, gpu_result);
