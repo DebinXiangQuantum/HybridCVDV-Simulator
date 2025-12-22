@@ -66,11 +66,19 @@ int HDDNode::decrement_ref() {
  * 深度复制节点 (用于Copy-on-Write)
  */
 HDDNode* HDDNode::deep_copy() const {
+    HDDNode* copy = nullptr;
     if (is_terminal()) {
-        return new HDDNode(tensor_id);
+        copy = new HDDNode(tensor_id);
     } else {
-        return new HDDNode(qubit_level, low, high, w_low, w_high);
+        copy = new HDDNode(qubit_level, low, high, w_low, w_high);
     }
+
+    // Generate a new unique ID for the copy to make it truly independent
+    // Use a static counter to ensure each copy gets a unique ID
+    static std::atomic<size_t> copy_id_counter{1000000000}; // Start from high number to avoid collision
+    copy->unique_id = copy_id_counter.fetch_add(1, std::memory_order_relaxed);
+
+    return copy;
 }
 
 /**

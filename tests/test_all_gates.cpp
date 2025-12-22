@@ -251,20 +251,29 @@ TEST_F(GPUGateTest, TestGPUPhaseRotation) {
     // 测试GPU相位旋转门 R(θ)
     double theta = M_PI / 4.0;
 
-    // 获取参考结果
+    // 创建初始状态
     std::vector<std::complex<double>> initial_state(d_trunc, std::complex<double>(0.0, 0.0));
     initial_state[0] = std::complex<double>(1.0, 0.0);
     initial_state[1] = std::complex<double>(0.0, 1.0);
     initial_state[2] = std::complex<double>(1.0, 0.0);
+
+    // 上传初始状态到GPU
+    std::vector<cuDoubleComplex> gpu_initial(d_trunc);
+    for (size_t i = 0; i < d_trunc; ++i) {
+        gpu_initial[i] = make_cuDoubleComplex(initial_state[i].real(), initial_state[i].imag());
+    }
+    pool->upload_state(state_id, gpu_initial);
+
+    // 获取参考结果
     auto ref_result = Reference::DiagonalGates::apply_phase_rotation(initial_state, theta);
 
     // 应用GPU门
     int* d_target_ids = nullptr;
     cudaMalloc(&d_target_ids, sizeof(int));
     cudaMemcpy(d_target_ids, &state_id, sizeof(int), cudaMemcpyHostToDevice);
-    
+
     apply_phase_rotation(pool, d_target_ids, 1, theta);
-    
+
     cudaFree(d_target_ids);
 
     // 下载GPU结果

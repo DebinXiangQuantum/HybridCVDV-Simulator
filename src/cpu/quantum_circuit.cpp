@@ -314,12 +314,10 @@ void QuantumCircuit::reset() {
     }
 
     node_manager_.clear();
+    state_pool_.reset();  // 重置状态池，释放所有分配的状态
     gate_sequence_.clear();
     is_built_ = false;
     is_executed_ = false;
-
-    // 重新初始化状态池 (可选)
-    // 这里保持状态池不变，以允许重新使用
 }
 
 /**
