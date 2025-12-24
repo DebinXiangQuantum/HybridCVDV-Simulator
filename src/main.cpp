@@ -29,8 +29,8 @@ int main(int argc, char* argv[]) {
         std::cout << "示例1: 连续变量位移和挤压" << std::endl;
         circuit.add_gates({
             Gates::Displacement(0, std::complex<double>(0.5, 0.2)),  // 在qumode 0上应用位移
-            Gates::Squeezing(1, std::complex<double>(0.3, 0.1))      // 在qumode 1上应用挤压
-            // Gates::BeamSplitter(0, 1, M_PI / 3.0)                   // 暂时禁用光束分裂器
+            Gates::Squeezing(1, std::complex<double>(0.3, 0.1)),      // 在qumode 1上应用挤压
+            Gates::BeamSplitter(0, 1, M_PI / 3.0)                   
         });
 
         circuit.build();
@@ -54,7 +54,7 @@ int main(int argc, char* argv[]) {
                 Gates::PhaseRotation(0, M_PI / 4.0),                        // Qubit旋转
                 Gates::ConditionalDisplacement(0, 0, std::complex<double>(0.4, 0.0)), // 受控位移
                 Gates::CreationOperator(1),                                 // 光子创建
-                Gates::KerrGate(1, 0.1)                                    // Kerr非线性
+                Gates::KerrGate(1, 0.1)                                   // Kerr非线性
             });
             circuit2.build();
 

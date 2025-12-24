@@ -209,6 +209,9 @@ private:
     bool fusion_enabled_;
     bool auto_flush_enabled_;
 
+    // 私有辅助：直接将门转换为批处理任务并入队
+    void enqueue_gate(const GateParams& gate);
+
 public:
     /**
      * 构造函数

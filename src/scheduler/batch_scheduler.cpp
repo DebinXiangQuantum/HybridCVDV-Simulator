@@ -398,6 +398,20 @@ RuntimeScheduler::RuntimeScheduler(QuantumCircuit* circuit, size_t max_batch_siz
     : batch_scheduler_(&circuit->get_state_pool(), max_batch_size),
       circuit_(circuit), fusion_enabled_(true), auto_flush_enabled_(true) {}
 
+// 私有辅助：将单个门转换为 BatchTask 并入队（直接提交到 BatchScheduler）
+void RuntimeScheduler::enqueue_gate(const GateParams& gate) {
+    // 尝试收集目标状态ID（当前采用简单策略：对指定的qumodes或默认使用所有活跃状态）
+    std::vector<int> target_state_ids;
+    auto& state_pool = circuit_->get_state_pool();
+
+    // 如果指定了qumodes，理想情况下应将每个qumode映射到具体的物理状态ID；
+    // 目前使用一个简单的启发式：使用所有活跃状态作为作用目标（最佳努力）
+    target_state_ids = state_pool.get_active_state_ids();
+
+    BatchTask task(gate.type, target_state_ids, gate.params);
+    batch_scheduler_.add_task(task);
+}
+
 /**
  * 调度单个门操作
  */
@@ -407,11 +421,15 @@ void RuntimeScheduler::schedule_gate(const GateParams& gate) {
 
         if (auto_flush_enabled_ && instruction_fusion_.buffer_size() >= 5) {
             auto fused_gates = instruction_fusion_.fuse_instructions();
-            schedule_gates(fused_gates);
+            // 直接把融合后的门提交到批调度器（绕过再次缓冲），避免递归调用
+            for (const auto& fg : fused_gates) {
+                enqueue_gate(fg);
+            }
             instruction_fusion_.clear();
         }
     } else {
-        schedule_gate(gate);
+        // 未启用融合时直接提交到批调度器（修复原来的递归调用问题）
+        enqueue_gate(gate);
     }
 }
 
@@ -420,7 +438,7 @@ void RuntimeScheduler::schedule_gate(const GateParams& gate) {
  */
 void RuntimeScheduler::schedule_gates(const std::vector<GateParams>& gates) {
     for (const auto& gate : gates) {
-        schedule_gate(gate);
+        enqueue_gate(gate);
     }
 }
 

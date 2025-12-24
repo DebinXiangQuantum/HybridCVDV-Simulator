@@ -532,8 +532,7 @@ void QuantumCircuit::execute_level3_gate(const GateParams& gate) {
                target_states.size() * sizeof(int), cudaMemcpyHostToDevice));
 
     if (gate.type == GateType::BEAM_SPLITTER && gate.params.size() >= 2) {
-        std::cout << "警告：分束器门实现与张量积基底不兼容，跳过执行" << std::endl;
-        /*
+        // std::cout << "警告：分束器门实现与张量积基底不兼容，跳过执行" << std::endl;
         double theta = gate.params[0].real();
         double phi = gate.params[1].real();
         int max_photon = cv_truncation_ - 1;  // 最大光子数
@@ -552,7 +551,6 @@ void QuantumCircuit::execute_level3_gate(const GateParams& gate) {
         CHECK_CUDA(cudaDeviceSynchronize());
 
         CHECK_CUDA(cudaFree(d_state_id));
-        */
     }
 
     CHECK_CUDA(cudaFree(d_target_ids));
