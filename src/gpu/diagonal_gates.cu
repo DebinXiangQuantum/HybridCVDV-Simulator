@@ -40,8 +40,8 @@ __global__ void apply_phase_rotation_kernel(
     size_t offset = state_offsets[state_idx];
     cuDoubleComplex* psi = &state_data[offset];
 
-    // 计算相位因子: exp(-i * theta * n)
-    double phase = -theta * static_cast<double>(n);
+    // 计算相位因子: exp(i * theta * n)  (注意：与SF一致，使用正号)
+    double phase = theta * static_cast<double>(n);
     cuDoubleComplex phase_factor = make_cuDoubleComplex(cos(phase), sin(phase));
 
     // 应用相位旋转
@@ -76,8 +76,9 @@ __global__ void apply_kerr_kernel(
     cuDoubleComplex* psi = &state_data[offset];
 
     // f(n, chi) = chi * n * n
+    // Kerr gate: exp(i * chi * n^2)  (注意：与SF一致，使用正号)
     double phase = chi * static_cast<double>(n * n);
-    cuDoubleComplex phase_factor = make_cuDoubleComplex(cos(phase), -sin(phase)); // e^(-i * phase)
+    cuDoubleComplex phase_factor = make_cuDoubleComplex(cos(phase), sin(phase)); // e^(i * phase)
 
     cuDoubleComplex current_val = psi[n];
     psi[n] = make_cuDoubleComplex(

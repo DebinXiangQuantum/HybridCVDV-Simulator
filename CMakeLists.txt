@@ -82,6 +82,7 @@ if(CUDA_FOUND)
         src/gpu/single_mode_gates.cu
         src/gpu/two_mode_gates.cu
         src/gpu/hybrid_gates.cu
+        src/gpu/squeezing_gate.cu
     )
 else()
     set(GPU_SOURCES
@@ -110,6 +111,7 @@ set(UTILS_SOURCES
 
 set(REFERENCE_SOURCES
     src/reference/reference_gates.cpp
+    src/reference/squeezing_matrix.cpp
 )
 
 # 创建库
@@ -181,6 +183,30 @@ add_executable(${PROJECT_NAME}_examples examples/basic_usage.cpp)
 target_link_libraries(${PROJECT_NAME}_examples ${PROJECT_NAME})
 if(CUDA_FOUND)
     target_link_libraries(${PROJECT_NAME}_examples ${CUDA_LIBRARIES})
+endif()
+
+# 基准测试程序
+if(CUDA_FOUND)
+    add_executable(benchmark_cv_gates tests/benchmark_cv_gates.cpp)
+    target_link_libraries(benchmark_cv_gates ${PROJECT_NAME} ${CUDA_LIBRARIES})
+    
+    add_executable(test_bs_fidelity tests/test_bs_fidelity.cpp)
+    target_link_libraries(test_bs_fidelity ${PROJECT_NAME} ${CUDA_LIBRARIES})
+    
+    add_executable(test_bs_recursive tests/test_bs_recursive.cpp)
+    target_link_libraries(test_bs_recursive ${PROJECT_NAME} ${CUDA_LIBRARIES})
+    
+    add_executable(test_bs_comparison tests/test_bs_comparison.cpp)
+    target_link_libraries(test_bs_comparison ${PROJECT_NAME} ${CUDA_LIBRARIES})
+    
+    add_executable(test_tms tests/test_tms.cpp)
+    target_link_libraries(test_tms ${PROJECT_NAME} ${CUDA_LIBRARIES})
+    
+    add_executable(${PROJECT_NAME}_cv_benchmark tests/test_cv_benchmark.cpp)
+    target_link_libraries(${PROJECT_NAME}_cv_benchmark ${PROJECT_NAME} GTest::gtest_main ${CUDA_LIBRARIES})
+    
+    add_executable(simple_benchmark tests/simple_benchmark.cpp)
+    target_link_libraries(simple_benchmark ${PROJECT_NAME} ${CUDA_LIBRARIES})
 endif()
 
 # 测试 (使用自动下载的GoogleTest)

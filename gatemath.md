@@ -574,8 +574,62 @@ $$ \vec{\psi}_{out} \approx \vec{\psi}_{in} + \hat{H}_{BS} \vec{\psi}_{in} $$
 类似于 Displacement，但它是“两步一跳”。
 $\hat{a}^2$ 耦合 $|n\rangle \leftrightarrow |n-2\rangle$。
 使用 **SpMV (ELL format)** 计算即可。矩阵带宽通常比 Displacement 宽。
+这是一个关于 **Squeezing Gate (挤压门)** 的详细技术实现文档。
+
+在 Hybrid Tensor-DD 架构中，Squeezing 门属于 **Level 2 (Generalized Banded Gate)**，但它具有特殊的**奇偶性守恒 (Parity Conservation)** 特征。利用这一特征，我们可以设计比通用 ELL 更高效的存储和计算模式。
+
+
+### 1.1 算符定义
+$$ S(\xi) = \exp\left[ \frac{1}{2} (\xi^* \hat{a}^2 - \xi (\hat{a}^\dagger)^2) \right], \quad \xi = r e^{i\theta} $$
+
+### 1.2 矩阵稀疏性分析 (The "Stride-2" Property)
+与位移算符 $D(\alpha)$ 不同，挤压算符的生成元是二次项 $\hat{a}^2$ 和 $(\hat{a}^\dagger)^2$。
+*   $\hat{a}^2$: 湮灭 2 个光子 ($|n\rangle \to |n-2\rangle$)。
+*   $(\hat{a}^\dagger)^2$: 生成 2 个光子 ($|n\rangle \to |n+2\rangle$)。
+
+**结论**: 在 Fock 基底下的矩阵 $M$ 中，**非零元素仅出现在 $n$ 与 $m$ 奇偶性相同的索引上**。
+即：$M_{row, col} \neq 0$ 仅当 $|row - col| = 0, 2, 4, 6, \dots$。
+矩阵呈现为**棋盘格状稀疏 (Checkerboard Sparsity)**，或者说是**步长为 2 的带状矩阵**。
 
 ---
+
+## 2. 专用数据结构: Strided-ELL
+
+为了节省显存和带宽，我们不应存储中间的 0 元素。我们定义一种变体格式：**Compact Strided-ELL**。
+
+### 2.1 数据定义
+假设有效带宽为 $K$（即每个态最多耦合 $K$ 个其他态），对于 Squeezing 门，这意味着它覆盖的物理范围是 $[n - 2\lfloor K/2 \rfloor, n + 2\lfloor K/2 \rfloor]$。
+
+### 2.2 内存布局示例
+假设 $D=5, K=3$。
+矩阵行 2 ($|2\rangle$) 耦合 $|0\rangle, |2\rangle, |4\rangle$。
+*   **Standard Banded**: 会存储索引 0, 1, 2, 3, 4 (包含两个0)。
+*   **Strided-ELL**: 仅存储索引 0, 2, 4。
+
+---
+
+## 3. 预计算策略 (CPU Host)
+
+由于 $S(\xi)$ 的矩阵元素计算涉及复杂的双曲函数和阶乘，**绝对不建议在 GPU Kernel 中实时计算矩阵元素**。应在 CPU 端预计算并上传。
+
+### 3.1 块对角化生成 (Block Diagonalization)
+利用奇偶守恒，将 $D \times D$ 矩阵拆分为两个独立的子矩阵生成，速度提升 4 倍。
+
+1.  **Even Block**: 构造基底 $\{|0\rangle, |2\rangle, |4\rangle, \dots\}$。
+    *   矩阵元素来源于 $\frac{1}{2}(\xi^* \hat{a}^2 - \xi (\hat{a}^\dagger)^2)$ 在该子空间的作用。
+2.  **Odd Block**: 构造基底 $\{|1\rangle, |3\rangle, |5\rangle, \dots\}$。
+3.  **Expm**: 分别对两个小矩阵调用 `scipy.linalg.expm` (或 C++ Eigen `matrix_exp`)。
+4.  **ELL Packing**: 将计算好的稠密子矩阵重新映射回 Strided-ELL 格式。
+    *   **截断策略**: 扫描每一行，保留模值最大的 $K$ 个元素，其他的丢弃（通常取阈值 $\epsilon=10^{-6}$）。
+
+---
+
+## 4. GPU 计算实现
+
+### 4.1 计算公式
+对于每个线程 $tid$ (代表行 $n$):
+$$ \psi_{out}[n] = \sum_{k=0}^{K-1} \text{Val}[n][k] \times \psi_{in}[ \text{Col}[n][k] ] $$
+
 
 ## 总结：代码实现速查表
 
