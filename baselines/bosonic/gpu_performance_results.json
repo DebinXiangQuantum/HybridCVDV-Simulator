@@ -1,0 +1,219 @@
+{
+  "simulator": "HybridCVDV-Simulator-GPU",
+  "truncation_dimension": 16,
+  "timestamp": "1768391302",
+  "qubit_gates": [
+    {
+      "operator_name": "I",
+      "operator_full_name": "Identity Gate",
+      "single_operator_latency_ms": 0.027973,
+      "batch_throughput": 6560.26,
+      "memory_efficiency": 0.5000
+    },
+    {
+      "operator_name": "X",
+      "operator_full_name": "Pauli X Gate",
+      "single_operator_latency_ms": 0.028007,
+      "batch_throughput": 6548.07,
+      "memory_efficiency": 0.5000
+    },
+    {
+      "operator_name": "Y",
+      "operator_full_name": "Pauli Y Gate",
+      "single_operator_latency_ms": 0.027471,
+      "batch_throughput": 6551.58,
+      "memory_efficiency": 0.5000
+    },
+    {
+      "operator_name": "Z",
+      "operator_full_name": "Pauli Z Gate",
+      "single_operator_latency_ms": 0.027527,
+      "batch_throughput": 6568.81,
+      "memory_efficiency": 0.5000
+    },
+    {
+      "operator_name": "SPLUS",
+      "operator_full_name": "S+ Gate",
+      "single_operator_latency_ms": 0.217207,
+      "batch_throughput": 2853.98,
+      "memory_efficiency": 0.5000
+    },
+    {
+      "operator_name": "SMINUS",
+      "operator_full_name": "S- Gate",
+      "single_operator_latency_ms": 0.216830,
+      "batch_throughput": 2846.66,
+      "memory_efficiency": 0.5000
+    },
+    {
+      "operator_name": "P0",
+      "operator_full_name": "Projection to |0>",
+      "single_operator_latency_ms": 0.169225,
+      "batch_throughput": 3328.02,
+      "memory_efficiency": 0.5000
+    },
+    {
+      "operator_name": "P1",
+      "operator_full_name": "Projection to |1>",
+      "single_operator_latency_ms": 0.169488,
+      "batch_throughput": 3315.51,
+      "memory_efficiency": 0.5000
+    }
+  ],
+  "cv_operators": [
+    {
+      "operator_name": "r",
+      "operator_full_name": "Phase Rotation",
+      "single_operator_latency_ms": 0.314524,
+      "batch_throughput": 2326.75,
+      "memory_efficiency": 0.2812
+    },
+    {
+      "operator_name": "d",
+      "operator_full_name": "Displacement",
+      "single_operator_latency_ms": 0.379180,
+      "batch_throughput": 1995.41,
+      "memory_efficiency": 1.0000
+    },
+    {
+      "operator_name": "s",
+      "operator_full_name": "Squeezing",
+      "single_operator_latency_ms": 0.396219,
+      "batch_throughput": 1932.53,
+      "memory_efficiency": 0.0625
+    },
+    {
+      "operator_name": "s2",
+      "operator_full_name": "Two-mode Squeezing",
+      "single_operator_latency_ms": 0.888601,
+      "batch_throughput": 992.53,
+      "memory_efficiency": 0.0840
+    },
+    {
+      "operator_name": "bs",
+      "operator_full_name": "Beam Splitter",
+      "single_operator_latency_ms": 0.824143,
+      "batch_throughput": 574.65,
+      "memory_efficiency": 0.0840
+    },
+    {
+      "operator_name": "cr",
+      "operator_full_name": "Conditional Rotation",
+      "single_operator_latency_ms": 0.444638,
+      "batch_throughput": 1773.51,
+      "memory_efficiency": 0.1406
+    },
+    {
+      "operator_name": "cd",
+      "operator_full_name": "Conditional Displacement",
+      "single_operator_latency_ms": 1.493260,
+      "batch_throughput": 563.55,
+      "memory_efficiency": 0.5000
+    },
+    {
+      "operator_name": "ecd",
+      "operator_full_name": "Echo Conditional Displacement",
+      "single_operator_latency_ms": 1.611231,
+      "batch_throughput": 566.06,
+      "memory_efficiency": 0.5000
+    },
+    {
+      "operator_name": "cbs",
+      "operator_full_name": "Conditional Beam Splitter",
+      "single_operator_latency_ms": 1.978718,
+      "batch_throughput": 470.63,
+      "memory_efficiency": 0.0420
+    },
+    {
+      "operator_name": "snap",
+      "operator_full_name": "SNAP Gate",
+      "single_operator_latency_ms": 0.027559,
+      "batch_throughput": 6606.08,
+      "memory_efficiency": 0.0625
+    },
+    {
+      "operator_name": "csnap",
+      "operator_full_name": "Conditional SNAP Gate",
+      "single_operator_latency_ms": 0.027235,
+      "batch_throughput": 6644.24,
+      "memory_efficiency": 0.0312
+    },
+    {
+      "operator_name": "multisnap",
+      "operator_full_name": "Multi-SNAP Gate",
+      "single_operator_latency_ms": 0.027667,
+      "batch_throughput": 6615.17,
+      "memory_efficiency": 0.0625
+    },
+    {
+      "operator_name": "multicsnap",
+      "operator_full_name": "Multi-Conditional SNAP Gate",
+      "single_operator_latency_ms": 0.027240,
+      "batch_throughput": 6581.37,
+      "memory_efficiency": 0.0312
+    },
+    {
+      "operator_name": "sqr",
+      "operator_full_name": "SQR Gate",
+      "single_operator_latency_ms": 26.615364,
+      "batch_throughput": 37.47,
+      "memory_efficiency": 0.0312
+    },
+    {
+      "operator_name": "pnr",
+      "operator_full_name": "Photon Number Resolving",
+      "single_operator_latency_ms": 1.110605,
+      "batch_throughput": 802.61,
+      "memory_efficiency": 0.0469
+    },
+    {
+      "operator_name": "eswap",
+      "operator_full_name": "Exponential SWAP",
+      "single_operator_latency_ms": 0.541948,
+      "batch_throughput": 1470.92,
+      "memory_efficiency": 0.0293
+    },
+    {
+      "operator_name": "csq",
+      "operator_full_name": "Conditional Squeezing",
+      "single_operator_latency_ms": 0.560004,
+      "batch_throughput": 1436.17,
+      "memory_efficiency": 0.0312
+    },
+    {
+      "operator_name": "sum",
+      "operator_full_name": "Sum Gate",
+      "single_operator_latency_ms": 2.553397,
+      "batch_throughput": 369.63,
+      "memory_efficiency": 0.5000
+    },
+    {
+      "operator_name": "csum",
+      "operator_full_name": "Conditional Sum Gate",
+      "single_operator_latency_ms": 8.418049,
+      "batch_throughput": 116.71,
+      "memory_efficiency": 0.2500
+    },
+    {
+      "operator_name": "jc",
+      "operator_full_name": "Jaynes-Cummings",
+      "single_operator_latency_ms": 0.985929,
+      "batch_throughput": 882.63,
+      "memory_efficiency": 0.5000
+    },
+    {
+      "operator_name": "ajc",
+      "operator_full_name": "Anti Jaynes-Cummings",
+      "single_operator_latency_ms": 0.986256,
+      "batch_throughput": 883.78,
+      "memory_efficiency": 0.5000
+    },
+    {
+      "operator_name": "rb",
+      "operator_full_name": "Rabi Interaction",
+      "single_operator_latency_ms": 0.745178,
+      "batch_throughput": 1124.45,
+      "memory_efficiency": 0.5000
+    }
+  ]
+}
