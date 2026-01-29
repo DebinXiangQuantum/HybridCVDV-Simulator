@@ -3,7 +3,7 @@
 # Compiler settings
 NVCC = nvcc
 NVCCFLAGS = -O3 -arch=sm_60 -std=c++17
-LIBS = -lcublas
+LIBS = -lcublas -lcusparse
 
 # Directories
 SRC_DIR = .

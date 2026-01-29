@@ -31,7 +31,13 @@ if(CUDA_FOUND)
         gpu/operators.cu
     )
     target_include_directories(bosonic_gpu PRIVATE ${CUDA_INCLUDE_DIRS})
-    target_link_libraries(bosonic_gpu ${CUDA_LIBRARIES} cublas)
+    target_link_libraries(bosonic_gpu ${CUDA_LIBRARIES} cublas cusparse)
+    
+    # 设置 CUDA 架构
+    set_target_properties(bosonic_gpu PROPERTIES
+        CUDA_SEPARABLE_COMPILATION ON
+        CUDA_ARCHITECTURES "75;80;86;89"
+    )
 endif()
 
 # 主程序
@@ -43,6 +49,20 @@ target_link_libraries(bosonic_test bosonic_cpu)
 
 if(CUDA_FOUND)
     target_link_libraries(bosonic_test bosonic_gpu)
+endif()
+
+# GPU 简单测试程序
+if(CUDA_FOUND)
+    add_executable(test_gpu_simple
+        test_gpu_simple.cpp
+    )
+    target_link_libraries(test_gpu_simple bosonic_gpu ${CUDA_LIBRARIES})
+    
+    # GPU 加速验证程序
+    add_executable(verify_gpu_acceleration
+        verify_gpu_acceleration.cpp
+    )
+    target_link_libraries(verify_gpu_acceleration bosonic_gpu ${CUDA_LIBRARIES})
 endif()
 
 # 设置输出目录
