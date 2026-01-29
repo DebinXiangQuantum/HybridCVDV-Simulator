@@ -245,7 +245,7 @@ private:
     int rows_;
     int cols_;
     
-    // CUDA设备上的数据
+    // CUDA设备上的数据（COO 格式）
     struct DeviceData {
         Complex* values;
         int* row_indices;
@@ -255,10 +255,25 @@ private:
     
     DeviceData device_data_;
     
+    // CSR 格式数据（用于 cuSPARSE SpGEMM）
+    struct CSRData {
+        Complex* values;
+        int* col_indices;
+        int* row_ptr;
+        int nnz;
+        bool allocated;
+    };
+    
+    mutable CSRData csr_data_;
+    
     // CPU上的临时数据，用于构建矩阵
     mutable std::vector<Complex> temp_values_;
     mutable std::vector<int> temp_row_indices_;
     mutable std::vector<int> temp_col_indices_;
+    
+    // 格式转换函数
+    void convertCOOtoCSR() const;
+    void freeCSRData() const;
 };
 
 // 定义常用的量子门矩阵（GPU版本）
