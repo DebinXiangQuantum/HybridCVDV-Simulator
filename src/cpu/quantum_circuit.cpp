@@ -5,6 +5,7 @@
 #include <cuda_runtime.h>
 #include <cuComplex.h>
 #include <stdexcept>
+#include <chrono>
 
 // CUDA错误检查宏
 #define CHECK_CUDA(call) \
@@ -77,6 +78,9 @@ HDDNode* QuantumCircuit::hdd_add(HDDNode* n1, std::complex<double> w1, HDDNode* 
         int id2 = n2->tensor_id;
         int new_id = state_pool_.allocate_state();
         
+        // 统计传输时延
+        auto transfer_start = std::chrono::high_resolution_clock::now();
+        
         // 准备设备端数据
         int* d_src1 = nullptr;
         int* d_src2 = nullptr;
@@ -99,8 +103,19 @@ HDDNode* QuantumCircuit::hdd_add(HDDNode* n1, std::complex<double> w1, HDDNode* 
         cudaMemcpy(d_w1, &w1_cu, sizeof(cuDoubleComplex), cudaMemcpyHostToDevice);
         cudaMemcpy(d_w2, &w2_cu, sizeof(cuDoubleComplex), cudaMemcpyHostToDevice);
         
+        auto transfer_end = std::chrono::high_resolution_clock::now();
+        transfer_time_ += std::chrono::duration<double, std::milli>(transfer_end - transfer_start).count();
+
+        // 统计计算时延
+        auto compute_start = std::chrono::high_resolution_clock::now();
+        
         // 调用GPU内核
         add_states(&state_pool_, d_src1, d_w1, d_src2, d_w2, d_dst, 1);
+        
+        cudaDeviceSynchronize();
+        
+        auto compute_end = std::chrono::high_resolution_clock::now();
+        computation_time_ += std::chrono::duration<double, std::milli>(compute_end - compute_start).count();
         
         // 清理
         cudaFree(d_src1);
@@ -218,7 +233,8 @@ HDDNode* QuantumCircuit::apply_cz_recursive(HDDNode* node, int control, int targ
 QuantumCircuit::QuantumCircuit(int num_qubits, int num_qumodes, int cv_truncation, int max_states)
     : num_qubits_(num_qubits), num_qumodes_(num_qumodes), cv_truncation_(cv_truncation),
       root_node_(nullptr), state_pool_(cv_truncation, max_states, num_qumodes),
-      is_built_(false), is_executed_(false) {
+      is_built_(false), is_executed_(false),
+      total_time_(0.0), transfer_time_(0.0), computation_time_(0.0) {
 
     if (num_qubits <= 0 || num_qumodes <= 0 || cv_truncation <= 0) {
         throw std::invalid_argument("Qubit数量、Qumode数量和截断维度必须为正数");
@@ -285,13 +301,28 @@ void QuantumCircuit::execute() {
 
     std::cout << "执行量子线路..." << std::endl;
 
+    // 重置时间统计
+    total_time_ = 0.0;
+    transfer_time_ = 0.0;
+    computation_time_ = 0.0;
+
+    // 记录总开始时间
+    auto start_total = std::chrono::high_resolution_clock::now();
+
     // 执行所有门操作
     for (const auto& gate : gate_sequence_) {
         execute_gate(gate);
     }
 
+    // 记录总结束时间
+    auto end_total = std::chrono::high_resolution_clock::now();
+    total_time_ = std::chrono::duration<double, std::milli>(end_total - start_total).count();
+
     is_executed_ = true;
     std::cout << "量子线路执行完成" << std::endl;
+    std::cout << "执行时间: " << total_time_ << " ms" << std::endl;
+    std::cout << "传输时延: " << transfer_time_ << " ms" << std::endl;
+    std::cout << "计算时延: " << computation_time_ << " ms" << std::endl;
 }
 
 /**
@@ -318,6 +349,11 @@ void QuantumCircuit::reset() {
     gate_sequence_.clear();
     is_built_ = false;
     is_executed_ = false;
+    
+    // 重置时间统计
+    total_time_ = 0.0;
+    transfer_time_ = 0.0;
+    computation_time_ = 0.0;
 }
 
 /**
@@ -406,14 +442,23 @@ void QuantumCircuit::execute_level0_gate(const GateParams& gate) {
 
     if (target_states.empty()) return;
 
+    // 统计传输时延
+    auto transfer_start = std::chrono::high_resolution_clock::now();
+    
     // 上传状态ID到GPU
     int* d_target_ids = nullptr;
     CHECK_CUDA(cudaMalloc(&d_target_ids, target_states.size() * sizeof(int)));
     CHECK_CUDA(cudaMemcpy(d_target_ids, target_states.data(),
                target_states.size() * sizeof(int), cudaMemcpyHostToDevice));
+               
+    auto transfer_end = std::chrono::high_resolution_clock::now();
+    transfer_time_ += std::chrono::duration<double, std::milli>(transfer_end - transfer_start).count();
 
     double param = gate.params.empty() ? 0.0 : gate.params[0].real();
 
+    // 统计计算时延
+    auto compute_start = std::chrono::high_resolution_clock::now();
+    
     switch (gate.type) {
         case GateType::PHASE_ROTATION:
             apply_phase_rotation(&state_pool_, d_target_ids, target_states.size(), param);
@@ -431,6 +476,9 @@ void QuantumCircuit::execute_level0_gate(const GateParams& gate) {
     // 检查GPU内核执行错误
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
+    
+    auto compute_end = std::chrono::high_resolution_clock::now();
+    computation_time_ += std::chrono::duration<double, std::milli>(compute_end - compute_start).count();
 
     CHECK_CUDA(cudaFree(d_target_ids));
 }
@@ -443,11 +491,20 @@ void QuantumCircuit::execute_level1_gate(const GateParams& gate) {
 
     if (target_states.empty()) return;
 
+    // 统计传输时延
+    auto transfer_start = std::chrono::high_resolution_clock::now();
+    
     int* d_target_ids = nullptr;
     CHECK_CUDA(cudaMalloc(&d_target_ids, target_states.size() * sizeof(int)));
     CHECK_CUDA(cudaMemcpy(d_target_ids, target_states.data(),
                target_states.size() * sizeof(int), cudaMemcpyHostToDevice));
+               
+    auto transfer_end = std::chrono::high_resolution_clock::now();
+    transfer_time_ += std::chrono::duration<double, std::milli>(transfer_end - transfer_start).count();
 
+    // 统计计算时延
+    auto compute_start = std::chrono::high_resolution_clock::now();
+    
     switch (gate.type) {
         case GateType::CREATION_OPERATOR:
             apply_creation_operator(&state_pool_, d_target_ids, target_states.size());
@@ -462,6 +519,9 @@ void QuantumCircuit::execute_level1_gate(const GateParams& gate) {
     // 检查GPU内核执行错误
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
+    
+    auto compute_end = std::chrono::high_resolution_clock::now();
+    computation_time_ += std::chrono::duration<double, std::milli>(compute_end - compute_start).count();
 
     CHECK_CUDA(cudaFree(d_target_ids));
 }
@@ -474,17 +534,31 @@ void QuantumCircuit::execute_level2_gate(const GateParams& gate) {
 
     if (target_states.empty()) return;
 
+    // 统计传输时延
+    auto transfer_start = std::chrono::high_resolution_clock::now();
+    
     int* d_target_ids = nullptr;
     CHECK_CUDA(cudaMalloc(&d_target_ids, target_states.size() * sizeof(int)));
     CHECK_CUDA(cudaMemcpy(d_target_ids, target_states.data(),
                target_states.size() * sizeof(int), cudaMemcpyHostToDevice));
+               
+    auto transfer_end = std::chrono::high_resolution_clock::now();
+    transfer_time_ += std::chrono::duration<double, std::milli>(transfer_end - transfer_start).count();
 
     if (gate.type == GateType::DISPLACEMENT && !gate.params.empty()) {
         cuDoubleComplex alpha = make_cuDoubleComplex(gate.params[0].real(), gate.params[0].imag());
+        
+        // 统计计算时延
+        auto compute_start = std::chrono::high_resolution_clock::now();
+        
         apply_displacement_gate(&state_pool_, d_target_ids, target_states.size(), alpha);
+        
         // 检查GPU内核执行错误
         CHECK_CUDA(cudaGetLastError());
         CHECK_CUDA(cudaDeviceSynchronize());
+        
+        auto compute_end = std::chrono::high_resolution_clock::now();
+        computation_time_ += std::chrono::duration<double, std::milli>(compute_end - compute_start).count();
     } else {
         // 使用ELL格式的通用实现
         FockELLOperator* ell_op = prepare_ell_operator(gate);
@@ -494,6 +568,9 @@ void QuantumCircuit::execute_level2_gate(const GateParams& gate) {
             
             // 清除之前的CUDA错误
             cudaGetLastError();
+            
+            // 统计计算时延
+            auto compute_start = std::chrono::high_resolution_clock::now();
             
             apply_single_mode_gate(&state_pool_, ell_op, d_target_ids, target_states.size());
             
@@ -507,6 +584,10 @@ void QuantumCircuit::execute_level2_gate(const GateParams& gate) {
             
             // 在删除ELL操作符之前，确保GPU操作完成
             CHECK_CUDA(cudaDeviceSynchronize());
+            
+            auto compute_end = std::chrono::high_resolution_clock::now();
+            computation_time_ += std::chrono::duration<double, std::milli>(compute_end - compute_start).count();
+            
             delete ell_op;
         } else {
             // ELL算符为空或无效
@@ -526,10 +607,16 @@ void QuantumCircuit::execute_level3_gate(const GateParams& gate) {
 
     if (target_states.empty()) return;
 
+    // 统计传输时延
+    auto transfer_start = std::chrono::high_resolution_clock::now();
+    
     int* d_target_ids = nullptr;
     CHECK_CUDA(cudaMalloc(&d_target_ids, target_states.size() * sizeof(int)));
     CHECK_CUDA(cudaMemcpy(d_target_ids, target_states.data(),
                target_states.size() * sizeof(int), cudaMemcpyHostToDevice));
+               
+    auto transfer_end = std::chrono::high_resolution_clock::now();
+    transfer_time_ += std::chrono::duration<double, std::milli>(transfer_end - transfer_start).count();
 
     if (gate.type == GateType::BEAM_SPLITTER && gate.params.size() >= 2) {
         // std::cout << "警告：分束器门实现与张量积基底不兼容，跳过执行" << std::endl;
@@ -544,11 +631,17 @@ void QuantumCircuit::execute_level3_gate(const GateParams& gate) {
         CHECK_CUDA(cudaMalloc(&d_state_id, sizeof(int)));
         CHECK_CUDA(cudaMemcpy(d_state_id, &state_id, sizeof(int), cudaMemcpyHostToDevice));
 
+        // 统计计算时延
+        auto compute_start = std::chrono::high_resolution_clock::now();
+        
         apply_beam_splitter(&state_pool_, d_state_id, 1, theta, phi, max_photon);
 
         // 检查GPU内核执行错误
         CHECK_CUDA(cudaGetLastError());
         CHECK_CUDA(cudaDeviceSynchronize());
+        
+        auto compute_end = std::chrono::high_resolution_clock::now();
+        computation_time_ += std::chrono::duration<double, std::milli>(compute_end - compute_start).count();
 
         CHECK_CUDA(cudaFree(d_state_id));
     }
@@ -741,6 +834,20 @@ void QuantumCircuit::execute_hybrid_gate(const GateParams& gate) {
             execute_conditional_beam_splitter(gate);
             break;
         }
+        case GateType::CONDITIONAL_TWO_MODE_SQUEEZING: {
+            if (gate.target_qubits.size() < 1 || gate.target_qumodes.size() < 2) {
+                throw std::runtime_error("CTMS门需要控制Qubit和两个目标Qumode");
+            }
+            execute_conditional_two_mode_squeezing(gate);
+            break;
+        }
+        case GateType::CONDITIONAL_SUM: {
+            if (gate.target_qubits.size() < 1 || gate.target_qumodes.size() < 2) {
+                throw std::runtime_error("SUM门需要控制Qubit和两个目标Qumode");
+            }
+            execute_conditional_sum(gate);
+            break;
+        }
 
         // 混合型相互作用门
         case GateType::RABI_INTERACTION: {
@@ -834,6 +941,9 @@ HDDNode* QuantumCircuit::apply_conditional_displacement_recursive(
  * 对单个状态应用位移门
  */
 void QuantumCircuit::apply_displacement_to_state(int state_id, std::complex<double> alpha) {
+    // 统计传输时延
+    auto transfer_start = std::chrono::high_resolution_clock::now();
+    
     // 上传位移参数到GPU
     cuDoubleComplex alpha_cu = make_cuDoubleComplex(alpha.real(), alpha.imag());
     int* d_state_id = nullptr;
@@ -843,9 +953,20 @@ void QuantumCircuit::apply_displacement_to_state(int state_id, std::complex<doub
     CHECK_CUDA(cudaMalloc(&d_alpha, sizeof(cuDoubleComplex)));
     CHECK_CUDA(cudaMemcpy(d_state_id, &state_id, sizeof(int), cudaMemcpyHostToDevice));
     CHECK_CUDA(cudaMemcpy(d_alpha, &alpha_cu, sizeof(cuDoubleComplex), cudaMemcpyHostToDevice));
+    
+    auto transfer_end = std::chrono::high_resolution_clock::now();
+    transfer_time_ += std::chrono::duration<double, std::milli>(transfer_end - transfer_start).count();
 
+    // 统计计算时延
+    auto compute_start = std::chrono::high_resolution_clock::now();
+    
     // 调用GPU位移门内核
     apply_displacement_gate(&state_pool_, d_state_id, 1, alpha_cu);
+    
+    CHECK_CUDA(cudaDeviceSynchronize());
+    
+    auto compute_end = std::chrono::high_resolution_clock::now();
+    computation_time_ += std::chrono::duration<double, std::milli>(compute_end - compute_start).count();
 
     CHECK_CUDA(cudaFree(d_state_id));
     CHECK_CUDA(cudaFree(d_alpha));
@@ -912,12 +1033,21 @@ void QuantumCircuit::apply_squeezing_to_state(int state_id, std::complex<double>
         // 确保ELL算符已上传到GPU
         ell_op->upload_to_gpu();
         
+        // 统计传输时延
+        auto transfer_start = std::chrono::high_resolution_clock::now();
+        
         int* d_state_id = nullptr;
         CHECK_CUDA(cudaMalloc(&d_state_id, sizeof(int)));
         CHECK_CUDA(cudaMemcpy(d_state_id, &state_id, sizeof(int), cudaMemcpyHostToDevice));
+        
+        auto transfer_end = std::chrono::high_resolution_clock::now();
+        transfer_time_ += std::chrono::duration<double, std::milli>(transfer_end - transfer_start).count();
 
         // 清除之前的CUDA错误
         cudaGetLastError();
+        
+        // 统计计算时延
+        auto compute_start = std::chrono::high_resolution_clock::now();
         
         apply_single_mode_gate(&state_pool_, ell_op, d_state_id, 1);
         
@@ -930,6 +1060,10 @@ void QuantumCircuit::apply_squeezing_to_state(int state_id, std::complex<double>
         }
         
         CHECK_CUDA(cudaDeviceSynchronize());
+        
+        auto compute_end = std::chrono::high_resolution_clock::now();
+        computation_time_ += std::chrono::duration<double, std::milli>(compute_end - compute_start).count();
+        
         CHECK_CUDA(cudaFree(d_state_id));
         delete ell_op;
     } else {
@@ -1412,6 +1546,17 @@ QuantumCircuit::CircuitStats QuantumCircuit::get_stats() const {
         static_cast<int>(gate_sequence_.size()),
         state_pool_.active_count,
         node_manager_.get_cache_size()
+    };
+}
+
+/**
+ * 获取时间统计信息
+ */
+QuantumCircuit::TimeStats QuantumCircuit::get_time_stats() const {
+    return {
+        total_time_,
+        transfer_time_,
+        computation_time_
     };
 }
 

@@ -325,7 +325,7 @@ Matrix create_displacement_matrix(int dim, Complex alpha) {
     matrix_add_to(generator, temp);
 
     // 计算矩阵指数: 使用更高的展开阶数以获得更好的精度
-    // exp(generator) ≈ I + A + A²/2! + A³/3! + A⁴/4! + A⁵/5! + A⁶/6!
+    // exp(generator) ≈ I + A + A²/2! + A³/3! + A⁴/4! + A⁵/5! + A⁶/6! + A⁷/7! + A⁸/8! + A⁹/9! + A¹⁰/10!
     Matrix result = create_identity_matrix(dim);  // I
 
     Matrix A_power = generator;  // A^1
@@ -345,6 +345,18 @@ Matrix create_displacement_matrix(int dim, Complex alpha) {
 
     A_power = matrix_multiply(A_power, generator);  // A^6
     matrix_add_to(result, matrix_multiply_scalar(A_power, 1.0/720.0)); // + A⁶/6!
+
+    A_power = matrix_multiply(A_power, generator);  // A^7
+    matrix_add_to(result, matrix_multiply_scalar(A_power, 1.0/5040.0)); // + A⁷/7!
+
+    A_power = matrix_multiply(A_power, generator);  // A^8
+    matrix_add_to(result, matrix_multiply_scalar(A_power, 1.0/40320.0)); // + A⁸/8!
+
+    A_power = matrix_multiply(A_power, generator);  // A^9
+    matrix_add_to(result, matrix_multiply_scalar(A_power, 1.0/362880.0)); // + A⁹/9!
+
+    A_power = matrix_multiply(A_power, generator);  // A^10
+    matrix_add_to(result, matrix_multiply_scalar(A_power, 1.0/3628800.0)); // + A¹⁰/10!
 
     return result;
 }

@@ -636,6 +636,156 @@ void copy_states(CVStatePool* state_pool,
     CHECK_CUDA(cudaFree(d_dst));
 }
 
+// ==========================================
+// 8. Echo Controlled Displacement (ECD)
+// ==========================================
+
+void apply_echo_controlled_displacement(CVStatePool* state_pool,
+                                       const std::vector<int>& controlled_states,
+                                       cuDoubleComplex theta) {
+    // ECD(θ) = CD(θ, -θ)
+    cuDoubleComplex beta = make_cuDoubleComplex(-cuCreal(theta), -cuCimag(theta));
+    
+    // 实现与 CD 相同，但 beta = -theta
+    // 复用 CD 的实现
+    if (controlled_states.empty()) return;
+
+    int* d_state_ids = nullptr;
+    CHECK_CUDA(cudaMalloc(&d_state_ids, controlled_states.size() * sizeof(int)));
+    CHECK_CUDA(cudaMemcpy(d_state_ids, controlled_states.data(),
+               controlled_states.size() * sizeof(int), cudaMemcpyHostToDevice));
+
+    size_t buffer_stride = state_pool->max_total_dim;
+    cuDoubleComplex* temp_buffer = nullptr;
+    size_t buffer_size = controlled_states.size() * buffer_stride * sizeof(cuDoubleComplex);
+    CHECK_CUDA(cudaMalloc(&temp_buffer, buffer_size));
+
+    dim3 block_dim(256);
+    dim3 grid_dim((state_pool->max_total_dim + block_dim.x - 1) / block_dim.x, controlled_states.size());
+
+    // 应用 D(theta) 到 |0⟩ 分量，D(-theta) 到 |1⟩ 分量
+    apply_controlled_displacement_kernel<<<grid_dim, block_dim>>>(
+        state_pool->data, 
+        state_pool->state_offsets,
+        state_pool->state_dims,
+        state_pool->capacity,
+        d_state_ids, controlled_states.size(), theta, temp_buffer, buffer_stride
+    );
+
+    CHECK_CUDA(cudaGetLastError());
+    CHECK_CUDA(cudaDeviceSynchronize());
+
+    copy_back_hybrid_kernel<<<grid_dim, block_dim>>>(
+        state_pool->data, 
+        state_pool->state_offsets,
+        state_pool->state_dims,
+        state_pool->capacity,
+        d_state_ids, controlled_states.size(), temp_buffer, buffer_stride
+    );
+    CHECK_CUDA(cudaGetLastError());
+    CHECK_CUDA(cudaDeviceSynchronize());
+
+    CHECK_CUDA(cudaFree(d_state_ids));
+    CHECK_CUDA(cudaFree(temp_buffer));
+}
+
+// ==========================================
+// 9. Controlled X/Y Rotation (CRX, CRY)
+// ==========================================
+
+__global__ void apply_controlled_x_rotation_kernel(
+    cuDoubleComplex* all_states_data,
+    const size_t* state_offsets,
+    const int* state_dims,
+    const int* target_state_ids,
+    int num_states,
+    double theta
+) {
+    int state_id = target_state_ids[blockIdx.y];
+    int n = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int current_dim = state_dims[state_id];
+    if (n >= current_dim) return;
+
+    size_t offset = state_offsets[state_id];
+    cuDoubleComplex* psi = &all_states_data[offset];
+    
+    // CRX(theta) = exp[-i theta/2 sigma_x ⊗ n]
+    // sigma_x 作用于 qubit，n 作用于 qumode
+    double phase = (theta / 2.0) * (double)n;
+    double cos_val = cos(phase);
+    double sin_val = sin(phase);
+    cuDoubleComplex phase_factor = make_cuDoubleComplex(cos_val, sin_val);
+    
+    psi[n] = cuCmul(psi[n], phase_factor);
+}
+
+void apply_controlled_x_rotation(CVStatePool* state_pool,
+                                 const std::vector<int>& controlled_states,
+                                 double theta) {
+    if (controlled_states.empty()) return;
+    int* d_ids = nullptr;
+    CHECK_CUDA(cudaMalloc(&d_ids, controlled_states.size() * sizeof(int)));
+    CHECK_CUDA(cudaMemcpy(d_ids, controlled_states.data(), controlled_states.size() * sizeof(int), cudaMemcpyHostToDevice));
+    
+    dim3 block_dim(256);
+    dim3 grid_dim((state_pool->max_total_dim + block_dim.x - 1) / block_dim.x, controlled_states.size());
+
+    apply_controlled_x_rotation_kernel<<<grid_dim, block_dim>>>(
+        state_pool->data, 
+        state_pool->state_offsets,
+        state_pool->state_dims,
+        d_ids, controlled_states.size(), theta
+    );
+    CHECK_CUDA(cudaFree(d_ids));
+}
+
+__global__ void apply_controlled_y_rotation_kernel(
+    cuDoubleComplex* all_states_data,
+    const size_t* state_offsets,
+    const int* state_dims,
+    const int* target_state_ids,
+    int num_states,
+    double theta
+) {
+    int state_id = target_state_ids[blockIdx.y];
+    int n = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int current_dim = state_dims[state_id];
+    if (n >= current_dim) return;
+
+    size_t offset = state_offsets[state_id];
+    cuDoubleComplex* psi = &all_states_data[offset];
+    
+    // CRY(theta) = exp[-i theta/2 sigma_y ⊗ n]
+    double phase = (theta / 2.0) * (double)n;
+    double cos_val = cos(phase);
+    double sin_val = sin(phase);
+    cuDoubleComplex phase_factor = make_cuDoubleComplex(cos_val, sin_val);
+    
+    psi[n] = cuCmul(psi[n], phase_factor);
+}
+
+void apply_controlled_y_rotation(CVStatePool* state_pool,
+                                 const std::vector<int>& controlled_states,
+                                 double theta) {
+    if (controlled_states.empty()) return;
+    int* d_ids = nullptr;
+    CHECK_CUDA(cudaMalloc(&d_ids, controlled_states.size() * sizeof(int)));
+    CHECK_CUDA(cudaMemcpy(d_ids, controlled_states.data(), controlled_states.size() * sizeof(int), cudaMemcpyHostToDevice));
+    
+    dim3 block_dim(256);
+    dim3 grid_dim((state_pool->max_total_dim + block_dim.x - 1) / block_dim.x, controlled_states.size());
+
+    apply_controlled_y_rotation_kernel<<<grid_dim, block_dim>>>(
+        state_pool->data, 
+        state_pool->state_offsets,
+        state_pool->state_dims,
+        d_ids, controlled_states.size(), theta
+    );
+    CHECK_CUDA(cudaFree(d_ids));
+}
+
 // Legacy Interface Wrapper (to satisfy existing calls)
 void apply_hybrid_control_gate(HDDNode* root_node,
                              CVStatePool* state_pool,

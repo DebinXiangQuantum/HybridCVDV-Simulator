@@ -309,6 +309,12 @@ void CUDASparseMatrix::uploadToDevice() {
         CUDA_CHECK(cudaFree(device_data_.col_indices));
     }
     
+<<<<<<< HEAD
+=======
+    // 释放 CSR 缓存（因为 COO 数据改变了）
+    freeCSRData();
+    
+>>>>>>> 6aaa4c4 (拓展模拟器门)
     // 更新非零元素数量
     device_data_.nnz = temp_values_.size();
     
@@ -1504,7 +1510,11 @@ CUDASparseMatrix::CUDASparseMatrix(const CUDASparseMatrix& other) :
     device_data_.col_indices = nullptr;
     device_data_.nnz = 0;
     
+<<<<<<< HEAD
     // 初始化 CSR 数据指针为nullptr
+=======
+    // 初始化 CSR 数据
+>>>>>>> 6aaa4c4 (拓展模拟器门)
     csr_data_.values = nullptr;
     csr_data_.col_indices = nullptr;
     csr_data_.row_ptr = nullptr;
@@ -1535,6 +1545,12 @@ CUDASparseMatrix& CUDASparseMatrix::operator=(const CUDASparseMatrix& other) {
             device_data_.col_indices = nullptr;
         }
         
+<<<<<<< HEAD
+=======
+        // 释放 CSR 数据
+        freeCSRData();
+        
+>>>>>>> 6aaa4c4 (拓展模拟器门)
         // 复制基本属性
         rows_ = other.rows_;
         cols_ = other.cols_;
@@ -1570,7 +1586,11 @@ CUDASparseMatrix::CUDASparseMatrix(CUDASparseMatrix&& other) :
     device_data_.col_indices = other.device_data_.col_indices;
     device_data_.nnz = other.device_data_.nnz;
     
+<<<<<<< HEAD
     // 接管other的 CSR 数据指针
+=======
+    // 接管 CSR 数据
+>>>>>>> 6aaa4c4 (拓展模拟器门)
     csr_data_.values = other.csr_data_.values;
     csr_data_.col_indices = other.csr_data_.col_indices;
     csr_data_.row_ptr = other.csr_data_.row_ptr;
@@ -1583,7 +1603,11 @@ CUDASparseMatrix::CUDASparseMatrix(CUDASparseMatrix&& other) :
     other.device_data_.col_indices = nullptr;
     other.device_data_.nnz = 0;
     
+<<<<<<< HEAD
     // 将other的 CSR 数据指针设置为nullptr，避免双重释放
+=======
+    // 将other的 CSR 数据指针设置为nullptr
+>>>>>>> 6aaa4c4 (拓展模拟器门)
     other.csr_data_.values = nullptr;
     other.csr_data_.col_indices = nullptr;
     other.csr_data_.row_ptr = nullptr;
@@ -1611,9 +1635,13 @@ CUDASparseMatrix& CUDASparseMatrix::operator=(CUDASparseMatrix&& other) {
         }
         
         // 释放当前的 CSR 数据
+<<<<<<< HEAD
         if (csr_data_.allocated) {
             freeCSRData();
         }
+=======
+        freeCSRData();
+>>>>>>> 6aaa4c4 (拓展模拟器门)
         
         // 接管other的基本属性
         rows_ = other.rows_;
@@ -1625,7 +1653,11 @@ CUDASparseMatrix& CUDASparseMatrix::operator=(CUDASparseMatrix&& other) {
         device_data_.col_indices = other.device_data_.col_indices;
         device_data_.nnz = other.device_data_.nnz;
         
+<<<<<<< HEAD
         // 接管other的 CSR 数据指针
+=======
+        // 接管 CSR 数据
+>>>>>>> 6aaa4c4 (拓展模拟器门)
         csr_data_.values = other.csr_data_.values;
         csr_data_.col_indices = other.csr_data_.col_indices;
         csr_data_.row_ptr = other.csr_data_.row_ptr;
@@ -1643,7 +1675,11 @@ CUDASparseMatrix& CUDASparseMatrix::operator=(CUDASparseMatrix&& other) {
         other.device_data_.col_indices = nullptr;
         other.device_data_.nnz = 0;
         
+<<<<<<< HEAD
         // 将other的 CSR 数据指针设置为nullptr，避免双重释放
+=======
+        // 将other的 CSR 数据指针设置为nullptr
+>>>>>>> 6aaa4c4 (拓展模拟器门)
         other.csr_data_.values = nullptr;
         other.csr_data_.col_indices = nullptr;
         other.csr_data_.row_ptr = nullptr;
@@ -1707,19 +1743,33 @@ void CUDASparseMatrix::convertCOOtoCSR() const {
     
     // 3. 上传 CSR 数据到 GPU
     non_const_this->csr_data_.nnz = values.size();
+<<<<<<< HEAD
     int nnz = non_const_this->csr_data_.nnz;
     
     CUDA_CHECK(cudaMalloc(&non_const_this->csr_data_.values, 
                           nnz * sizeof(Complex)));
     CUDA_CHECK(cudaMalloc(&non_const_this->csr_data_.col_indices, 
                           nnz * sizeof(int)));
+=======
+    
+    CUDA_CHECK(cudaMalloc(&non_const_this->csr_data_.values, 
+                          csr_data_.nnz * sizeof(Complex)));
+    CUDA_CHECK(cudaMalloc(&non_const_this->csr_data_.col_indices, 
+                          csr_data_.nnz * sizeof(int)));
+>>>>>>> 6aaa4c4 (拓展模拟器门)
     CUDA_CHECK(cudaMalloc(&non_const_this->csr_data_.row_ptr, 
                           (rows_ + 1) * sizeof(int)));
     
     CUDA_CHECK(cudaMemcpy(non_const_this->csr_data_.values, values.data(), 
+<<<<<<< HEAD
                           nnz * sizeof(Complex), cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(non_const_this->csr_data_.col_indices, col_indices.data(), 
                           nnz * sizeof(int), cudaMemcpyHostToDevice));
+=======
+                          csr_data_.nnz * sizeof(Complex), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(non_const_this->csr_data_.col_indices, col_indices.data(), 
+                          csr_data_.nnz * sizeof(int), cudaMemcpyHostToDevice));
+>>>>>>> 6aaa4c4 (拓展模拟器门)
     CUDA_CHECK(cudaMemcpy(non_const_this->csr_data_.row_ptr, row_ptr.data(), 
                           (rows_ + 1) * sizeof(int), cudaMemcpyHostToDevice));
     
@@ -1731,6 +1781,7 @@ void CUDASparseMatrix::freeCSRData() const {
     if (csr_data_.allocated) {
         CUDASparseMatrix* non_const_this = const_cast<CUDASparseMatrix*>(this);
         
+<<<<<<< HEAD
         // 安全释放内存，避免空指针错误
         if (non_const_this->csr_data_.values != nullptr) {
             CUDA_CHECK(cudaFree(non_const_this->csr_data_.values));
@@ -1741,6 +1792,17 @@ void CUDASparseMatrix::freeCSRData() const {
             non_const_this->csr_data_.col_indices = nullptr;
         }
         if (non_const_this->csr_data_.row_ptr != nullptr) {
+=======
+        if (csr_data_.values != nullptr) {
+            CUDA_CHECK(cudaFree(non_const_this->csr_data_.values));
+            non_const_this->csr_data_.values = nullptr;
+        }
+        if (csr_data_.col_indices != nullptr) {
+            CUDA_CHECK(cudaFree(non_const_this->csr_data_.col_indices));
+            non_const_this->csr_data_.col_indices = nullptr;
+        }
+        if (csr_data_.row_ptr != nullptr) {
+>>>>>>> 6aaa4c4 (拓展模拟器门)
             CUDA_CHECK(cudaFree(non_const_this->csr_data_.row_ptr));
             non_const_this->csr_data_.row_ptr = nullptr;
         }

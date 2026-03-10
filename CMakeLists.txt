@@ -83,6 +83,8 @@ if(CUDA_FOUND)
         src/gpu/two_mode_gates.cu
         src/gpu/hybrid_gates.cu
         src/gpu/squeezing_gate.cu
+        src/gpu/qubit_gates.cu
+        src/gpu/snap_gates.cu
     )
 else()
     set(GPU_SOURCES
@@ -163,20 +165,8 @@ if(CUDA_FOUND)
     target_link_libraries(${PROJECT_NAME}_main ${CUDA_LIBRARIES})
 endif()
 
-# 验证程序
-add_executable(${PROJECT_NAME}_validation tests/test_validation.cpp)
-target_link_libraries(${PROJECT_NAME}_validation ${PROJECT_NAME})
-
-# GPU验证程序
-if(CUDA_FOUND)
-    add_executable(${PROJECT_NAME}_gpu_validation tests/test_gpu_validation.cpp)
-    target_link_libraries(${PROJECT_NAME}_gpu_validation ${PROJECT_NAME} ${CUDA_LIBRARIES})
-else()
-    # CPU-only版本的GPU验证程序
-    add_executable(${PROJECT_NAME}_gpu_validation tests/test_gpu_validation.cpp)
-    target_link_libraries(${PROJECT_NAME}_gpu_validation ${PROJECT_NAME})
-    target_compile_definitions(${PROJECT_NAME}_gpu_validation PRIVATE CPU_ONLY_GPU_TEST)
-endif()
+# 验证程序已包含在主测试套件中
+# GPU验证程序已包含在主测试套件中
 
 # 示例程序
 add_executable(${PROJECT_NAME}_examples examples/basic_usage.cpp)
@@ -185,28 +175,28 @@ if(CUDA_FOUND)
     target_link_libraries(${PROJECT_NAME}_examples ${CUDA_LIBRARIES})
 endif()
 
-# 基准测试程序
+# 基准测试程序 - 暂时注释掉不存在的文件
 if(CUDA_FOUND)
-    add_executable(benchmark_cv_gates tests/benchmark_cv_gates.cpp)
-    target_link_libraries(benchmark_cv_gates ${PROJECT_NAME} ${CUDA_LIBRARIES})
-    
-    add_executable(test_bs_fidelity tests/test_bs_fidelity.cpp)
-    target_link_libraries(test_bs_fidelity ${PROJECT_NAME} ${CUDA_LIBRARIES})
-    
-    add_executable(test_bs_recursive tests/test_bs_recursive.cpp)
-    target_link_libraries(test_bs_recursive ${PROJECT_NAME} ${CUDA_LIBRARIES})
-    
-    add_executable(test_bs_comparison tests/test_bs_comparison.cpp)
-    target_link_libraries(test_bs_comparison ${PROJECT_NAME} ${CUDA_LIBRARIES})
-    
-    add_executable(test_tms tests/test_tms.cpp)
-    target_link_libraries(test_tms ${PROJECT_NAME} ${CUDA_LIBRARIES})
-    
-    add_executable(${PROJECT_NAME}_cv_benchmark tests/test_cv_benchmark.cpp)
-    target_link_libraries(${PROJECT_NAME}_cv_benchmark ${PROJECT_NAME} GTest::gtest_main ${CUDA_LIBRARIES})
-    
-    add_executable(simple_benchmark tests/simple_benchmark.cpp)
-    target_link_libraries(simple_benchmark ${PROJECT_NAME} ${CUDA_LIBRARIES})
+    # add_executable(benchmark_cv_gates tests/benchmark_cv_gates.cpp)
+    # target_link_libraries(benchmark_cv_gates ${PROJECT_NAME} ${CUDA_LIBRARIES})
+    # 
+    # add_executable(test_bs_fidelity tests/test_bs_fidelity.cpp)
+    # target_link_libraries(test_bs_fidelity ${PROJECT_NAME} ${CUDA_LIBRARIES})
+    # 
+    # add_executable(test_bs_recursive tests/test_bs_recursive.cpp)
+    # target_link_libraries(test_bs_recursive ${PROJECT_NAME} ${CUDA_LIBRARIES})
+    # 
+    # add_executable(test_bs_comparison tests/test_bs_comparison.cpp)
+    # target_link_libraries(test_bs_comparison ${PROJECT_NAME} ${CUDA_LIBRARIES})
+    # 
+    # add_executable(test_tms tests/test_tms.cpp)
+    # target_link_libraries(test_tms ${PROJECT_NAME} ${CUDA_LIBRARIES})
+    # 
+    # add_executable(${PROJECT_NAME}_cv_benchmark tests/test_cv_benchmark.cpp)
+    # target_link_libraries(${PROJECT_NAME}_cv_benchmark ${PROJECT_NAME} GTest::gtest_main ${CUDA_LIBRARIES})
+    # 
+    # add_executable(simple_benchmark tests/simple_benchmark.cpp)
+    # target_link_libraries(simple_benchmark ${PROJECT_NAME} ${CUDA_LIBRARIES})
 endif()
 
 # 测试 (使用自动下载的GoogleTest)
@@ -220,6 +210,13 @@ endif()
         tests/test_ladder_gates.cpp
         tests/test_hdd_node.cpp
         tests/test_system.cpp
+        tests/test_snap_gates.cpp
+        tests/test_sf_two_mode_gates.cpp
+        tests/test_sf_single_mode_gates.cpp
+        tests/test_number_operator.cpp
+        tests/test_qubit_gates.cpp
+        tests/test_validation.cpp
+        tests/test_gpu_validation.cpp
     )
 
     add_executable(${PROJECT_NAME}_tests ${TEST_SOURCES})

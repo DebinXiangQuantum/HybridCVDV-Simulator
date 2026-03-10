@@ -1,0 +1,40 @@
+门类别,门名称,符号,函数名,参数,矩阵维度,描述,性能测量
+基础量子比特门,Pauli X,X,预定义,无,2×2,比特翻转门,否
+基础量子比特门,Pauli Y,Y,预定义,无,2×2,Y旋转门,否
+基础量子比特门,Pauli Z,Z,预定义,无,2×2,相位翻转门,否
+基础量子比特门,S+,σ+,预定义,无,2×2,升算符,否
+基础量子比特门,S-,σ-,预定义,无,2×2,降算符,否
+基础量子比特门,P0,|0⟩⟨0|,预定义,无,2×2,投影到|0⟩,否
+基础量子比特门,P1,|1⟩⟨1|,预定义,无,2×2,投影到|1⟩,否
+基础CV算符,单位算符,I,get_eye,dim,dim×dim,单位矩阵,否
+基础CV算符,湮灭算符,a,get_a,cutoff,cutoff×cutoff,降低光子数,否
+基础CV算符,产生算符,a†,get_ad,cutoff,cutoff×cutoff,增加光子数,否
+基础CV算符,数算符,n,get_N,cutoff,cutoff×cutoff,光子数算符,否
+基础CV算符,投影算符,|n⟩⟨n|,get_projector,"n, cutoff",cutoff×cutoff,投影到Fock态n,否
+单模门,相位旋转,R(θ),r,"theta, cutoff",cutoff×cutoff,相空间旋转,是
+单模门,位移,D(α),d,"alpha, cutoff",cutoff×cutoff,相空间位移,是
+单模门,单模压缩,S(θ),s,"theta, cutoff",cutoff×cutoff,单模压缩,是
+双模门,双模压缩,S₂(θ),s2,"theta, cutoff_a, cutoff_b",(cutoff_a×cutoff_b)²,双模压缩,是
+双模门,分束器,BS(θ),bs,"theta, cutoff_a, cutoff_b",(cutoff_a×cutoff_b)²,光束分裂器,是
+双模门,指数SWAP,eSWAP(θ),eswap,"theta, cutoff_a, cutoff_b",(cutoff_a×cutoff_b)²,指数交换门,是
+双模门,双模求和,SUM(s),sum,"scale, cutoff_a, cutoff_b",(cutoff_a×cutoff_b)²,双模求和门,是
+三模门,三模压缩,S₃(θ),s3,"theta, cutoff_a, cutoff_b, cutoff_c",(cutoff_a×cutoff_b×cutoff_c)²,三模压缩,是
+受控门,受控相位旋转,CR(θ),cr,"theta, cutoff",2×cutoff,受控Z旋转,是
+受控门,受控X旋转,CRX(θ),crx,"theta, cutoff",2×cutoff,受控X旋转,是
+受控门,受控Y旋转,CRY(θ),cry,"theta, cutoff",2×cutoff,受控Y旋转,是
+受控门,受控位移,CD(α,β),cd,"alpha, beta, cutoff",2×cutoff,受控位移,是
+受控门,回声受控位移,ECD(θ),ecd,"theta, cutoff",2×cutoff,回声受控位移,是
+受控门,受控分束器,CBS(θ),cbs,"theta, cutoff_a, cutoff_b",2×(cutoff_a×cutoff_b),受控分束器,是
+受控门,受控压缩,CSQ(θ),csq,"theta, cutoff",2×cutoff,受控单模压缩,是
+受控门,受控求和,CSUM(s),csum,"scale, cutoff_a, cutoff_b",2×(cutoff_a×cutoff_b),受控双模求和,是
+SNAP类门,SNAP,SNAP(θ,n),snap,"theta, n, cutoff",cutoff×cutoff,单Fock态选择性相位,是
+SNAP类门,受控SNAP,CSNAP(θ,n),csnap,"theta, n, cutoff",2×cutoff,受控单Fock态相位,是
+SNAP类门,多态SNAP,MultiSNAP,multisnap,"phase_map, cutoff",cutoff×cutoff,多Fock态选择性相位,是
+SNAP类门,受控多态SNAP,CMultiSNAP,multicsnap,"phase_map, cutoff",2×cutoff,受控多Fock态相位,是
+特殊门,SQR门,SQR(θ),sqr,"theta, cutoff",2×cutoff,平方门,是
+特殊门,PNR门,PNR(max),pnr,"max, cutoff",2×cutoff,光子数读出支持门,是
+特殊门,Jaynes-Cummings,JC(θ,φ),jc,"theta, phi, cutoff",2×cutoff,JC相互作用,是
+特殊门,反JC,AJC(θ,φ),ajc,"theta, phi, cutoff",2×cutoff,反JC相互作用,是
+特殊门,Rabi门,RB(θ),rb,"theta, cutoff",2×cutoff,Rabi相互作用,是
+特殊门,Schwinger门,CSchwinger,cschwinger,"beta, θ₁, φ₁, θ₂, φ₂, cutoff_a, cutoff_b",2×(cutoff_a×cutoff_b),受控Schwinger门,是
+特殊门,多玻色子采样,CMultiboson,c_multiboson_sampling,"max, cutoff",cutoff×cutoff,多玻色子采样支持,是

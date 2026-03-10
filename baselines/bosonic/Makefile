@@ -3,7 +3,11 @@
 # Compiler settings
 NVCC = nvcc
 NVCCFLAGS = -O3 -arch=sm_60 -std=c++17
+<<<<<<< HEAD
 LIBS = -lcublas -lcusparse
+=======
+LIBS = -lcublas
+>>>>>>> 6aaa4c4 (拓展模拟器门)
 
 # Directories
 SRC_DIR = .

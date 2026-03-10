@@ -87,6 +87,11 @@ private:
     bool is_built_;               // 是否已构建
     bool is_executed_;            // 是否已执行
 
+    // 时间统计
+    double total_time_;           // 总执行时间 (毫秒)
+    double transfer_time_;        // 传输时延 (毫秒)
+    double computation_time_;     // 计算时延 (毫秒)
+
 public:
     /**
      * 构造函数
@@ -170,6 +175,15 @@ public:
     HDDNodeManager& get_node_manager() { return node_manager_; }
 
     /**
+     * 时间统计信息
+     */
+    struct TimeStats {
+        double total_time;          // 总执行时间 (毫秒)
+        double transfer_time;       // 传输时延 (毫秒)
+        double computation_time;    // 计算时延 (毫秒)
+    };
+
+    /**
      * 获取线路统计信息
      */
     struct CircuitStats {
@@ -181,6 +195,11 @@ public:
         size_t hdd_nodes;
     };
     CircuitStats get_stats() const;
+
+    /**
+     * 获取时间统计信息
+     */
+    TimeStats get_time_stats() const;
 
 private:
     /**

@@ -40,8 +40,8 @@ __global__ void apply_phase_rotation_kernel(
     size_t offset = state_offsets[state_idx];
     cuDoubleComplex* psi = &state_data[offset];
 
-    // 计算相位因子: exp(i * theta * n)  (注意：与SF一致，使用正号)
-    double phase = theta * static_cast<double>(n);
+    // 计算相位因子: exp(-i * theta * n)  (与参考实现一致，使用负号)
+    double phase = -theta * static_cast<double>(n);
     cuDoubleComplex phase_factor = make_cuDoubleComplex(cos(phase), sin(phase));
 
     // 应用相位旋转
@@ -75,16 +75,13 @@ __global__ void apply_kerr_kernel(
     size_t offset = state_offsets[state_idx];
     cuDoubleComplex* psi = &state_data[offset];
 
-    // f(n, chi) = chi * n * n
-    // Kerr gate: exp(i * chi * n^2)  (注意：与SF一致，使用正号)
-    double phase = chi * static_cast<double>(n * n);
+    // f(n, chi) = -chi * n * n
+    // Kerr gate: exp(-i * chi * n^2)  (与参考实现一致，使用负号)
+    double phase = -chi * static_cast<double>(n * n);
     cuDoubleComplex phase_factor = make_cuDoubleComplex(cos(phase), sin(phase)); // e^(i * phase)
 
     cuDoubleComplex current_val = psi[n];
-    psi[n] = make_cuDoubleComplex(
-        current_val.x * phase_factor.x - current_val.y * phase_factor.y,
-        current_val.x * phase_factor.y + current_val.y * phase_factor.x
-    );
+    psi[n] = cuCmul(current_val, phase_factor);
 }
 
 /**
@@ -114,15 +111,12 @@ __global__ void apply_conditional_parity_kernel(
     size_t offset = state_offsets[state_idx];
     cuDoubleComplex* psi = &state_data[offset];
 
-    // f(n, parity) = parity * pi * (n % 2)
-    double phase = parity * M_PI * static_cast<double>(n % 2);
-    cuDoubleComplex phase_factor = make_cuDoubleComplex(cos(phase), -sin(phase)); // e^(-i * phase)
+    // f(n, parity) = -parity * pi * (n % 2)
+    double phase = -parity * M_PI * static_cast<double>(n % 2);
+    cuDoubleComplex phase_factor = make_cuDoubleComplex(cos(phase), sin(phase)); // e^(i * phase)
 
     cuDoubleComplex current_val = psi[n];
-    psi[n] = make_cuDoubleComplex(
-        current_val.x * phase_factor.x - current_val.y * phase_factor.y,
-        current_val.x * phase_factor.y + current_val.y * phase_factor.x
-    );
+    psi[n] = cuCmul(current_val, phase_factor);
 }
 
 /**

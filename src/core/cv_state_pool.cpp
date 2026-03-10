@@ -15,8 +15,19 @@ CVStatePool::CVStatePool(int trunc_dim, int max_states, int num_qumodes, size_t 
     // 检查CUDA设备是否可用
     int device_count = 0;
     cudaError_t device_check = cudaGetDeviceCount(&device_count);
+    std::cout << "CUDA设备检查: device_count=" << device_count << ", error=" << cudaGetErrorString(device_check) << std::endl;
+    
     if (device_check != cudaSuccess || device_count == 0) {
-        throw std::runtime_error("CUDA设备不可用: " + std::string(cudaGetErrorString(device_check)));
+        // 尝试设置环境变量
+        setenv("LD_LIBRARY_PATH", "/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH", 1);
+        
+        // 重新检查
+        cudaError_t device_check2 = cudaGetDeviceCount(&device_count);
+        std::cout << "重新检查CUDA设备: device_count=" << device_count << ", error=" << cudaGetErrorString(device_check2) << std::endl;
+        
+        if (device_check2 != cudaSuccess || device_count == 0) {
+            throw std::runtime_error("CUDA设备不可用: " + std::string(cudaGetErrorString(device_check2)));
+        }
     }
     
     // 设置CUDA设备（使用默认设备0）

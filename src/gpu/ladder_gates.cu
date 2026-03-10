@@ -244,3 +244,68 @@ void apply_annihilation_operator(CVStatePool* state_pool, const int* target_indi
                                 std::string(cudaGetErrorString(err)));
     }
 }
+
+/**
+ * 数算符内核 n = a† a
+ * ψ_out[n] = n · ψ_in[n]
+ * 支持动态维度
+ */
+__global__ void apply_number_operator_kernel(
+    cuDoubleComplex* state_data,
+    const size_t* state_offsets,
+    const int* state_dims,
+    const int* target_indices,
+    int batch_size
+) {
+    int batch_id = blockIdx.y;
+    if (batch_id >= batch_size) return;
+
+    int state_idx = target_indices[batch_id];
+    int n = blockIdx.x * blockDim.x + threadIdx.x;
+
+    // 获取该状态的维度
+    int current_dim = state_dims[state_idx];
+    if (n >= current_dim) return;
+
+    // 获取状态向量指针 (使用偏移量)
+    size_t offset = state_offsets[state_idx];
+    cuDoubleComplex* psi = &state_data[offset];
+
+    // 数算符：n|n⟩ = n|n⟩
+    // ψ_out[n] = n · ψ_in[n]
+    double photon_number = static_cast<double>(n);
+    cuDoubleComplex current_val = psi[n];
+    psi[n] = make_cuDoubleComplex(
+        photon_number * cuCreal(current_val),
+        photon_number * cuCimag(current_val)
+    );
+}
+
+/**
+ * 主机端接口：应用数算符 n
+ * @param target_indices 设备端指针，指向目标状态ID数组
+ */
+void apply_number_operator(CVStatePool* state_pool, const int* target_indices, int batch_size) {
+    dim3 block_dim(256);
+    dim3 grid_dim((state_pool->max_total_dim + block_dim.x - 1) / block_dim.x, batch_size);
+
+    apply_number_operator_kernel<<<grid_dim, block_dim>>>(
+        state_pool->data,
+        state_pool->state_offsets,
+        state_pool->state_dims,
+        target_indices, batch_size
+    );
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        throw std::runtime_error("Number operator kernel launch failed: " +
+                                std::string(cudaGetErrorString(err)));
+    }
+
+    // 同步等待内核完成
+    err = cudaDeviceSynchronize();
+    if (err != cudaSuccess) {
+        throw std::runtime_error("Number operator kernel synchronization failed: " +
+                                std::string(cudaGetErrorString(err)));
+    }
+}
