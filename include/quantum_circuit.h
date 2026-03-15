@@ -5,12 +5,15 @@
 #include <memory>
 #include <string>
 #include <map>
+#include <unordered_map>
 #include <utility>
 #include "gaussian_mixture.h"
 #include "symplectic_math.h"
 #include "cv_state_pool.h"
 #include "fock_ell_operator.h"
 #include "hdd_node.h"
+
+class GaussianStatePool;
 
 /**
  * 门操作类型枚举
@@ -86,6 +89,7 @@ private:
     HDDNode* root_node_;          // HDD根节点
     HDDNodeManager node_manager_; // HDD节点管理器
     CVStatePool state_pool_;      // CV状态池
+    std::unique_ptr<GaussianStatePool> gaussian_state_pool_; // 持久Gaussian branch状态池
 
     std::vector<GateParams> gate_sequence_;  // 门操作序列
 
@@ -100,6 +104,7 @@ private:
     double computation_time_;     // 计算时延 (毫秒)
     double planning_time_;        // 块级编译/规划时间 (毫秒)
     int gaussian_symbolic_mode_limit_; // Gaussian symbolic路径的活跃mode上限
+    int next_symbolic_terminal_id_; // 负ID用于symbolic terminal sidecar
 
 public:
     /**
@@ -244,11 +249,24 @@ private:
         double downstream_non_gaussianity = 0.0;
         double compile_time_ms = 0.0;
         double estimated_diagonal_l2_error = 0.0;
+        double diagonal_fidelity_lower_bound = 1.0;
         size_t mixture_branch_count = 0;
         bool gaussian_ready = false;
         bool diagonal_mixture_ready = false;
         std::string compile_error;
     };
+
+    struct SymbolicGaussianBranch {
+        int gaussian_state_id = -1;
+        std::complex<double> weight{1.0, 0.0};
+        std::vector<GateParams> replay_gates;
+    };
+
+    struct SymbolicTerminalState {
+        std::vector<SymbolicGaussianBranch> branches;
+    };
+
+    std::unordered_map<int, SymbolicTerminalState> symbolic_terminal_states_;
 
     /**
      * 初始化HDD结构
@@ -292,6 +310,29 @@ private:
      */
     bool try_execute_diagonal_non_gaussian_block_with_mixture(
         const CompiledExecutionBlock& compiled_block);
+
+    /**
+     * 在GPU上对单个Fock终端态应用当前支持的Gaussian mixture近似
+     */
+    bool apply_gaussian_mixture_approximation_on_gpu(
+        int state_id,
+        const GaussianMixtureApproximation& approximation);
+
+    bool has_symbolic_terminals() const;
+    bool is_symbolic_terminal_id(int terminal_id) const;
+    void ensure_gaussian_state_pool();
+    int allocate_symbolic_terminal_id();
+    void release_symbolic_terminal(int terminal_id);
+    void clear_symbolic_terminals();
+    std::vector<int> collect_symbolic_terminal_ids(HDDNode* root) const;
+    void initialize_gaussian_vacuum_state(int gaussian_state_id);
+    int duplicate_gaussian_state(int gaussian_state_id);
+    void apply_symplectic_update_to_gaussian_states(
+        const std::vector<int>& gaussian_state_ids,
+        const SymplecticGate& gate);
+    void apply_replayable_gaussian_gate_to_state(int state_id, const GateParams& gate);
+    int project_symbolic_terminal_to_fock_state(int terminal_id);
+    bool materialize_symbolic_terminals_to_fock();
 
     /**
      * 替换当前HDD根节点并回收旧分支引用的状态

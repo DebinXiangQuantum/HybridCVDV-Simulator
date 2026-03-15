@@ -26,6 +26,19 @@ size_t integer_power(size_t base, int exponent) {
     return result;
 }
 
+size_t count_occurrences(const std::string& text, const std::string& needle) {
+    if (needle.empty()) {
+        return 0;
+    }
+    size_t count = 0;
+    size_t pos = 0;
+    while ((pos = text.find(needle, pos)) != std::string::npos) {
+        ++count;
+        pos += needle.size();
+    }
+    return count;
+}
+
 template <typename Transform>
 Reference::Vector apply_single_mode_transform(const Reference::Vector& state,
                                               int cutoff,
@@ -985,7 +998,7 @@ TEST_F(GateTest, TestDiagonalNonGaussianBlockUsesGaussianMixture) {
         QuantumCircuit circuit(1, 1, cutoff, 1024);
 
         const std::complex<double> alpha(0.30, -0.05);
-        const double chi = 0.02;
+        const double chi = 5e-4;
         const double parity = 1.0;
 
         circuit.add_gate(Gates::Displacement(0, alpha));
@@ -1016,8 +1029,8 @@ TEST_F(GateTest, TestDiagonalNonGaussianBlockUsesGaussianMixture) {
         }
 
         const Reference::ErrorMetrics metrics = Reference::compute_error_metrics(expected, actual);
-        EXPECT_LT(metrics.fidelity_deviation, 2e-2);
-        EXPECT_LT(metrics.l2_error, 2.5e-1);
+        EXPECT_LT(metrics.fidelity_deviation, 1e-4);
+        EXPECT_LT(metrics.l2_error, 2e-2);
     } catch (const std::exception& e) {
         FAIL() << "对角非高斯块Gaussian Mixture集成测试失败: " << e.what();
     }
@@ -1029,7 +1042,7 @@ TEST_F(GateTest, TestSnapBlockUsesGaussianMixture) {
         QuantumCircuit circuit(1, 1, cutoff, 1024);
 
         const std::complex<double> alpha(0.18, -0.07);
-        const double theta = M_PI / 3.0;
+        const double theta = 0.05;
         const int target_fock_state = 2;
 
         circuit.add_gate(Gates::Displacement(0, alpha));
@@ -1059,8 +1072,8 @@ TEST_F(GateTest, TestSnapBlockUsesGaussianMixture) {
         }
 
         const Reference::ErrorMetrics metrics = Reference::compute_error_metrics(expected, actual);
-        EXPECT_LT(metrics.fidelity_deviation, 2e-2);
-        EXPECT_LT(metrics.l2_error, 1.8e-1);
+        EXPECT_LT(metrics.fidelity_deviation, 1e-4);
+        EXPECT_LT(metrics.l2_error, 2e-2);
     } catch (const std::exception& e) {
         FAIL() << "SNAP块Gaussian Mixture集成测试失败: " << e.what();
     }
@@ -1072,7 +1085,7 @@ TEST_F(GateTest, TestMultiSnapBlockUsesGaussianMixture) {
         QuantumCircuit circuit(1, 1, cutoff, 1024);
 
         const std::complex<double> alpha(0.20, 0.03);
-        const std::vector<double> phase_map = {0.0, 0.35, 0.0, -0.22};
+        const std::vector<double> phase_map = {0.0, 0.01, 0.0, -0.008};
 
         circuit.add_gate(Gates::Displacement(0, alpha));
         circuit.add_gate(Gates::MultiSNAP(0, phase_map));
@@ -1102,8 +1115,8 @@ TEST_F(GateTest, TestMultiSnapBlockUsesGaussianMixture) {
         }
 
         const Reference::ErrorMetrics metrics = Reference::compute_error_metrics(expected, actual);
-        EXPECT_LT(metrics.fidelity_deviation, 2e-2);
-        EXPECT_LT(metrics.l2_error, 1.8e-1);
+        EXPECT_LT(metrics.fidelity_deviation, 1e-4);
+        EXPECT_LT(metrics.l2_error, 2e-2);
     } catch (const std::exception& e) {
         FAIL() << "Multi-SNAP块Gaussian Mixture集成测试失败: " << e.what();
     }
@@ -1116,7 +1129,7 @@ TEST_F(GateTest, TestCrossKerrBlockUsesGaussianMixture) {
 
         const std::complex<double> alpha0(0.20, -0.05);
         const std::complex<double> alpha1(-0.15, 0.08);
-        const double kappa = 0.02;
+        const double kappa = 1e-3;
 
         circuit.add_gate(Gates::Displacement(0, alpha0));
         circuit.add_gate(Gates::Displacement(1, alpha1));
@@ -1170,10 +1183,169 @@ TEST_F(GateTest, TestCrossKerrBlockUsesGaussianMixture) {
         }
 
         const Reference::ErrorMetrics metrics = Reference::compute_error_metrics(expected, actual);
-        EXPECT_LT(metrics.fidelity_deviation, 2e-2);
-        EXPECT_LT(metrics.l2_error, 1.6e-1);
+        EXPECT_LT(metrics.fidelity_deviation, 1e-4);
+        EXPECT_LT(metrics.l2_error, 2e-2);
     } catch (const std::exception& e) {
         FAIL() << "Cross-Kerr块Gaussian Mixture集成测试失败: " << e.what();
+    }
+}
+
+TEST_F(GateTest, TestGaussianMixtureBranchStaysSymbolicForFollowingGaussianBlock) {
+    try {
+        constexpr int cutoff = 16;
+        QuantumCircuit circuit(1, 1, cutoff, 1024);
+
+        const std::complex<double> alpha(0.22, -0.04);
+        const double chi = 5e-4;
+        const std::complex<double> xi(0.08, -0.03);
+
+        circuit.add_gate(Gates::Displacement(0, alpha));
+        circuit.add_gate(Gates::KerrGate(0, chi));
+        circuit.add_gate(Gates::Squeezing(0, xi));
+
+        circuit.build();
+
+        testing::internal::CaptureStdout();
+        circuit.execute();
+        const std::string execution_log = testing::internal::GetCapturedStdout();
+
+        EXPECT_NE(execution_log.find("对角非高斯块Gaussian Mixture已启用"), std::string::npos);
+        EXPECT_EQ(count_occurrences(execution_log, "Gaussian EDE块级加速已启用"), 2u);
+        EXPECT_EQ(execution_log.find("Gaussian EDE块回退到全量Fock执行"), std::string::npos);
+
+        Reference::Vector vacuum(cutoff, {0.0, 0.0});
+        vacuum[0] = {1.0, 0.0};
+
+        Reference::Vector expected =
+            Reference::SingleModeGates::apply_displacement_gate(vacuum, alpha);
+        expected = Reference::DiagonalGates::apply_kerr_gate(expected, chi);
+        expected = Reference::SingleModeGates::apply_squeezing_gate(expected, xi);
+
+        Reference::Vector actual(static_cast<size_t>(cutoff), {0.0, 0.0});
+        for (int n = 0; n < cutoff; ++n) {
+            std::vector<std::complex<double>> basis(cutoff, {0.0, 0.0});
+            basis[n] = {1.0, 0.0};
+            actual[static_cast<size_t>(n)] = circuit.get_amplitude({0}, {basis});
+        }
+
+        const Reference::ErrorMetrics metrics = Reference::compute_error_metrics(expected, actual);
+        EXPECT_LT(metrics.fidelity_deviation, 1e-4);
+        EXPECT_LT(metrics.l2_error, 2e-2);
+    } catch (const std::exception& e) {
+        FAIL() << "GaussianMixture后续Gaussian block符号路径测试失败: " << e.what();
+    }
+}
+
+TEST_F(GateTest, TestGaussianMixtureFallsBackToFockForUnsupportedFollowingBlock) {
+    try {
+        constexpr int cutoff = 16;
+        QuantumCircuit circuit(1, 1, cutoff, 1024);
+
+        const std::complex<double> alpha(0.18, 0.02);
+        const double chi = 5e-4;
+
+        circuit.add_gate(Gates::Displacement(0, alpha));
+        circuit.add_gate(Gates::KerrGate(0, chi));
+        circuit.add_gate(Gates::CreationOperator(0));
+
+        circuit.build();
+
+        testing::internal::CaptureStdout();
+        circuit.execute();
+        const std::string execution_log = testing::internal::GetCapturedStdout();
+
+        EXPECT_NE(execution_log.find("对角非高斯块Gaussian Mixture已启用"), std::string::npos);
+
+        Reference::Vector vacuum(cutoff, {0.0, 0.0});
+        vacuum[0] = {1.0, 0.0};
+
+        Reference::Vector expected =
+            Reference::SingleModeGates::apply_displacement_gate(vacuum, alpha);
+        expected = Reference::DiagonalGates::apply_kerr_gate(expected, chi);
+        expected = Reference::LadderGates::apply_creation_operator(expected);
+
+        Reference::Vector actual(static_cast<size_t>(cutoff), {0.0, 0.0});
+        for (int n = 0; n < cutoff; ++n) {
+            std::vector<std::complex<double>> basis(cutoff, {0.0, 0.0});
+            basis[n] = {1.0, 0.0};
+            actual[static_cast<size_t>(n)] = circuit.get_amplitude({0}, {basis});
+        }
+
+        const Reference::ErrorMetrics metrics = Reference::compute_error_metrics(expected, actual);
+        EXPECT_LT(metrics.fidelity_deviation, 1e-4);
+        EXPECT_LT(metrics.l2_error, 2e-2);
+    } catch (const std::exception& e) {
+        FAIL() << "GaussianMixture向Fock回退测试失败: " << e.what();
+    }
+}
+
+TEST_F(GateTest, TestLargeCrossKerrBlockFallsBackToExactFockForFidelityTarget) {
+    try {
+        constexpr int cutoff = 16;
+        QuantumCircuit circuit(1, 2, cutoff, 1024);
+
+        const std::complex<double> alpha0(0.18, -0.03);
+        const std::complex<double> alpha1(-0.11, 0.04);
+        const double kappa = 0.02;
+
+        circuit.add_gate(Gates::Displacement(0, alpha0));
+        circuit.add_gate(Gates::Displacement(1, alpha1));
+        circuit.add_gate(Gates::CrossKerr(0, 1, kappa));
+
+        circuit.build();
+
+        testing::internal::CaptureStdout();
+        circuit.execute();
+        const std::string execution_log = testing::internal::GetCapturedStdout();
+
+        EXPECT_EQ(execution_log.find("对角非高斯块Gaussian Mixture已启用"), std::string::npos);
+        EXPECT_NE(execution_log.find("对角非高斯块Mixture预编译失败，回退到精确Fock执行"),
+                  std::string::npos);
+
+        Reference::Vector vacuum(cutoff, {0.0, 0.0});
+        vacuum[0] = {1.0, 0.0};
+
+        const Reference::Vector mode0 =
+            Reference::SingleModeGates::apply_displacement_gate(vacuum, alpha0);
+        const Reference::Vector mode1 =
+            Reference::SingleModeGates::apply_displacement_gate(vacuum, alpha1);
+        Reference::Vector expected = Reference::tensor_product(mode0, mode1);
+        expected = apply_two_mode_transform(
+            expected,
+            cutoff,
+            2,
+            0,
+            1,
+            [cutoff, kappa](const Reference::Vector& local_state) {
+                Reference::Vector transformed = local_state;
+                for (int first = 0; first < cutoff; ++first) {
+                    for (int second = 0; second < cutoff; ++second) {
+                        const size_t index =
+                            static_cast<size_t>(first) * cutoff + static_cast<size_t>(second);
+                        transformed[index] *= std::exp(std::complex<double>(
+                            0.0, kappa * static_cast<double>(first * second)));
+                    }
+                }
+                return transformed;
+            });
+
+        Reference::Vector actual(static_cast<size_t>(cutoff * cutoff), {0.0, 0.0});
+        for (int n0 = 0; n0 < cutoff; ++n0) {
+            std::vector<std::complex<double>> basis0(cutoff, {0.0, 0.0});
+            basis0[n0] = {1.0, 0.0};
+            for (int n1 = 0; n1 < cutoff; ++n1) {
+                std::vector<std::complex<double>> basis1(cutoff, {0.0, 0.0});
+                basis1[n1] = {1.0, 0.0};
+                actual[static_cast<size_t>(n0) * cutoff + static_cast<size_t>(n1)] =
+                    circuit.get_amplitude({0}, {basis0, basis1});
+            }
+        }
+
+        const Reference::ErrorMetrics metrics = Reference::compute_error_metrics(expected, actual);
+        EXPECT_LT(metrics.fidelity_deviation, 1e-10);
+        EXPECT_LT(metrics.l2_error, 1e-10);
+    } catch (const std::exception& e) {
+        FAIL() << "大Cross-Kerr门精确Fock回退测试失败: " << e.what();
     }
 }
 

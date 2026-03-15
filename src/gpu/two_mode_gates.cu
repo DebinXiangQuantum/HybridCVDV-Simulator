@@ -33,6 +33,24 @@ HostComplex to_host_complex(cuDoubleComplex value) {
     return HostComplex(cuCreal(value), cuCimag(value));
 }
 
+int compute_mode_right_stride(int trunc_dim, int target_qumode, int num_qumodes) {
+    if (trunc_dim <= 0) {
+        throw std::invalid_argument("truncation dimension must be positive");
+    }
+    if (num_qumodes <= 0) {
+        throw std::invalid_argument("number of qumodes must be positive");
+    }
+    if (target_qumode < 0 || target_qumode >= num_qumodes) {
+        throw std::out_of_range("target qumode is out of range");
+    }
+
+    int right_stride = 1;
+    for (int mode = target_qumode + 1; mode < num_qumodes; ++mode) {
+        right_stride *= trunc_dim;
+    }
+    return right_stride;
+}
+
 cuDoubleComplex to_device_complex(const HostComplex& value) {
     return make_cuDoubleComplex(value.real(), value.imag());
 }
@@ -229,24 +247,6 @@ std::vector<int> copy_target_indices_to_host(const int* target_indices, int batc
     }
 
     return host_targets;
-}
-
-int compute_mode_right_stride(int trunc_dim, int target_qumode, int num_qumodes) {
-    if (trunc_dim <= 0) {
-        throw std::invalid_argument("truncation dimension must be positive");
-    }
-    if (num_qumodes <= 0) {
-        throw std::invalid_argument("number of qumodes must be positive");
-    }
-    if (target_qumode < 0 || target_qumode >= num_qumodes) {
-        throw std::out_of_range("target qumode is out of range");
-    }
-
-    int right_stride = 1;
-    for (int mode = target_qumode + 1; mode < num_qumodes; ++mode) {
-        right_stride *= trunc_dim;
-    }
-    return right_stride;
 }
 
 int infer_single_mode_cutoff(const CVStatePool* state_pool, int num_qumodes) {
@@ -1633,6 +1633,37 @@ __global__ void apply_ckgate_kernel(
     psi[idx] = cuCmul(psi[idx], phase_factor);
 }
 
+__global__ void apply_ckgate_multimode_kernel(
+    cuDoubleComplex* state_data,
+    const size_t* state_offsets,
+    const int* state_dims,
+    const int* target_indices,
+    int batch_size,
+    double kappa,
+    int first_mode_dim,
+    int first_mode_right_stride,
+    int second_mode_dim,
+    int second_mode_right_stride
+) {
+    int batch_id = blockIdx.y;
+    if (batch_id >= batch_size) return;
+
+    const int state_idx = target_indices[batch_id];
+    const size_t flat_index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const int current_dim = state_dims[state_idx];
+    if (flat_index >= static_cast<size_t>(current_dim)) return;
+
+    cuDoubleComplex* psi = &state_data[state_offsets[state_idx]];
+    const int first_photon =
+        static_cast<int>((flat_index / static_cast<size_t>(first_mode_right_stride)) % first_mode_dim);
+    const int second_photon =
+        static_cast<int>((flat_index / static_cast<size_t>(second_mode_right_stride)) % second_mode_dim);
+
+    const double phase = kappa * static_cast<double>(first_photon * second_photon);
+    const cuDoubleComplex phase_factor = make_cuDoubleComplex(cos(phase), sin(phase));
+    psi[flat_index] = cuCmul(psi[flat_index], phase_factor);
+}
+
 void apply_ckgate(CVStatePool* state_pool, const int* target_indices,
                  int batch_size, double kappa, int cutoff_a, int cutoff_b) {
     dim3 block_dim(16, 16);
@@ -1656,5 +1687,47 @@ void apply_ckgate(CVStatePool* state_pool, const int* target_indices,
     if (err != cudaSuccess) {
         throw std::runtime_error("CKgate kernel synchronization failed: " +
                                 std::string(cudaGetErrorString(err)));
+    }
+}
+
+void apply_ckgate_on_modes(CVStatePool* state_pool, const int* target_indices,
+                           int batch_size, double kappa,
+                           int target_qumode1, int target_qumode2,
+                           int num_qumodes) {
+    if (target_qumode1 == target_qumode2) {
+        throw std::invalid_argument("Cross-Kerr requires two distinct target qumodes");
+    }
+
+    const int first_mode_right_stride =
+        compute_mode_right_stride(state_pool->d_trunc, target_qumode1, num_qumodes);
+    const int second_mode_right_stride =
+        compute_mode_right_stride(state_pool->d_trunc, target_qumode2, num_qumodes);
+
+    dim3 block_dim(256);
+    dim3 grid_dim((state_pool->max_total_dim + block_dim.x - 1) / block_dim.x, batch_size);
+
+    apply_ckgate_multimode_kernel<<<grid_dim, block_dim>>>(
+        state_pool->data,
+        state_pool->state_offsets,
+        state_pool->state_dims,
+        target_indices,
+        batch_size,
+        kappa,
+        state_pool->d_trunc,
+        first_mode_right_stride,
+        state_pool->d_trunc,
+        second_mode_right_stride
+    );
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        throw std::runtime_error("Cross-Kerr multi-mode kernel launch failed: " +
+                                 std::string(cudaGetErrorString(err)));
+    }
+
+    err = cudaDeviceSynchronize();
+    if (err != cudaSuccess) {
+        throw std::runtime_error("Cross-Kerr multi-mode kernel synchronization failed: " +
+                                 std::string(cudaGetErrorString(err)));
     }
 }

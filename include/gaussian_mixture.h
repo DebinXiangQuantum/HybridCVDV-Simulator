@@ -18,6 +18,7 @@ struct GaussianMixtureApproximation {
     std::vector<std::complex<double>> approximated_diagonal;
     double l2_diagonal_error = 0.0;
     double max_diagonal_error = 0.0;
+    double conservative_fidelity_lower_bound = 0.0;
 };
 
 class GaussianMixtureDecomposer {

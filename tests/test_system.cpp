@@ -75,9 +75,9 @@ TEST_F(SystemTest, MemoryManagement) {
         circuit->execute();
     }
 
-    // 验证状态池状态
-    auto& state_pool = circuit->get_state_pool();
-    EXPECT_EQ(state_pool.active_count, 1);  // 应该只有一个活动状态
+    // 验证电路层的活跃终端数量；纯Gaussian线路可能保持在symbolic terminal中
+    auto stats = circuit->get_stats();
+    EXPECT_EQ(stats.active_states, 1);
 }
 
 TEST_F(SystemTest, ComplexCircuit) {
@@ -97,7 +97,7 @@ TEST_F(SystemTest, ComplexCircuit) {
     // 验证电路执行成功
     auto stats = circuit->get_stats();
     EXPECT_EQ(stats.num_gates, 5);
-    EXPECT_GE(circuit->get_state_pool().active_count, 1);
+    EXPECT_GE(stats.active_states, 1);
 }
 
 TEST_F(SystemTest, ResetAndReuse) {

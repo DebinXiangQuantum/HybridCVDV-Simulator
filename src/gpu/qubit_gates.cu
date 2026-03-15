@@ -1,6 +1,8 @@
 #include <cuda_runtime.h>
 #include <cuComplex.h>
 #include <cmath>
+#include <stdexcept>
+#include <string>
 #include "cv_state_pool.h"
 
 /**

@@ -239,6 +239,7 @@ TEST(GaussianMixtureTest, KerrMixtureIsExactAtFullCutoffRank) {
 
     EXPECT_LT(approximation.l2_diagonal_error, 1e-10);
     EXPECT_LT(approximation.max_diagonal_error, 1e-10);
+    EXPECT_GT(approximation.conservative_fidelity_lower_bound, 1.0 - 1e-10);
 
     const std::vector<Complex> input_state = build_coherent_state(cutoff, Complex(0.7, -0.2));
     const std::vector<Complex> exact_state = exact_kerr_on_mode(input_state, cutoff, 1, 0, chi);
@@ -257,6 +258,7 @@ TEST(GaussianMixtureTest, SnapMixtureIsExactAtFullCutoffRank) {
 
     EXPECT_LT(approximation.l2_diagonal_error, 1e-10);
     EXPECT_LT(approximation.max_diagonal_error, 1e-10);
+    EXPECT_GT(approximation.conservative_fidelity_lower_bound, 1.0 - 1e-10);
 
     const std::vector<Complex> exact_state =
         exact_snap_on_mode(input_state, cutoff, 1, 0, M_PI / 3.0, 5);
@@ -292,6 +294,8 @@ TEST(GaussianMixtureTest, MultiSnapMixtureAccuracyImprovesWithBranchCount) {
 
     EXPECT_GT(approximation_k4.l2_diagonal_error, approximation_k8.l2_diagonal_error);
     EXPECT_GT(approximation_k8.l2_diagonal_error, approximation_k12.l2_diagonal_error);
+    EXPECT_LT(approximation_k4.conservative_fidelity_lower_bound,
+              approximation_k12.conservative_fidelity_lower_bound);
 
     const double fidelity_k4 = Reference::fidelity(exact_state, approx_state_k4);
     const double fidelity_k12 = Reference::fidelity(exact_state, approx_state_k12);
@@ -309,6 +313,7 @@ TEST(GaussianMixtureTest, ConditionalParityMixtureIsExactWithTwoBranches) {
 
     EXPECT_LT(approximation.l2_diagonal_error, 1e-10);
     EXPECT_LT(approximation.max_diagonal_error, 1e-10);
+    EXPECT_GT(approximation.conservative_fidelity_lower_bound, 1.0 - 1e-10);
 
     const std::vector<Complex> exact_state =
         exact_conditional_parity_on_mode(input_state, cutoff, 1, 0, parity);
@@ -333,6 +338,7 @@ TEST(GaussianMixtureTest, CrossKerrMixtureIsExactAtFullCutoffRank) {
 
     EXPECT_LT(approximation.l2_diagonal_error, 1e-10);
     EXPECT_LT(approximation.max_diagonal_error, 1e-10);
+    EXPECT_GT(approximation.conservative_fidelity_lower_bound, 1.0 - 1e-10);
 
     const std::vector<Complex> exact_state =
         exact_cross_kerr_on_modes(input_state, cutoff, 2, 0, 1, kappa);
@@ -368,6 +374,8 @@ TEST(GaussianMixtureTest, CrossKerrMixtureAccuracyImprovesWithBranchCount) {
 
     EXPECT_GT(approximation_k4.l2_diagonal_error, approximation_k16.l2_diagonal_error);
     EXPECT_GT(approximation_k16.l2_diagonal_error, approximation_k32.l2_diagonal_error);
+    EXPECT_LT(approximation_k4.conservative_fidelity_lower_bound,
+              approximation_k32.conservative_fidelity_lower_bound);
 
     const double fidelity_k4 = Reference::fidelity(exact_state, approx_state_k4);
     const double fidelity_k32 = Reference::fidelity(exact_state, approx_state_k32);

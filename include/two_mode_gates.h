@@ -15,6 +15,12 @@ void apply_czgate(CVStatePool* state_pool, const int* target_indices,
 void apply_ckgate(CVStatePool* state_pool, const int* target_indices,
                  int batch_size, double kappa, int cutoff_a, int cutoff_b);
 
+// 任意多qumode全量态上的 Cross-Kerr
+void apply_ckgate_on_modes(CVStatePool* state_pool, const int* target_indices,
+                          int batch_size, double kappa,
+                          int target_qumode1, int target_qumode2,
+                          int num_qumodes);
+
 // 递归光束分裂器
 void apply_beam_splitter_recursive(CVStatePool* state_pool, const int* target_indices,
                                   int batch_size, double theta, double phi,

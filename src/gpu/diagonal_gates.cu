@@ -1,8 +1,10 @@
 #include <cuda_runtime.h>
 #include <cuComplex.h>
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <string>
+#include <vector>
 #include "cv_state_pool.h"
 
 namespace {
@@ -283,7 +285,8 @@ void apply_conditional_parity(CVStatePool* state_pool, const int* target_indices
  */
 __global__ void add_states_kernel(
     cuDoubleComplex* all_states_data,
-    int total_dim,
+    const size_t* state_offsets,
+    const int* state_dims,
     const int* src1_indices,
     const cuDoubleComplex* weights1,
     const int* src2_indices,
@@ -299,14 +302,15 @@ __global__ void add_states_kernel(
     int dst_idx = dst_indices[batch_id];
     int n = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (n >= total_dim) return;
+    const int current_dim = state_dims[src1_idx];
+    if (n >= current_dim) return;
 
     cuDoubleComplex w1 = weights1[batch_id];
     cuDoubleComplex w2 = weights2[batch_id];
 
-    cuDoubleComplex* state1 = &all_states_data[src1_idx * total_dim];
-    cuDoubleComplex* state2 = &all_states_data[src2_idx * total_dim];
-    cuDoubleComplex* result = &all_states_data[dst_idx * total_dim];
+    cuDoubleComplex* state1 = &all_states_data[state_offsets[src1_idx]];
+    cuDoubleComplex* state2 = &all_states_data[state_offsets[src2_idx]];
+    cuDoubleComplex* result = &all_states_data[state_offsets[dst_idx]];
 
     // result[n] = w1 * state1[n] + w2 * state2[n]
     cuDoubleComplex val1 = cuCmul(w1, state1[n]);
@@ -331,19 +335,305 @@ void add_states(CVStatePool* state_pool,
                 const cuDoubleComplex* weights2,
                 const int* dst_indices,
                 int batch_size) {
+    std::vector<int> host_src1(batch_size);
+    std::vector<int> host_src2(batch_size);
+    std::vector<int> host_dst(batch_size);
+
+    cudaError_t err = cudaMemcpy(host_src1.data(), src1_indices,
+                                 batch_size * sizeof(int), cudaMemcpyDeviceToHost);
+    if (err != cudaSuccess) {
+        throw std::runtime_error("Add states读取源状态1失败: " +
+                                 std::string(cudaGetErrorString(err)));
+    }
+    err = cudaMemcpy(host_src2.data(), src2_indices,
+                     batch_size * sizeof(int), cudaMemcpyDeviceToHost);
+    if (err != cudaSuccess) {
+        throw std::runtime_error("Add states读取源状态2失败: " +
+                                 std::string(cudaGetErrorString(err)));
+    }
+    err = cudaMemcpy(host_dst.data(), dst_indices,
+                     batch_size * sizeof(int), cudaMemcpyDeviceToHost);
+    if (err != cudaSuccess) {
+        throw std::runtime_error("Add states读取目标状态失败: " +
+                                 std::string(cudaGetErrorString(err)));
+    }
+
+    int max_dim = 0;
+    for (int batch = 0; batch < batch_size; ++batch) {
+        const int src1_dim = state_pool->get_state_dim(host_src1[batch]);
+        const int src2_dim = state_pool->get_state_dim(host_src2[batch]);
+        if (src1_dim != src2_dim) {
+            throw std::runtime_error("Add states要求源状态维度一致");
+        }
+        state_pool->reserve_state_storage(host_dst[batch], src1_dim);
+        max_dim = std::max(max_dim, src1_dim);
+    }
+
     dim3 block_dim(256);
-    dim3 grid_dim((state_pool->total_dim + block_dim.x - 1) / block_dim.x, batch_size);
+    dim3 grid_dim((max_dim + block_dim.x - 1) / block_dim.x, batch_size);
 
     add_states_kernel<<<grid_dim, block_dim>>>(
-        state_pool->data, state_pool->total_dim,
+        state_pool->data,
+        state_pool->state_offsets,
+        state_pool->state_dims,
         src1_indices, weights1,
         src2_indices, weights2,
         dst_indices, batch_size
     );
 
-    cudaError_t err = cudaGetLastError();
+    err = cudaGetLastError();
     if (err != cudaSuccess) {
         throw std::runtime_error("Add states kernel launch failed: " +
                                 std::string(cudaGetErrorString(err)));
     }
+}
+
+__global__ void zero_state_vector_kernel(cuDoubleComplex* state, int state_dim) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= state_dim) {
+        return;
+    }
+    state[idx] = make_cuDoubleComplex(0.0, 0.0);
+}
+
+__global__ void initialize_vacuum_state_vector_kernel(cuDoubleComplex* state, int state_dim) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= state_dim) {
+        return;
+    }
+    state[idx] = idx == 0 ? make_cuDoubleComplex(1.0, 0.0) : make_cuDoubleComplex(0.0, 0.0);
+}
+
+__global__ void copy_state_vector_kernel(const cuDoubleComplex* src,
+                                         cuDoubleComplex* dst,
+                                         int state_dim) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= state_dim) {
+        return;
+    }
+    dst[idx] = src[idx];
+}
+
+__global__ void axpy_state_vector_kernel(const cuDoubleComplex* src,
+                                         cuDoubleComplex* dst,
+                                         cuDoubleComplex weight,
+                                         int state_dim) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= state_dim) {
+        return;
+    }
+    dst[idx] = cuCadd(dst[idx], cuCmul(weight, src[idx]));
+}
+
+__global__ void inspect_scaled_vacuum_kernel(const cuDoubleComplex* state,
+                                             int state_dim,
+                                             double tolerance,
+                                             int* is_zero,
+                                             int* is_scaled_vacuum,
+                                             cuDoubleComplex* scale) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= state_dim) {
+        return;
+    }
+
+    const cuDoubleComplex value = state[idx];
+    const double magnitude = hypot(cuCreal(value), cuCimag(value));
+    if (idx == 0) {
+        *scale = value;
+        if (magnitude > tolerance) {
+            atomicExch(is_zero, 0);
+        }
+        return;
+    }
+
+    if (magnitude > tolerance) {
+        atomicExch(is_zero, 0);
+        atomicExch(is_scaled_vacuum, 0);
+    }
+}
+
+void zero_state_device(CVStatePool* state_pool, int state_id) {
+    cuDoubleComplex* state_ptr = state_pool->get_state_ptr(state_id);
+    const int state_dim = state_pool->get_state_dim(state_id);
+    if (!state_ptr || state_dim <= 0) {
+        return;
+    }
+
+    dim3 block_dim(256);
+    dim3 grid_dim((state_dim + block_dim.x - 1) / block_dim.x);
+    zero_state_vector_kernel<<<grid_dim, block_dim>>>(state_ptr, state_dim);
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        throw std::runtime_error("Zero state kernel launch failed: " +
+                                 std::string(cudaGetErrorString(err)));
+    }
+
+    err = cudaDeviceSynchronize();
+    if (err != cudaSuccess) {
+        throw std::runtime_error("Zero state kernel synchronization failed: " +
+                                 std::string(cudaGetErrorString(err)));
+    }
+}
+
+void initialize_vacuum_state_device(CVStatePool* state_pool, int state_id, int state_dim) {
+    state_pool->reserve_state_storage(state_id, state_dim);
+    cuDoubleComplex* state_ptr = state_pool->get_state_ptr(state_id);
+    if (!state_ptr || state_dim <= 0) {
+        return;
+    }
+
+    dim3 block_dim(256);
+    dim3 grid_dim((state_dim + block_dim.x - 1) / block_dim.x);
+    initialize_vacuum_state_vector_kernel<<<grid_dim, block_dim>>>(state_ptr, state_dim);
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        throw std::runtime_error("Initialize vacuum kernel launch failed: " +
+                                 std::string(cudaGetErrorString(err)));
+    }
+
+    err = cudaDeviceSynchronize();
+    if (err != cudaSuccess) {
+        throw std::runtime_error("Initialize vacuum kernel synchronization failed: " +
+                                 std::string(cudaGetErrorString(err)));
+    }
+}
+
+void copy_state_device(CVStatePool* state_pool, int src_state_id, int dst_state_id) {
+    const int state_dim = state_pool->get_state_dim(src_state_id);
+    state_pool->reserve_state_storage(dst_state_id, state_dim);
+
+    const cuDoubleComplex* src_ptr = state_pool->get_state_ptr(src_state_id);
+    cuDoubleComplex* dst_ptr = state_pool->get_state_ptr(dst_state_id);
+    if (!src_ptr || !dst_ptr || state_dim <= 0) {
+        return;
+    }
+
+    dim3 block_dim(256);
+    dim3 grid_dim((state_dim + block_dim.x - 1) / block_dim.x);
+    copy_state_vector_kernel<<<grid_dim, block_dim>>>(src_ptr, dst_ptr, state_dim);
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        throw std::runtime_error("Copy state kernel launch failed: " +
+                                 std::string(cudaGetErrorString(err)));
+    }
+
+    err = cudaDeviceSynchronize();
+    if (err != cudaSuccess) {
+        throw std::runtime_error("Copy state kernel synchronization failed: " +
+                                 std::string(cudaGetErrorString(err)));
+    }
+}
+
+void axpy_state_device(CVStatePool* state_pool,
+                       int src_state_id,
+                       int dst_state_id,
+                       cuDoubleComplex weight) {
+    const int state_dim = state_pool->get_state_dim(src_state_id);
+    const int dst_dim = state_pool->get_state_dim(dst_state_id);
+    if (state_dim != dst_dim) {
+        throw std::invalid_argument("AXPY requires matching state dimensions");
+    }
+    if (state_dim <= 0) {
+        return;
+    }
+
+    const cuDoubleComplex* src_ptr = state_pool->get_state_ptr(src_state_id);
+    cuDoubleComplex* dst_ptr = state_pool->get_state_ptr(dst_state_id);
+    if (!src_ptr || !dst_ptr) {
+        throw std::runtime_error("AXPY requires valid GPU state pointers");
+    }
+
+    dim3 block_dim(256);
+    dim3 grid_dim((state_dim + block_dim.x - 1) / block_dim.x);
+    axpy_state_vector_kernel<<<grid_dim, block_dim>>>(src_ptr, dst_ptr, weight, state_dim);
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        throw std::runtime_error("AXPY state kernel launch failed: " +
+                                 std::string(cudaGetErrorString(err)));
+    }
+
+    err = cudaDeviceSynchronize();
+    if (err != cudaSuccess) {
+        throw std::runtime_error("AXPY state kernel synchronization failed: " +
+                                 std::string(cudaGetErrorString(err)));
+    }
+}
+
+void classify_vacuum_ray_device(const CVStatePool* state_pool,
+                                int state_id,
+                                double tolerance,
+                                int* is_zero,
+                                int* is_scaled_vacuum,
+                                cuDoubleComplex* scale) {
+    if (!is_zero || !is_scaled_vacuum || !scale) {
+        throw std::invalid_argument("vacuum classification output pointers must not be null");
+    }
+
+    const cuDoubleComplex* state_ptr = state_pool->get_state_ptr(state_id);
+    const int state_dim = state_pool->get_state_dim(state_id);
+    *is_zero = 0;
+    *is_scaled_vacuum = 0;
+    *scale = make_cuDoubleComplex(0.0, 0.0);
+
+    if (!state_ptr || state_dim <= 0) {
+        return;
+    }
+
+    int host_is_zero = 1;
+    int host_is_scaled_vacuum = 1;
+    int* d_is_zero = nullptr;
+    int* d_is_scaled_vacuum = nullptr;
+    cuDoubleComplex* d_scale = nullptr;
+
+    cudaError_t err = cudaMalloc(&d_is_zero, sizeof(int));
+    if (err != cudaSuccess) {
+        throw std::runtime_error("Vacuum classification alloc failed: " +
+                                 std::string(cudaGetErrorString(err)));
+    }
+    err = cudaMalloc(&d_is_scaled_vacuum, sizeof(int));
+    if (err != cudaSuccess) {
+        cudaFree(d_is_zero);
+        throw std::runtime_error("Vacuum classification alloc failed: " +
+                                 std::string(cudaGetErrorString(err)));
+    }
+    err = cudaMalloc(&d_scale, sizeof(cuDoubleComplex));
+    if (err != cudaSuccess) {
+        cudaFree(d_is_zero);
+        cudaFree(d_is_scaled_vacuum);
+        throw std::runtime_error("Vacuum classification alloc failed: " +
+                                 std::string(cudaGetErrorString(err)));
+    }
+
+    cudaMemcpy(d_is_zero, &host_is_zero, sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_is_scaled_vacuum, &host_is_scaled_vacuum, sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemset(d_scale, 0, sizeof(cuDoubleComplex));
+
+    dim3 block_dim(256);
+    dim3 grid_dim((state_dim + block_dim.x - 1) / block_dim.x);
+    inspect_scaled_vacuum_kernel<<<grid_dim, block_dim>>>(
+        state_ptr, state_dim, tolerance, d_is_zero, d_is_scaled_vacuum, d_scale);
+
+    err = cudaGetLastError();
+    if (err == cudaSuccess) {
+        err = cudaDeviceSynchronize();
+    }
+    if (err != cudaSuccess) {
+        cudaFree(d_is_zero);
+        cudaFree(d_is_scaled_vacuum);
+        cudaFree(d_scale);
+        throw std::runtime_error("Vacuum classification kernel failed: " +
+                                 std::string(cudaGetErrorString(err)));
+    }
+
+    cudaMemcpy(is_zero, d_is_zero, sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(is_scaled_vacuum, d_is_scaled_vacuum, sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(scale, d_scale, sizeof(cuDoubleComplex), cudaMemcpyDeviceToHost);
+
+    cudaFree(d_is_zero);
+    cudaFree(d_is_scaled_vacuum);
+    cudaFree(d_scale);
 }

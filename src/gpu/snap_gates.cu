@@ -1,8 +1,32 @@
 #include <cuda_runtime.h>
 #include <cuComplex.h>
 #include <cmath>
+#include <stdexcept>
+#include <string>
 #include <vector>
 #include "cv_state_pool.h"
+
+namespace {
+
+int compute_mode_right_stride(int trunc_dim, int target_qumode, int num_qumodes) {
+    if (trunc_dim <= 0) {
+        throw std::invalid_argument("truncation dimension must be positive");
+    }
+    if (num_qumodes <= 0) {
+        throw std::invalid_argument("number of qumodes must be positive");
+    }
+    if (target_qumode < 0 || target_qumode >= num_qumodes) {
+        throw std::out_of_range("target qumode is out of range");
+    }
+
+    int right_stride = 1;
+    for (int mode = target_qumode + 1; mode < num_qumodes; ++mode) {
+        right_stride *= trunc_dim;
+    }
+    return right_stride;
+}
+
+}  // namespace
 
 /**
  * SNAP 门 GPU 实现
@@ -31,29 +55,33 @@ __global__ void apply_snap_kernel(
     const int* target_indices,
     int batch_size,
     double theta,
-    int target_fock_state
+    int target_fock_state,
+    int target_mode_dim,
+    int target_mode_right_stride
 ) {
     int batch_id = blockIdx.y;
     if (batch_id >= batch_size) return;
 
     int state_idx = target_indices[batch_id];
-    int n = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t flat_index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
 
     int current_dim = state_dims[state_idx];
-    if (n >= current_dim) return;
+    if (flat_index >= static_cast<size_t>(current_dim)) return;
 
     size_t offset = state_offsets[state_idx];
     cuDoubleComplex* psi = &state_data[offset];
+    const size_t right_stride = static_cast<size_t>(target_mode_right_stride);
+    const int target_n = static_cast<int>((flat_index / right_stride) % target_mode_dim);
 
     // 只对目标 Fock 态施加相位
-    if (n == target_fock_state) {
+    if (target_n == target_fock_state) {
         // 相位因子: exp(iθ)
         double cos_theta = cos(theta);
         double sin_theta = sin(theta);
         cuDoubleComplex phase_factor = make_cuDoubleComplex(cos_theta, sin_theta);
         
-        cuDoubleComplex current_val = psi[n];
-        psi[n] = cuCmul(current_val, phase_factor);
+        cuDoubleComplex current_val = psi[flat_index];
+        psi[flat_index] = cuCmul(current_val, phase_factor);
     }
     // 其他 Fock 态保持不变
 }
@@ -72,23 +100,27 @@ __global__ void apply_multisnap_kernel(
     const int* target_indices,
     int batch_size,
     const double* phase_map,
-    int map_size
+    int map_size,
+    int target_mode_dim,
+    int target_mode_right_stride
 ) {
     int batch_id = blockIdx.y;
     if (batch_id >= batch_size) return;
 
     int state_idx = target_indices[batch_id];
-    int n = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t flat_index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
 
     int current_dim = state_dims[state_idx];
-    if (n >= current_dim) return;
+    if (flat_index >= static_cast<size_t>(current_dim)) return;
 
     size_t offset = state_offsets[state_idx];
     cuDoubleComplex* psi = &state_data[offset];
+    const size_t right_stride = static_cast<size_t>(target_mode_right_stride);
+    const int target_n = static_cast<int>((flat_index / right_stride) % target_mode_dim);
 
     // 检查是否需要对该 Fock 态施加相位
-    if (n < map_size) {
-        double theta = phase_map[n];
+    if (target_n < map_size) {
+        double theta = phase_map[target_n];
         
         // 如果相位不为 0，施加相位
         if (fabs(theta) > 1e-15) {
@@ -96,8 +128,8 @@ __global__ void apply_multisnap_kernel(
             double sin_theta = sin(theta);
             cuDoubleComplex phase_factor = make_cuDoubleComplex(cos_theta, sin_theta);
             
-            cuDoubleComplex current_val = psi[n];
-            psi[n] = cuCmul(current_val, phase_factor);
+            cuDoubleComplex current_val = psi[flat_index];
+            psi[flat_index] = cuCmul(current_val, phase_factor);
         }
     }
 }
@@ -200,8 +232,12 @@ __global__ void apply_cmultisnap_kernel(
  * @param theta 相位角度
  * @param target_fock_state 目标 Fock 态
  */
-void apply_snap(CVStatePool* state_pool, const int* target_indices,
-                int batch_size, double theta, int target_fock_state) {
+void apply_snap_on_mode(CVStatePool* state_pool, const int* target_indices,
+                        int batch_size, double theta, int target_fock_state,
+                        int target_qumode, int num_qumodes) {
+    const int target_mode_right_stride =
+        compute_mode_right_stride(state_pool->d_trunc, target_qumode, num_qumodes);
+
     dim3 block_dim(256);
     dim3 grid_dim((state_pool->max_total_dim + block_dim.x - 1) / block_dim.x, batch_size);
 
@@ -210,7 +246,8 @@ void apply_snap(CVStatePool* state_pool, const int* target_indices,
         state_pool->state_offsets,
         state_pool->state_dims,
         target_indices, batch_size,
-        theta, target_fock_state
+        theta, target_fock_state,
+        state_pool->d_trunc, target_mode_right_stride
     );
 
     cudaError_t err = cudaGetLastError();
@@ -226,6 +263,11 @@ void apply_snap(CVStatePool* state_pool, const int* target_indices,
     }
 }
 
+void apply_snap(CVStatePool* state_pool, const int* target_indices,
+                int batch_size, double theta, int target_fock_state) {
+    apply_snap_on_mode(state_pool, target_indices, batch_size, theta, target_fock_state, 0, 1);
+}
+
 /**
  * 应用 Multi-SNAP 门
  * 
@@ -234,8 +276,16 @@ void apply_snap(CVStatePool* state_pool, const int* target_indices,
  * @param batch_size 批次大小
  * @param phase_map 相位映射（主机端 vector）
  */
-void apply_multisnap(CVStatePool* state_pool, const int* target_indices,
-                     int batch_size, const std::vector<double>& phase_map) {
+void apply_multisnap_on_mode(CVStatePool* state_pool, const int* target_indices,
+                             int batch_size, const std::vector<double>& phase_map,
+                             int target_qumode, int num_qumodes) {
+    if (phase_map.empty()) {
+        return;
+    }
+
+    const int target_mode_right_stride =
+        compute_mode_right_stride(state_pool->d_trunc, target_qumode, num_qumodes);
+
     // 将 phase_map 上传到设备
     double* d_phase_map = nullptr;
     cudaMalloc(&d_phase_map, phase_map.size() * sizeof(double));
@@ -250,7 +300,8 @@ void apply_multisnap(CVStatePool* state_pool, const int* target_indices,
         state_pool->state_offsets,
         state_pool->state_dims,
         target_indices, batch_size,
-        d_phase_map, phase_map.size()
+        d_phase_map, phase_map.size(),
+        state_pool->d_trunc, target_mode_right_stride
     );
 
     cudaError_t err = cudaGetLastError();
@@ -267,6 +318,11 @@ void apply_multisnap(CVStatePool* state_pool, const int* target_indices,
         throw std::runtime_error("Multi-SNAP kernel synchronization failed: " +
                                 std::string(cudaGetErrorString(err)));
     }
+}
+
+void apply_multisnap(CVStatePool* state_pool, const int* target_indices,
+                     int batch_size, const std::vector<double>& phase_map) {
+    apply_multisnap_on_mode(state_pool, target_indices, batch_size, phase_map, 0, 1);
 }
 
 /**

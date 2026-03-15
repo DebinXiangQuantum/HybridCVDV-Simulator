@@ -23,6 +23,18 @@ size_t integer_power(size_t base, int exponent) {
     return result;
 }
 
+double conservative_fidelity_lower_bound_from_max_error(double max_error) {
+    if (max_error <= 0.0) {
+        return 1.0;
+    }
+    if (max_error >= 1.0) {
+        return 0.0;
+    }
+
+    const double overlap_lower_bound = (1.0 - max_error) / (1.0 + max_error);
+    return overlap_lower_bound * overlap_lower_bound;
+}
+
 void validate_common_inputs(int total_qumodes, int cutoff, int max_branches) {
     if (total_qumodes <= 0) {
         throw std::invalid_argument("total_qumodes must be positive");
@@ -250,6 +262,8 @@ void finalize_approximation(GaussianMixtureApproximation* approximation) {
 
     approximation->l2_diagonal_error = std::sqrt(l2_error_sq);
     approximation->max_diagonal_error = max_error;
+    approximation->conservative_fidelity_lower_bound =
+        conservative_fidelity_lower_bound_from_max_error(max_error);
 }
 
 template <typename Transform>

@@ -4,8 +4,6 @@
 #include <cuComplex.h>
 
 #include <vector>
-#include <memory>
-#include <atomic>
 #include <cstdint>
 
 /**
@@ -38,12 +36,12 @@ struct CVStatePool {
     size_t total_memory_size = 0;  // 已分配的总内存大小
     size_t max_memory_size = 0;    // 最大允许内存大小
 
-    // 主机端副本，用于CPU操作
-    std::vector<cuDoubleComplex> host_data;
-
     // 主机端状态跟踪
     std::vector<int> free_state_ids;
     std::vector<uint8_t> active_flags;
+    std::vector<int> host_state_dims;
+    std::vector<size_t> host_state_offsets;
+    std::vector<size_t> host_state_capacities;
 
     /**
      * 构造函数 - 动态张量积版本
@@ -141,6 +139,12 @@ struct CVStatePool {
     int tensor_product(int state1_id, int state2_id);
 
     /**
+     * 为状态预留指定维度的存储空间。
+     * 调用者负责后续写满该状态向量。
+     */
+    void reserve_state_storage(int state_id, int state_dim);
+
+    /**
      * 检查内存使用情况
      * @return 当前内存使用量（字节）
      */
@@ -153,6 +157,24 @@ struct CVStatePool {
     std::vector<int> get_active_state_ids() const;
 
 private:
+    struct FreeBlock {
+        size_t offset = 0;
+        size_t length = 0;
+    };
+
+    size_t data_capacity_elements_ = 0;
+    size_t allocated_elements_ = 0;
+    size_t metadata_memory_size_ = 0;
+    std::vector<FreeBlock> free_blocks_;
+
+    void refresh_total_memory_size();
+    void sync_state_metadata_to_device(int state_id);
+    void ensure_data_capacity(size_t required_elements);
+    size_t acquire_storage_block(size_t required_elements);
+    void release_storage_block(int state_id);
+    void assign_state_storage(int state_id, size_t required_elements);
+    void merge_free_blocks();
+
     // 禁用拷贝构造和赋值
     CVStatePool(const CVStatePool&) = delete;
     CVStatePool& operator=(const CVStatePool&) = delete;
