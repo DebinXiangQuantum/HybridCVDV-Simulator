@@ -1,9 +1,277 @@
 #include "reference_gates.h"
+#include "squeezing_matrix.h"
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <numeric>
 
 namespace Reference {
+
+namespace {
+
+void build_beam_splitter_tensor(std::vector<Complex>& tensor,
+                                int cutoff,
+                                double theta,
+                                double phi) {
+    tensor.assign(static_cast<size_t>(cutoff) * cutoff * cutoff * cutoff, Complex(0.0, 0.0));
+
+    const double ct = std::cos(theta);
+    const double st = std::sin(theta);
+    const Complex phase(std::cos(phi), std::sin(phi));
+
+    std::vector<double> sqrt_table(cutoff);
+    for (int i = 0; i < cutoff; ++i) {
+        sqrt_table[i] = std::sqrt(static_cast<double>(i));
+    }
+
+    tensor[0] = Complex(1.0, 0.0);
+
+    for (int m = 0; m < cutoff; ++m) {
+        for (int n = 0; n < cutoff - m; ++n) {
+            const int p = m + n;
+            if (p <= 0 || p >= cutoff) {
+                continue;
+            }
+
+            const size_t idx =
+                static_cast<size_t>(m) * cutoff * cutoff * cutoff +
+                static_cast<size_t>(n) * cutoff * cutoff +
+                static_cast<size_t>(p) * cutoff;
+            Complex sum(0.0, 0.0);
+
+            if (m > 0) {
+                const size_t idx1 =
+                    static_cast<size_t>(m - 1) * cutoff * cutoff * cutoff +
+                    static_cast<size_t>(n) * cutoff * cutoff +
+                    static_cast<size_t>(p - 1) * cutoff;
+                sum += (ct * sqrt_table[m] / sqrt_table[p]) * tensor[idx1];
+            }
+
+            if (n > 0) {
+                const size_t idx2 =
+                    static_cast<size_t>(m) * cutoff * cutoff * cutoff +
+                    static_cast<size_t>(n - 1) * cutoff * cutoff +
+                    static_cast<size_t>(p - 1) * cutoff;
+                sum += phase * (st * sqrt_table[n] / sqrt_table[p]) * tensor[idx2];
+            }
+
+            tensor[idx] = sum;
+        }
+    }
+
+    for (int m = 0; m < cutoff; ++m) {
+        for (int n = 0; n < cutoff; ++n) {
+            for (int p = 0; p < cutoff; ++p) {
+                const int q = m + n - p;
+                if (q <= 0 || q >= cutoff) {
+                    continue;
+                }
+
+                const size_t idx =
+                    static_cast<size_t>(m) * cutoff * cutoff * cutoff +
+                    static_cast<size_t>(n) * cutoff * cutoff +
+                    static_cast<size_t>(p) * cutoff +
+                    static_cast<size_t>(q);
+                Complex sum(0.0, 0.0);
+
+                if (m > 0) {
+                    const size_t idx1 =
+                        static_cast<size_t>(m - 1) * cutoff * cutoff * cutoff +
+                        static_cast<size_t>(n) * cutoff * cutoff +
+                        static_cast<size_t>(p) * cutoff +
+                        static_cast<size_t>(q - 1);
+                    sum += (-st * sqrt_table[m] / sqrt_table[q]) * std::conj(phase) * tensor[idx1];
+                }
+
+                if (n > 0) {
+                    const size_t idx2 =
+                        static_cast<size_t>(m) * cutoff * cutoff * cutoff +
+                        static_cast<size_t>(n - 1) * cutoff * cutoff +
+                        static_cast<size_t>(p) * cutoff +
+                        static_cast<size_t>(q - 1);
+                    sum += (ct * sqrt_table[n] / sqrt_table[q]) * tensor[idx2];
+                }
+
+                tensor[idx] = sum;
+            }
+        }
+    }
+}
+
+double matrix_max_abs(const Matrix& matrix) {
+    double max_abs = 0.0;
+    for (const auto& row : matrix) {
+        for (const auto& value : row) {
+            max_abs = std::max(max_abs, std::abs(value));
+        }
+    }
+    return max_abs;
+}
+
+double matrix_one_norm(const Matrix& matrix) {
+    if (matrix.empty()) {
+        return 0.0;
+    }
+
+    const int dim = static_cast<int>(matrix.size());
+    double max_sum = 0.0;
+    for (int col = 0; col < dim; ++col) {
+        double sum = 0.0;
+        for (int row = 0; row < dim; ++row) {
+            sum += std::abs(matrix[row][col]);
+        }
+        max_sum = std::max(max_sum, sum);
+    }
+    return max_sum;
+}
+
+Matrix scale_matrix(const Matrix& matrix, double scale) {
+    Matrix result = matrix;
+    for (auto& row : result) {
+        for (auto& value : row) {
+            value *= scale;
+        }
+    }
+    return result;
+}
+
+Matrix multiply_matrices(const Matrix& lhs, const Matrix& rhs) {
+    if (lhs.empty()) {
+        return {};
+    }
+
+    const int dim = static_cast<int>(lhs.size());
+    Matrix result(dim, Vector(dim, Complex(0.0, 0.0)));
+    for (int row = 0; row < dim; ++row) {
+        for (int col = 0; col < dim; ++col) {
+            Complex sum(0.0, 0.0);
+            for (int k = 0; k < dim; ++k) {
+                sum += lhs[row][k] * rhs[k][col];
+            }
+            result[row][col] = sum;
+        }
+    }
+    return result;
+}
+
+void add_matrix_inplace(Matrix& target, const Matrix& source) {
+    for (size_t row = 0; row < target.size(); ++row) {
+        for (size_t col = 0; col < target[row].size(); ++col) {
+            target[row][col] += source[row][col];
+        }
+    }
+}
+
+Matrix matrix_exponential(const Matrix& matrix) {
+    if (matrix.empty()) {
+        return {};
+    }
+
+    const int dim = static_cast<int>(matrix.size());
+    const double norm = matrix_one_norm(matrix);
+    const int scaling_power = norm > 1.0 ? static_cast<int>(std::ceil(std::log2(norm))) : 0;
+    const double scale = std::ldexp(1.0, scaling_power);
+    const Matrix scaled_matrix = scale_matrix(matrix, 1.0 / scale);
+
+    Matrix result(dim, Vector(dim, Complex(0.0, 0.0)));
+    Matrix term(dim, Vector(dim, Complex(0.0, 0.0)));
+    for (int i = 0; i < dim; ++i) {
+        result[i][i] = Complex(1.0, 0.0);
+        term[i][i] = Complex(1.0, 0.0);
+    }
+
+    for (int order = 1; order <= 80; ++order) {
+        term = multiply_matrices(term, scaled_matrix);
+        const double inv_order = 1.0 / static_cast<double>(order);
+        for (auto& row : term) {
+            for (auto& value : row) {
+                value *= inv_order;
+            }
+        }
+        add_matrix_inplace(result, term);
+        if (matrix_max_abs(term) < 1e-14) {
+            break;
+        }
+    }
+
+    for (int i = 0; i < scaling_power; ++i) {
+        result = multiply_matrices(result, result);
+    }
+    return result;
+}
+
+int infer_two_mode_cutoff(const Vector& input) {
+    const int cutoff = static_cast<int>(std::lround(std::sqrt(static_cast<double>(input.size()))));
+    if (cutoff <= 0 || cutoff * cutoff != static_cast<int>(input.size())) {
+        throw std::invalid_argument("双模门需要长度为 D^2 的状态向量");
+    }
+    return cutoff;
+}
+
+Matrix build_two_mode_squeezing_matrix(int cutoff, Complex xi) {
+    const int dim = cutoff * cutoff;
+    Matrix generator(dim, Vector(dim, Complex(0.0, 0.0)));
+
+    for (int p = 0; p < cutoff; ++p) {
+        for (int q = 0; q < cutoff; ++q) {
+            const int input_idx = p * cutoff + q;
+
+            if (p + 1 < cutoff && q + 1 < cutoff) {
+                const int output_idx = (p + 1) * cutoff + (q + 1);
+                const double coeff = 0.5 * std::sqrt(static_cast<double>((p + 1) * (q + 1)));
+                generator[output_idx][input_idx] += std::conj(xi) * coeff;
+            }
+
+            if (p > 0 && q > 0) {
+                const int output_idx = (p - 1) * cutoff + (q - 1);
+                const double coeff = -0.5 * std::sqrt(static_cast<double>(p * q));
+                generator[output_idx][input_idx] += xi * coeff;
+            }
+        }
+    }
+
+    return matrix_exponential(generator);
+}
+
+Matrix build_sum_matrix(int cutoff, double theta) {
+    const int dim = cutoff * cutoff;
+    Matrix generator(dim, Vector(dim, Complex(0.0, 0.0)));
+    const double prefactor = 0.5 * theta;
+
+    for (int p = 0; p < cutoff; ++p) {
+        for (int q = 0; q < cutoff; ++q) {
+            const int input_idx = p * cutoff + q;
+
+            if (p > 0 && q + 1 < cutoff) {
+                const int output_idx = (p - 1) * cutoff + (q + 1);
+                generator[output_idx][input_idx] +=
+                    prefactor * std::sqrt(static_cast<double>(p * (q + 1)));
+            }
+
+            if (p > 0 && q > 0) {
+                const int output_idx = (p - 1) * cutoff + (q - 1);
+                generator[output_idx][input_idx] +=
+                    -prefactor * std::sqrt(static_cast<double>(p * q));
+            }
+
+            if (p + 1 < cutoff && q + 1 < cutoff) {
+                const int output_idx = (p + 1) * cutoff + (q + 1);
+                generator[output_idx][input_idx] +=
+                    prefactor * std::sqrt(static_cast<double>((p + 1) * (q + 1)));
+            }
+
+            if (p + 1 < cutoff && q > 0) {
+                const int output_idx = (p + 1) * cutoff + (q - 1);
+                generator[output_idx][input_idx] +=
+                    -prefactor * std::sqrt(static_cast<double>((p + 1) * q));
+            }
+        }
+    }
+
+    return matrix_exponential(generator);
+}
+
+}  // namespace
 
 // ===== 工具函数实现 =====
 // 添加缺失的工具函数
@@ -254,32 +522,15 @@ Vector SingleModeGates::apply_squeezing_gate(const Vector& input, Complex xi) {
 // ===== Level 3: 双模门实现 =====
 
 Vector TwoModeGates::apply_beam_splitter(const Vector& input, double theta, double phi, int max_photon) {
-    int total_dim = input.size();
-    // 简化的实现：假设输入是单模状态，扩展到双模
-    // 在实际实现中，需要根据具体的状态表示方式处理
-
-    // 这里提供一个简化的实现
-    Vector result = input;
-
-    // 计算光束分裂器的简单版本
-    // BS = [[cosθ, -sinθ*e^(iφ)], [sinθ*e^(iφ), cosθ]]
-
-    double cos_theta = std::cos(theta);
-    double sin_theta = std::sin(theta);
-    Complex phase_factor(std::cos(phi), std::sin(phi));
-
-    // 对于真空输入，简单的处理
-    if (input.size() >= 2) {
-        Complex input0 = input[0];
-        Complex input1 = (input.size() > 1) ? input[1] : Complex(0.0, 0.0);
-
-        result[0] = cos_theta * input0 - sin_theta * phase_factor * input1;
-        if (result.size() > 1) {
-            result[1] = sin_theta * phase_factor * input0 + cos_theta * input1;
-        }
+    (void)max_photon;
+    const int total_dim = static_cast<int>(input.size());
+    const int single_mode_dim = static_cast<int>(std::lround(std::sqrt(static_cast<double>(total_dim))));
+    if (single_mode_dim * single_mode_dim != total_dim) {
+        throw std::invalid_argument("Beam splitter reference expects a square two-mode state dimension");
     }
 
-    return result;
+    Matrix beam_splitter_matrix = create_beam_splitter_matrix(single_mode_dim, single_mode_dim, theta, phi);
+    return matrix_vector_multiply(beam_splitter_matrix, input);
 }
 
 // ===== 矩阵创建函数 =====
@@ -363,17 +614,12 @@ Matrix create_displacement_matrix(int dim, Complex alpha) {
 
 Matrix create_squeezing_matrix(int dim, Complex xi) {
     Matrix matrix(dim, std::vector<Complex>(dim, Complex(0.0, 0.0)));
+    const std::vector<std::complex<double>> dense =
+        generate_squeezing_matrix(std::abs(xi), std::arg(xi), dim);
 
-    // 简化的挤压矩阵实现
-    // S(ξ) = exp(ξ*a²/2 - ξ*(a†)²/2)
-
-    for (int n = 0; n < dim; ++n) {
-        for (int m = 0; m < dim; ++m) {
-            // 这里应该计算完整的挤压矩阵元素
-            // 暂时使用单位矩阵作为占位符
-            if (n == m) {
-                matrix[n][m] = Complex(1.0, 0.0);
-            }
+    for (int row = 0; row < dim; ++row) {
+        for (int col = 0; col < dim; ++col) {
+            matrix[row][col] = dense[static_cast<size_t>(row) * dim + static_cast<size_t>(col)];
         }
     }
 
@@ -381,25 +627,26 @@ Matrix create_squeezing_matrix(int dim, Complex xi) {
 }
 
 Matrix create_beam_splitter_matrix(int dim1, int dim2, double theta, double phi) {
-    int total_dim = dim1 * dim2;
+    const int total_dim = dim1 * dim2;
+    const int cutoff = std::max(dim1, dim2);
     Matrix matrix(total_dim, std::vector<Complex>(total_dim, Complex(0.0, 0.0)));
+    std::vector<Complex> tensor;
+    build_beam_splitter_tensor(tensor, cutoff, theta, phi);
 
-    double cos_theta = std::cos(theta);
-    double sin_theta = std::sin(theta);
-    Complex phase_factor(std::cos(phi), std::sin(phi));
-
-    // 简化的双模光束分裂器矩阵
-    // 在实际实现中，这应该是一个更复杂的块对角矩阵
-
-    for (int n1 = 0; n1 < dim1; ++n1) {
-        for (int n2 = 0; n2 < dim2; ++n2) {
-            int idx = n1 * dim2 + n2;
-
-            // 对角元素 (n1,n2) -> (n1,n2)
-            matrix[idx][idx] = cos_theta;
-
-            // 交叉项 (n1,n2) -> (n1+1,n2-1) 等
-            // 这里需要根据光子数守恒实现完整的逻辑
+    for (int m = 0; m < dim1; ++m) {
+        for (int n = 0; n < dim2; ++n) {
+            const int row = m * dim2 + n;
+            for (int p = 0; p < dim1; ++p) {
+                for (int q = 0; q < dim2; ++q) {
+                    const int col = p * dim2 + q;
+                    const size_t tensor_idx =
+                        static_cast<size_t>(m) * cutoff * cutoff * cutoff +
+                        static_cast<size_t>(n) * cutoff * cutoff +
+                        static_cast<size_t>(p) * cutoff +
+                        static_cast<size_t>(q);
+                    matrix[row][col] = tensor[tensor_idx];
+                }
+            }
         }
     }
 
@@ -543,62 +790,173 @@ Vector QubitGates::apply_phase_t(const Vector& input) {
 
 // ===== 扩展的混合控制门实现 =====
 
+namespace {
+
+std::pair<Vector, Vector> split_hybrid_state(const Vector& hybrid_state) {
+    if (hybrid_state.size() % 2 != 0) {
+        throw std::invalid_argument("混合态向量长度必须为偶数");
+    }
+
+    const size_t cutoff = hybrid_state.size() / 2;
+    Vector branch0(cutoff, Complex(0.0, 0.0));
+    Vector branch1(cutoff, Complex(0.0, 0.0));
+    for (size_t n = 0; n < cutoff; ++n) {
+        branch0[n] = hybrid_state[n];
+        branch1[n] = hybrid_state[cutoff + n];
+    }
+    return {branch0, branch1};
+}
+
+Vector combine_hybrid_state(const Vector& branch0, const Vector& branch1) {
+    if (branch0.size() != branch1.size()) {
+        throw std::invalid_argument("混合态分支长度不匹配");
+    }
+
+    Vector hybrid_state(branch0.size() * 2, Complex(0.0, 0.0));
+    for (size_t n = 0; n < branch0.size(); ++n) {
+        hybrid_state[n] = branch0[n];
+        hybrid_state[branch0.size() + n] = branch1[n];
+    }
+    return hybrid_state;
+}
+
+Vector make_hybrid_product_state(const Vector& qubit_state, const Vector& qumode_state) {
+    if (qubit_state.size() != 2) {
+        throw std::invalid_argument("混合门参考实现要求2维qubit状态");
+    }
+    return tensor_product(qubit_state, qumode_state);
+}
+
+}  // namespace
+
 Vector HybridControlGates::apply_controlled_beam_splitter(int control_state, const Vector& target_state,
                                                          double theta, double phi) {
-    // CBS(θ,φ) = exp[-i θ/2 σ_z ⊗ (e^{iφ} a† b + e^{-iφ} a b†)]
-    // 这是一个复杂的双模门，暂时使用简化的实现
-    return target_state; // 占位符
+    return TwoModeGates::apply_beam_splitter(
+        target_state, control_state == 0 ? theta : -theta, phi);
 }
 
 Vector HybridControlGates::apply_controlled_two_mode_squeezing(int control_state, const Vector& target_state,
                                                              Complex xi) {
-    // CTMS(ξ) = exp[1/2 σ_z ⊗ (ξ* a† b† - ξ* a b)]
-    // 这是一个复杂的双模门，暂时使用简化的实现
-    return target_state; // 占位符
+    if (control_state == 0) {
+        return TwoModeGatesExtended::apply_two_mode_squeezing(target_state, xi);
+    }
+    return TwoModeGatesExtended::apply_two_mode_squeezing(target_state, -xi);
 }
 
 Vector HybridControlGates::apply_controlled_sum(int control_state, const Vector& target_state,
                                               double theta, double phi) {
-    // SUM门定义较为复杂，暂时使用简化的实现
-    return target_state; // 占位符
+    if (control_state == 0) {
+        return TwoModeGatesExtended::apply_sum_gate(target_state, theta, phi);
+    }
+    return TwoModeGatesExtended::apply_sum_gate(target_state, -theta, phi);
 }
 
 Vector HybridControlGates::apply_rabi_interaction(const Vector& qubit_state, const Vector& qumode_state, double theta) {
-    // RB(θ) = exp[-i σ_x ⊗ (θ a† + θ* a)]
-    // 这是一个复杂的混合门，暂时使用简化的实现
-    return tensor_product(qubit_state, qumode_state); // 占位符
+    Vector hybrid_state = make_hybrid_product_state(qubit_state, qumode_state);
+    auto branches = split_hybrid_state(hybrid_state);
+    Vector plus(branches.first.size(), Complex(0.0, 0.0));
+    Vector minus(branches.first.size(), Complex(0.0, 0.0));
+    const double inv_sqrt2 = 1.0 / std::sqrt(2.0);
+
+    for (size_t n = 0; n < branches.first.size(); ++n) {
+        plus[n] = (branches.first[n] + branches.second[n]) * inv_sqrt2;
+        minus[n] = (branches.first[n] - branches.second[n]) * inv_sqrt2;
+    }
+
+    plus = SingleModeGates::apply_displacement_gate(plus, Complex(0.0, -theta));
+    minus = SingleModeGates::apply_displacement_gate(minus, Complex(0.0, theta));
+
+    Vector out0(branches.first.size(), Complex(0.0, 0.0));
+    Vector out1(branches.first.size(), Complex(0.0, 0.0));
+    for (size_t n = 0; n < branches.first.size(); ++n) {
+        out0[n] = (plus[n] + minus[n]) * inv_sqrt2;
+        out1[n] = (plus[n] - minus[n]) * inv_sqrt2;
+    }
+
+    return combine_hybrid_state(out0, out1);
 }
 
 Vector HybridControlGates::apply_jaynes_cummings(const Vector& qubit_state, const Vector& qumode_state, double theta, double phi) {
-    // JC(θ,φ) = exp[-iθ(e^{iφ} σ- a† + e^{-iφ} σ+ a)]
-    // 这是一个复杂的混合门，暂时使用简化的实现
-    return tensor_product(qubit_state, qumode_state); // 占位符
+    Vector hybrid_state = make_hybrid_product_state(qubit_state, qumode_state);
+    auto branches = split_hybrid_state(hybrid_state);
+    Vector out0 = branches.first;
+    Vector out1 = branches.second;
+
+    for (size_t n = 0; n + 1 < branches.first.size(); ++n) {
+        const double omega = theta * std::sqrt(static_cast<double>(n + 1));
+        const double cos_w = std::cos(omega);
+        const double sin_w = std::sin(omega);
+        const Complex factor01(-std::sin(phi) * sin_w, -std::cos(phi) * sin_w);
+        const Complex factor10(std::sin(phi) * sin_w, -std::cos(phi) * sin_w);
+
+        const Complex c0 = branches.first[n + 1];
+        const Complex c1 = branches.second[n];
+        out0[n + 1] = cos_w * c0 + factor01 * c1;
+        out1[n] = factor10 * c0 + cos_w * c1;
+    }
+
+    return combine_hybrid_state(out0, out1);
 }
 
 Vector HybridControlGates::apply_anti_jaynes_cummings(const Vector& qubit_state, const Vector& qumode_state, double theta, double phi) {
-    // AJC(θ,φ) = exp[-iθ(e^{iφ} σ+ a† + e^{-iφ} σ- a)]
-    // 这是一个复杂的混合门，暂时使用简化的实现
-    return tensor_product(qubit_state, qumode_state); // 占位符
+    Vector hybrid_state = make_hybrid_product_state(qubit_state, qumode_state);
+    auto branches = split_hybrid_state(hybrid_state);
+    Vector out0 = branches.first;
+    Vector out1 = branches.second;
+
+    for (size_t n = 0; n + 1 < branches.first.size(); ++n) {
+        const double omega = theta * std::sqrt(static_cast<double>(n + 1));
+        const double cos_w = std::cos(omega);
+        const double sin_w = std::sin(omega);
+        const Complex factor01(-std::sin(phi) * sin_w, -std::cos(phi) * sin_w);
+        const Complex factor10(std::sin(phi) * sin_w, -std::cos(phi) * sin_w);
+
+        const Complex c0 = branches.first[n];
+        const Complex c1 = branches.second[n + 1];
+        out0[n] = cos_w * c0 + factor01 * c1;
+        out1[n + 1] = factor10 * c0 + cos_w * c1;
+    }
+
+    return combine_hybrid_state(out0, out1);
 }
 
 Vector HybridControlGates::apply_selective_qubit_rotation(const Vector& qubit_state, const Vector& qumode_state,
                                                          const std::vector<double>& theta_vec, const std::vector<double>& phi_vec) {
-    // SQR根据光子数选择性旋转Qubit
-    // 这是一个非常复杂的门，暂时使用简化的实现
-    return tensor_product(qubit_state, qumode_state); // 占位符
+    Vector hybrid_state = make_hybrid_product_state(qubit_state, qumode_state);
+    auto branches = split_hybrid_state(hybrid_state);
+    Vector out0 = branches.first;
+    Vector out1 = branches.second;
+
+    for (size_t n = 0; n < branches.first.size(); ++n) {
+        const double theta = n < theta_vec.size() ? theta_vec[n] : 0.0;
+        const double phi = n < phi_vec.size() ? phi_vec[n] : 0.0;
+        const double cos_t = std::cos(theta / 2.0);
+        const double sin_t = std::sin(theta / 2.0);
+        const Complex alpha(cos_t, 0.0);
+        const Complex beta(-std::cos(phi) * sin_t, std::sin(phi) * sin_t);
+        const Complex c0 = branches.first[n];
+        const Complex c1 = branches.second[n];
+
+        out0[n] = alpha * c0 + beta * c1;
+        out1[n] = -std::conj(beta) * c0 + std::conj(alpha) * c1;
+    }
+
+    return combine_hybrid_state(out0, out1);
 }
 
 // ===== 双模门扩展实现 =====
 
 Vector TwoModeGatesExtended::apply_two_mode_squeezing(const Vector& input, Complex xi) {
-    // TMS(ξ) = exp[1/2 (ξ* a† b† - ξ a b)]
-    // 暂时使用简化的实现
-    return input; // 占位符
+    const int cutoff = infer_two_mode_cutoff(input);
+    return matrix_vector_multiply(build_two_mode_squeezing_matrix(cutoff, xi), input);
 }
 
 Vector TwoModeGatesExtended::apply_sum_gate(const Vector& input, double theta, double phi) {
-    // SUM门定义较为复杂，暂时使用简化的实现
-    return input; // 占位符
+    if (std::abs(phi) > 1e-14) {
+        throw std::invalid_argument("当前SUM参考实现仅支持 phi = 0");
+    }
+    const int cutoff = infer_two_mode_cutoff(input);
+    return matrix_vector_multiply(build_sum_matrix(cutoff, theta), input);
 }
 
 } // namespace Reference

@@ -6,6 +6,7 @@
 #include <vector>
 #include <memory>
 #include <atomic>
+#include <cstdint>
 
 /**
  * 连续变量状态池 (CV State Pool)
@@ -39,6 +40,10 @@ struct CVStatePool {
 
     // 主机端副本，用于CPU操作
     std::vector<cuDoubleComplex> host_data;
+
+    // 主机端状态跟踪
+    std::vector<int> free_state_ids;
+    std::vector<uint8_t> active_flags;
 
     /**
      * 构造函数 - 动态张量积版本

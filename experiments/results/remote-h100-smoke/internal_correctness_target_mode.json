@@ -1,0 +1,289 @@
+{
+  "schema_version": "1.0",
+  "generated_at_utc": "2026-03-13T06:47:59Z",
+  "simulator": "HybridCVDV-Simulator",
+  "single_gpu_only": true,
+  "requested_suite": "correctness",
+  "device": {
+    "available": true,
+    "device_index": 0,
+    "name": "NVIDIA H100 PCIe",
+    "compute_capability": "9.0",
+    "multiprocessor_count": 114,
+    "total_global_mem_bytes": 85017886720,
+    "shared_mem_per_block_bytes": 49152
+  },
+  "results": [
+    {
+      "name": "phase_rotation_fock1",
+      "category": "correctness",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "max_states": "32",
+        "num_qumodes": "1"
+      },
+      "metrics": {
+        "compute_time_ms": 0.014972,
+        "fidelity_deviation": 0,
+        "l2_error": 0,
+        "max_error": 0,
+        "memory_bytes": 8192,
+        "output_norm": 1,
+        "reference_norm": 1,
+        "relative_error": 0,
+        "total_time_ms": 0.025688,
+        "transfer_time_ms": 0.004907
+      }
+    },
+    {
+      "name": "kerr_fock2",
+      "category": "correctness",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "max_states": "32",
+        "num_qumodes": "1"
+      },
+      "metrics": {
+        "compute_time_ms": 0.010416,
+        "fidelity_deviation": 0,
+        "l2_error": 0,
+        "max_error": 0,
+        "memory_bytes": 8192,
+        "output_norm": 1,
+        "reference_norm": 1,
+        "relative_error": 0,
+        "total_time_ms": 0.017737,
+        "transfer_time_ms": 0.003836
+      }
+    },
+    {
+      "name": "creation_vacuum",
+      "category": "correctness",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "max_states": "32",
+        "num_qumodes": "1"
+      },
+      "metrics": {
+        "compute_time_ms": 0.010776,
+        "fidelity_deviation": 0,
+        "l2_error": 0,
+        "max_error": 0,
+        "memory_bytes": 8192,
+        "output_norm": 1,
+        "reference_norm": 1,
+        "relative_error": 0,
+        "total_time_ms": 0.017186,
+        "transfer_time_ms": 0.003545
+      }
+    },
+    {
+      "name": "annihilation_fock1",
+      "category": "correctness",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "max_states": "32",
+        "num_qumodes": "1"
+      },
+      "metrics": {
+        "compute_time_ms": 0.009915,
+        "fidelity_deviation": 0,
+        "l2_error": 0,
+        "max_error": 0,
+        "memory_bytes": 8192,
+        "output_norm": 1,
+        "reference_norm": 1,
+        "relative_error": 0,
+        "total_time_ms": 0.016014,
+        "transfer_time_ms": 0.003315
+      }
+    },
+    {
+      "name": "displacement_coherent",
+      "category": "correctness",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "max_states": "32",
+        "num_qumodes": "1"
+      },
+      "metrics": {
+        "compute_time_ms": 0.35463,
+        "fidelity_deviation": -4.44089209850063e-16,
+        "l2_error": 4.92026072298927e-12,
+        "max_error": 2.63584121101832e-12,
+        "memory_bytes": 8192,
+        "output_norm": 1,
+        "reference_norm": 1.00000000000006,
+        "relative_error": 4.92026072298897e-12,
+        "total_time_ms": 0.360709,
+        "transfer_time_ms": 0.003566
+      }
+    },
+    {
+      "name": "squeezing_vacuum",
+      "category": "correctness",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "max_states": "32",
+        "num_qumodes": "1"
+      },
+      "metrics": {
+        "compute_time_ms": 0.047091,
+        "fidelity_deviation": 0,
+        "l2_error": 0,
+        "max_error": 0,
+        "memory_bytes": 8192,
+        "output_norm": 1,
+        "reference_norm": 1,
+        "relative_error": 0,
+        "total_time_ms": 0.05336,
+        "transfer_time_ms": 0.003725
+      }
+    },
+    {
+      "name": "beamsplitter_fock10",
+      "category": "correctness",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "8",
+        "max_states": "32",
+        "num_qumodes": "2"
+      },
+      "metrics": {
+        "compute_time_ms": 0.05337,
+        "fidelity_deviation": 0,
+        "l2_error": 0,
+        "max_error": 0,
+        "memory_bytes": 32768,
+        "output_norm": 1,
+        "reference_norm": 1,
+        "relative_error": 0,
+        "total_time_ms": 0.065949,
+        "transfer_time_ms": 0.003836
+      }
+    },
+    {
+      "name": "conditional_displacement_branching",
+      "category": "correctness",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "num_qubits": "1",
+        "num_qumodes": "1"
+      },
+      "metrics": {
+        "branch_probability_sum": 1,
+        "high_fidelity_deviation": 2.22044604925031e-16,
+        "high_l2_error": 7.08129120906497e-14,
+        "low_fidelity_deviation": 0,
+        "low_l2_error": 0
+      }
+    },
+    {
+      "name": "conditional_displacement_target_qumode1",
+      "category": "correctness",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "num_qubits": "1",
+        "num_qumodes": "2",
+        "target_qumode": "1"
+      },
+      "metrics": {
+        "branch_probability_sum": 1,
+        "high_fidelity_deviation": 0,
+        "high_l2_error": 4.69505824521576e-14,
+        "low_fidelity_deviation": 0,
+        "low_l2_error": 0
+      }
+    },
+    {
+      "name": "rabi_interaction_kernel",
+      "category": "correctness",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "num_qubits": "1",
+        "num_qumodes": "1"
+      },
+      "metrics": {
+        "branch_probability_sum": 0.999999999999999,
+        "high_fidelity_deviation": -4.44089209850063e-16,
+        "high_l2_error": 5.98079334767667e-11,
+        "low_fidelity_deviation": 0,
+        "low_l2_error": 4.78239577573168e-12
+      }
+    },
+    {
+      "name": "rabi_interaction_target_qumode1",
+      "category": "correctness",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "num_qubits": "1",
+        "num_qumodes": "2",
+        "target_qumode": "1"
+      },
+      "metrics": {
+        "branch_probability_sum": 0.999999999999999,
+        "high_fidelity_deviation": -4.44089209850063e-16,
+        "high_l2_error": 5.98079334767667e-11,
+        "low_fidelity_deviation": 0,
+        "low_l2_error": 4.78239577573168e-12
+      }
+    },
+    {
+      "name": "jaynes_cummings_kernel",
+      "category": "correctness",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "num_qubits": "1",
+        "num_qumodes": "1"
+      },
+      "metrics": {
+        "branch_probability_sum": 1,
+        "high_fidelity_deviation": 0,
+        "high_l2_error": 0,
+        "low_fidelity_deviation": 0,
+        "low_l2_error": 0
+      }
+    },
+    {
+      "name": "anti_jaynes_cummings_kernel",
+      "category": "correctness",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "num_qubits": "1",
+        "num_qumodes": "1"
+      },
+      "metrics": {
+        "branch_probability_sum": 1,
+        "high_fidelity_deviation": 0,
+        "high_l2_error": 0,
+        "low_fidelity_deviation": 0,
+        "low_l2_error": 0
+      }
+    }
+  ]
+}

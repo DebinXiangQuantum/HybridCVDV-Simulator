@@ -1,0 +1,207 @@
+{
+  "schema_version": "1.0",
+  "generated_at_utc": "2026-03-12T13:45:09Z",
+  "simulator": "HybridCVDV-Simulator",
+  "single_gpu_only": true,
+  "requested_suite": "correctness",
+  "device": {
+    "available": true,
+    "device_index": 0,
+    "name": "NVIDIA H100 PCIe",
+    "compute_capability": "9.0",
+    "multiprocessor_count": 114,
+    "total_global_mem_bytes": 85017886720,
+    "shared_mem_per_block_bytes": 49152
+  },
+  "results": [
+    {
+      "name": "phase_rotation_fock1",
+      "category": "correctness",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "max_states": "32",
+        "num_qumodes": "1"
+      },
+      "metrics": {
+        "compute_time_ms": 0.015203,
+        "fidelity_deviation": 0,
+        "l2_error": 0,
+        "max_error": 0,
+        "memory_bytes": 8192,
+        "output_norm": 1,
+        "reference_norm": 1,
+        "relative_error": 0,
+        "total_time_ms": 0.0265,
+        "transfer_time_ms": 0.004647
+      }
+    },
+    {
+      "name": "kerr_fock2",
+      "category": "correctness",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "max_states": "32",
+        "num_qumodes": "1"
+      },
+      "metrics": {
+        "compute_time_ms": 0.010506,
+        "fidelity_deviation": 0,
+        "l2_error": 0,
+        "max_error": 0,
+        "memory_bytes": 8192,
+        "output_norm": 1,
+        "reference_norm": 1,
+        "relative_error": 0,
+        "total_time_ms": 0.017657,
+        "transfer_time_ms": 0.003826
+      }
+    },
+    {
+      "name": "creation_vacuum",
+      "category": "correctness",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "max_states": "32",
+        "num_qumodes": "1"
+      },
+      "metrics": {
+        "compute_time_ms": 0.010906,
+        "fidelity_deviation": 0,
+        "l2_error": 0,
+        "max_error": 0,
+        "memory_bytes": 8192,
+        "output_norm": 1,
+        "reference_norm": 1,
+        "relative_error": 0,
+        "total_time_ms": 0.017366,
+        "transfer_time_ms": 0.003506
+      }
+    },
+    {
+      "name": "annihilation_fock1",
+      "category": "correctness",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "max_states": "32",
+        "num_qumodes": "1"
+      },
+      "metrics": {
+        "compute_time_ms": 0.009965,
+        "fidelity_deviation": 0,
+        "l2_error": 0,
+        "max_error": 0,
+        "memory_bytes": 8192,
+        "output_norm": 1,
+        "reference_norm": 1,
+        "relative_error": 0,
+        "total_time_ms": 0.016154,
+        "transfer_time_ms": 0.003395
+      }
+    },
+    {
+      "name": "displacement_coherent",
+      "category": "correctness",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "max_states": "32",
+        "num_qumodes": "1"
+      },
+      "metrics": {
+        "compute_time_ms": 0.352962,
+        "fidelity_deviation": -4.44089209850063e-16,
+        "l2_error": 4.92026072298927e-12,
+        "max_error": 2.63584121101832e-12,
+        "memory_bytes": 8192,
+        "output_norm": 1,
+        "reference_norm": 1.00000000000006,
+        "relative_error": 4.92026072298897e-12,
+        "total_time_ms": 0.35905,
+        "transfer_time_ms": 0.003555
+      }
+    },
+    {
+      "name": "squeezing_vacuum",
+      "category": "correctness",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "max_states": "32",
+        "num_qumodes": "1"
+      },
+      "metrics": {
+        "compute_time_ms": 0.041363,
+        "fidelity_deviation": 0,
+        "l2_error": 0,
+        "max_error": 0,
+        "memory_bytes": 8192,
+        "output_norm": 1,
+        "reference_norm": 1,
+        "relative_error": 0,
+        "total_time_ms": 0.047441,
+        "transfer_time_ms": 0.003775
+      }
+    },
+    {
+      "name": "beamsplitter_fock10",
+      "category": "correctness",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "8",
+        "max_states": "32",
+        "num_qumodes": "2"
+      },
+      "metrics": {
+        "compute_time_ms": 0.081313,
+        "fidelity_deviation": 0,
+        "l2_error": 0,
+        "max_error": 0,
+        "memory_bytes": 32768,
+        "output_norm": 1,
+        "reference_norm": 1,
+        "relative_error": 0,
+        "total_time_ms": 0.094292,
+        "transfer_time_ms": 0.003795
+      }
+    },
+    {
+      "name": "conditional_displacement_branching",
+      "category": "correctness",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "num_qubits": "1",
+        "num_qumodes": "1"
+      },
+      "metrics": {
+        "branch_probability_sum": 1,
+        "high_fidelity_deviation": 2.22044604925031e-16,
+        "high_l2_error": 7.08129514897104e-14,
+        "low_fidelity_deviation": 0,
+        "low_l2_error": 0
+      }
+    },
+    {
+      "name": "jaynes_cummings_kernel",
+      "category": "correctness",
+      "status": "unsupported",
+      "note": "Jaynes-Cummings and Anti-Jaynes-Cummings paths are placeholders in src/cpu/quantum_circuit.cpp",
+      "params": {
+      },
+      "metrics": {
+      }
+    }
+  ]
+}

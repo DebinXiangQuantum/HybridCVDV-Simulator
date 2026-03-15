@@ -895,3 +895,102 @@ void apply_fouriergate(CVStatePool* state_pool, const int* target_indices,
                                 std::string(cudaGetErrorString(err)));
     }
 }
+
+// ==========================================
+// HPC Optimization: Kernel/Operator Fusion
+// ==========================================
+
+/**
+ * 深度融合内核 (Phase -> Displacement -> Squeezing)
+ * 将三个连续的单模门操作融合为一个 Kernel。
+ * 数据仅从 Global Memory 加载一次，中间结果保存在 Shared Memory / Registers 中，
+ * 最后一次性写回 Global Memory。这降低了 66% 的全局显存带宽需求。
+ */
+__global__ void apply_fused_rds_kernel(
+    cuDoubleComplex* state_data, 
+    const size_t* state_offsets, 
+    const int* state_dims,
+    const int* target_indices, 
+    int batch_size,
+    double theta,                         // Phase 参数
+    const cuDoubleComplex* disp_ell_val, const int* disp_ell_col, int disp_bw, // Disp ELL 格式
+    const cuDoubleComplex* sqz_ell_val,  const int* sqz_ell_col,  int sqz_bw   // Squeezing ELL 格式
+) {
+    extern __shared__ cuDoubleComplex smem_buffer[]; 
+    // 分配 2 * current_dim 的 Shared Memory 用于 Double Buffering
+
+    int batch_id = blockIdx.y;
+    if (batch_id >= batch_size) return;
+
+    int state_idx = target_indices[batch_id];
+    int n = threadIdx.x; 
+    
+    int current_dim = state_dims[state_idx];
+    if (n >= current_dim) return;
+
+    cuDoubleComplex* psi_global = &state_data[state_offsets[state_idx]];
+    cuDoubleComplex* smem_in = smem_buffer;
+    cuDoubleComplex* smem_out = &smem_buffer[current_dim];
+
+    // 1. Load & Phase Rotation (R) 
+    double phase = -theta * static_cast<double>(n);
+    cuDoubleComplex phase_factor = make_cuDoubleComplex(cos(phase), sin(phase));
+    smem_in[n] = cuCmul(psi_global[n], phase_factor);
+    __syncthreads();
+
+    // 2. Displacement (D)
+    cuDoubleComplex sum_d = make_cuDoubleComplex(0.0, 0.0);
+    for (int k = 0; k < disp_bw; ++k) {
+        int col = disp_ell_col[n * disp_bw + k];
+        if (col != -1 && col < current_dim) {
+            sum_d = cuCadd(sum_d, cuCmul(disp_ell_val[n * disp_bw + k], smem_in[col]));
+        }
+    }
+    smem_out[n] = sum_d;
+    __syncthreads();
+
+    // 3. Squeezing (S)
+    cuDoubleComplex sum_s = make_cuDoubleComplex(0.0, 0.0);
+    for (int k = 0; k < sqz_bw; ++k) {
+        int col = sqz_ell_col[n * sqz_bw + k];
+        if (col != -1 && col < current_dim) {
+            sum_s = cuCadd(sum_s, cuCmul(sqz_ell_val[n * sqz_bw + k], smem_out[col]));
+        }
+    }
+
+    // 4. Store Back
+    psi_global[n] = sum_s;
+}
+
+/**
+ * 主机端接口：执行深度融合的 R -> D -> S 门
+ */
+void apply_fused_rds_gate(
+    CVStatePool* state_pool, 
+    const int* target_indices, 
+    int batch_size,
+    double phase_theta,
+    FockELLOperator* disp_ell,
+    FockELLOperator* sqz_ell
+) {
+    if (!state_pool || !disp_ell || !sqz_ell || !target_indices || batch_size <= 0) return;
+
+    // 假设每个 block 处理一个态，利用 Shared Memory 做 Buffer
+    dim3 block_dim(state_pool->max_total_dim); 
+    // 若 D > 1024 需要做 block stride loop，此处简化假设 D <= 1024
+    if (block_dim.x > 1024) block_dim.x = 1024;
+    
+    dim3 grid_dim(1, batch_size);
+
+    size_t shared_mem_size = 2 * state_pool->max_total_dim * sizeof(cuDoubleComplex);
+
+    apply_fused_rds_kernel<<<grid_dim, block_dim, shared_mem_size>>>(
+        state_pool->data, state_pool->state_offsets, state_pool->state_dims,
+        target_indices, batch_size,
+        phase_theta,
+        disp_ell->ell_val, disp_ell->ell_col, disp_ell->max_bandwidth,
+        sqz_ell->ell_val, sqz_ell->ell_col, sqz_ell->max_bandwidth
+    );
+
+    cudaDeviceSynchronize();
+}

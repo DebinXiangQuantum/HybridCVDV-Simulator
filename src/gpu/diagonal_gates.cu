@@ -1,7 +1,31 @@
 #include <cuda_runtime.h>
 #include <cuComplex.h>
 #include <cmath>
+#include <stdexcept>
+#include <string>
 #include "cv_state_pool.h"
+
+namespace {
+
+int compute_mode_right_stride(int trunc_dim, int target_qumode, int num_qumodes) {
+    if (trunc_dim <= 0) {
+        throw std::invalid_argument("truncation dimension must be positive");
+    }
+    if (num_qumodes <= 0) {
+        throw std::invalid_argument("number of qumodes must be positive");
+    }
+    if (target_qumode < 0 || target_qumode >= num_qumodes) {
+        throw std::out_of_range("target qumode is out of range");
+    }
+
+    int right_stride = 1;
+    for (int mode = target_qumode + 1; mode < num_qumodes; ++mode) {
+        right_stride *= trunc_dim;
+    }
+    return right_stride;
+}
+
+}  // namespace
 
 /**
  * Level 0: 对角门 (Diagonal Gates) GPU内核
@@ -24,29 +48,34 @@ __global__ void apply_phase_rotation_kernel(
     const int* state_dims,
     const int* target_indices,
     int batch_size,
-    double theta
+    double theta,
+    int target_mode_dim,
+    int target_mode_right_stride
 ) {
     int batch_id = blockIdx.y;
     if (batch_id >= batch_size) return;
 
     int state_idx = target_indices[batch_id];
-    int n = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t flat_index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
 
     // 获取该状态的维度
     int current_dim = state_dims[state_idx];
-    if (n >= current_dim) return;
+    if (flat_index >= static_cast<size_t>(current_dim)) return;
 
     // 获取状态向量指针 (使用偏移量)
     size_t offset = state_offsets[state_idx];
     cuDoubleComplex* psi = &state_data[offset];
 
+    const size_t right_stride = static_cast<size_t>(target_mode_right_stride);
+    const int target_n = static_cast<int>((flat_index / right_stride) % target_mode_dim);
+
     // 计算相位因子: exp(-i * theta * n)  (与参考实现一致，使用负号)
-    double phase = -theta * static_cast<double>(n);
+    double phase = -theta * static_cast<double>(target_n);
     cuDoubleComplex phase_factor = make_cuDoubleComplex(cos(phase), sin(phase));
 
     // 应用相位旋转
-    cuDoubleComplex current_val = psi[n];
-    psi[n] = cuCmul(current_val, phase_factor);
+    cuDoubleComplex current_val = psi[flat_index];
+    psi[flat_index] = cuCmul(current_val, phase_factor);
 }
 
 /**
@@ -59,29 +88,34 @@ __global__ void apply_kerr_kernel(
     const int* state_dims,
     const int* target_indices,
     int batch_size,
-    double chi
+    double chi,
+    int target_mode_dim,
+    int target_mode_right_stride
 ) {
     int batch_id = blockIdx.y;
     if (batch_id >= batch_size) return;
 
     int state_idx = target_indices[batch_id];
-    int n = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t flat_index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
 
     // 获取该状态的维度
     int current_dim = state_dims[state_idx];
-    if (n >= current_dim) return;
+    if (flat_index >= static_cast<size_t>(current_dim)) return;
 
     // 获取状态向量指针 (使用偏移量)
     size_t offset = state_offsets[state_idx];
     cuDoubleComplex* psi = &state_data[offset];
 
+    const size_t right_stride = static_cast<size_t>(target_mode_right_stride);
+    const int target_n = static_cast<int>((flat_index / right_stride) % target_mode_dim);
+
     // f(n, chi) = -chi * n * n
     // Kerr gate: exp(-i * chi * n^2)  (与参考实现一致，使用负号)
-    double phase = -chi * static_cast<double>(n * n);
+    double phase = -chi * static_cast<double>(target_n * target_n);
     cuDoubleComplex phase_factor = make_cuDoubleComplex(cos(phase), sin(phase)); // e^(i * phase)
 
-    cuDoubleComplex current_val = psi[n];
-    psi[n] = cuCmul(current_val, phase_factor);
+    cuDoubleComplex current_val = psi[flat_index];
+    psi[flat_index] = cuCmul(current_val, phase_factor);
 }
 
 /**
@@ -95,36 +129,45 @@ __global__ void apply_conditional_parity_kernel(
     const int* state_dims,
     const int* target_indices,
     int batch_size,
-    double parity
+    double parity,
+    int target_mode_dim,
+    int target_mode_right_stride
 ) {
     int batch_id = blockIdx.y;
     if (batch_id >= batch_size) return;
 
     int state_idx = target_indices[batch_id];
-    int n = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t flat_index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
 
     // 获取该状态的维度
     int current_dim = state_dims[state_idx];
-    if (n >= current_dim) return;
+    if (flat_index >= static_cast<size_t>(current_dim)) return;
 
     // 获取状态向量指针 (使用偏移量)
     size_t offset = state_offsets[state_idx];
     cuDoubleComplex* psi = &state_data[offset];
 
+    const size_t right_stride = static_cast<size_t>(target_mode_right_stride);
+    const int target_n = static_cast<int>((flat_index / right_stride) % target_mode_dim);
+
     // f(n, parity) = -parity * pi * (n % 2)
-    double phase = -parity * M_PI * static_cast<double>(n % 2);
+    double phase = -parity * M_PI * static_cast<double>(target_n % 2);
     cuDoubleComplex phase_factor = make_cuDoubleComplex(cos(phase), sin(phase)); // e^(i * phase)
 
-    cuDoubleComplex current_val = psi[n];
-    psi[n] = cuCmul(current_val, phase_factor);
+    cuDoubleComplex current_val = psi[flat_index];
+    psi[flat_index] = cuCmul(current_val, phase_factor);
 }
 
 /**
  * 主机端接口：应用相位旋转门 R(θ)
  * @param target_indices 设备端指针，指向目标状态ID数组
  */
-void apply_phase_rotation(CVStatePool* state_pool, const int* target_indices,
-                         int batch_size, double theta) {
+void apply_phase_rotation_on_mode(CVStatePool* state_pool, const int* target_indices,
+                                  int batch_size, double theta,
+                                  int target_qumode, int num_qumodes) {
+    const int target_mode_right_stride =
+        compute_mode_right_stride(state_pool->d_trunc, target_qumode, num_qumodes);
+
     dim3 block_dim(256);
     dim3 grid_dim((state_pool->max_total_dim + block_dim.x - 1) / block_dim.x, batch_size);
 
@@ -133,6 +176,7 @@ void apply_phase_rotation(CVStatePool* state_pool, const int* target_indices,
         state_pool->state_offsets,
         state_pool->state_dims,
         target_indices, batch_size, theta
+        , state_pool->d_trunc, target_mode_right_stride
     );
 
     cudaError_t err = cudaGetLastError();
@@ -149,12 +193,21 @@ void apply_phase_rotation(CVStatePool* state_pool, const int* target_indices,
     }
 }
 
+void apply_phase_rotation(CVStatePool* state_pool, const int* target_indices,
+                         int batch_size, double theta) {
+    apply_phase_rotation_on_mode(state_pool, target_indices, batch_size, theta, 0, 1);
+}
+
 /**
  * 主机端接口：应用Kerr门 K(χ)
  * @param target_indices 设备端指针，指向目标状态ID数组
  */
-void apply_kerr_gate(CVStatePool* state_pool, const int* target_indices,
-                    int batch_size, double chi) {
+void apply_kerr_gate_on_mode(CVStatePool* state_pool, const int* target_indices,
+                             int batch_size, double chi,
+                             int target_qumode, int num_qumodes) {
+    const int target_mode_right_stride =
+        compute_mode_right_stride(state_pool->d_trunc, target_qumode, num_qumodes);
+
     dim3 block_dim(256);
     dim3 grid_dim((state_pool->max_total_dim + block_dim.x - 1) / block_dim.x, batch_size);
 
@@ -163,6 +216,7 @@ void apply_kerr_gate(CVStatePool* state_pool, const int* target_indices,
         state_pool->state_offsets,
         state_pool->state_dims,
         target_indices, batch_size, chi
+        , state_pool->d_trunc, target_mode_right_stride
     );
 
     cudaError_t err = cudaGetLastError();
@@ -179,12 +233,21 @@ void apply_kerr_gate(CVStatePool* state_pool, const int* target_indices,
     }
 }
 
+void apply_kerr_gate(CVStatePool* state_pool, const int* target_indices,
+                    int batch_size, double chi) {
+    apply_kerr_gate_on_mode(state_pool, target_indices, batch_size, chi, 0, 1);
+}
+
 /**
  * 主机端接口：应用条件奇偶校验门 CP
  * @param target_indices 设备端指针，指向目标状态ID数组
  */
-void apply_conditional_parity(CVStatePool* state_pool, const int* target_indices,
-                             int batch_size, double parity) {
+void apply_conditional_parity_on_mode(CVStatePool* state_pool, const int* target_indices,
+                                      int batch_size, double parity,
+                                      int target_qumode, int num_qumodes) {
+    const int target_mode_right_stride =
+        compute_mode_right_stride(state_pool->d_trunc, target_qumode, num_qumodes);
+
     dim3 block_dim(256);
     dim3 grid_dim((state_pool->max_total_dim + block_dim.x - 1) / block_dim.x, batch_size);
 
@@ -193,6 +256,7 @@ void apply_conditional_parity(CVStatePool* state_pool, const int* target_indices
         state_pool->state_offsets,
         state_pool->state_dims,
         target_indices, batch_size, parity
+        , state_pool->d_trunc, target_mode_right_stride
     );
 
     cudaError_t err = cudaGetLastError();
@@ -207,6 +271,11 @@ void apply_conditional_parity(CVStatePool* state_pool, const int* target_indices
         throw std::runtime_error("Conditional Parity kernel synchronization failed: " +
                                 std::string(cudaGetErrorString(err)));
     }
+}
+
+void apply_conditional_parity(CVStatePool* state_pool, const int* target_indices,
+                             int batch_size, double parity) {
+    apply_conditional_parity_on_mode(state_pool, target_indices, batch_size, parity, 0, 1);
 }
 
 /**

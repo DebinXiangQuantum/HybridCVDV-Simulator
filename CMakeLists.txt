@@ -13,10 +13,13 @@ set(CUDA_HOST_COMPILER "/usr/bin/gcc-9")
 
 project(HybridCVDV-Simulator VERSION 1.5 LANGUAGES CXX)
 
+option(HYBRIDCVDV_BUILD_TESTS "Build the GoogleTest-based test suite" OFF)
+
 # 尝试查找CUDA (可选)
 find_package(CUDA QUIET)
 if(CUDA_FOUND)
     enable_language(CUDA)
+    find_package(CUDAToolkit REQUIRED)
     message(STATUS "CUDA found - building with GPU support")
     message(STATUS "CUDA version: ${CUDA_VERSION_STRING}")
     message(STATUS "CUDA toolkit: ${CUDA_TOOLKIT_ROOT_DIR}")
@@ -54,16 +57,18 @@ else()
     target_compile_definitions(cuda_mock INTERFACE CUDA_FOUND=0)
 endif()
 
-# Google Test - 自动下载和安装 (使用Gitee镜像)
-include(FetchContent)
-FetchContent_Declare(
-    googletest
-    GIT_REPOSITORY https://gitee.com/mirrors/googletest.git
-    GIT_TAG v1.14.0
-)
-# 防止googletest项目覆盖我们的编译设置
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(googletest)
+# Google Test - 仅在显式启用测试时下载
+if(HYBRIDCVDV_BUILD_TESTS)
+    include(FetchContent)
+    FetchContent_Declare(
+        googletest
+        GIT_REPOSITORY https://gitee.com/mirrors/googletest.git
+        GIT_TAG v1.14.0
+    )
+    # 防止googletest项目覆盖我们的编译设置
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(googletest)
+endif()
 
 # 包含目录
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -73,6 +78,10 @@ set(CORE_SOURCES
     src/core/cv_state_pool.cpp
     src/core/fock_ell_operator.cpp
     src/core/hdd_node.cpp
+    src/core/gaussian_state.cpp
+    src/core/gaussian_mixture.cpp
+    src/core/symplectic_math.cpp
+    src/core/gaussian_circuit.cpp
 )
 
 if(CUDA_FOUND)
@@ -85,6 +94,7 @@ if(CUDA_FOUND)
         src/gpu/squeezing_gate.cu
         src/gpu/qubit_gates.cu
         src/gpu/snap_gates.cu
+        src/gpu/gaussian_kernels.cu
     )
 else()
     set(GPU_SOURCES
@@ -155,14 +165,14 @@ endif()
 
 # 链接CUDA运行时
 if(CUDA_FOUND)
-    target_link_libraries(${PROJECT_NAME} ${CUDA_LIBRARIES})
+    target_link_libraries(${PROJECT_NAME} ${CUDA_LIBRARIES} CUDA::cublas)
 endif()
 
 # 主可执行文件
 add_executable(${PROJECT_NAME}_main src/main.cpp)
 target_link_libraries(${PROJECT_NAME}_main ${PROJECT_NAME})
 if(CUDA_FOUND)
-    target_link_libraries(${PROJECT_NAME}_main ${CUDA_LIBRARIES})
+    target_link_libraries(${PROJECT_NAME}_main ${CUDA_LIBRARIES} CUDA::cublas)
 endif()
 
 # 验证程序已包含在主测试套件中
@@ -172,34 +182,49 @@ endif()
 add_executable(${PROJECT_NAME}_examples examples/basic_usage.cpp)
 target_link_libraries(${PROJECT_NAME}_examples ${PROJECT_NAME})
 if(CUDA_FOUND)
-    target_link_libraries(${PROJECT_NAME}_examples ${CUDA_LIBRARIES})
+    target_link_libraries(${PROJECT_NAME}_examples ${CUDA_LIBRARIES} CUDA::cublas)
 endif()
 
-# 基准测试程序 - 暂时注释掉不存在的文件
+# 单卡实验程序
 if(CUDA_FOUND)
-    # add_executable(benchmark_cv_gates tests/benchmark_cv_gates.cpp)
-    # target_link_libraries(benchmark_cv_gates ${PROJECT_NAME} ${CUDA_LIBRARIES})
-    # 
-    # add_executable(test_bs_fidelity tests/test_bs_fidelity.cpp)
-    # target_link_libraries(test_bs_fidelity ${PROJECT_NAME} ${CUDA_LIBRARIES})
-    # 
-    # add_executable(test_bs_recursive tests/test_bs_recursive.cpp)
-    # target_link_libraries(test_bs_recursive ${PROJECT_NAME} ${CUDA_LIBRARIES})
-    # 
-    # add_executable(test_bs_comparison tests/test_bs_comparison.cpp)
-    # target_link_libraries(test_bs_comparison ${PROJECT_NAME} ${CUDA_LIBRARIES})
-    # 
-    # add_executable(test_tms tests/test_tms.cpp)
-    # target_link_libraries(test_tms ${PROJECT_NAME} ${CUDA_LIBRARIES})
-    # 
-    # add_executable(${PROJECT_NAME}_cv_benchmark tests/test_cv_benchmark.cpp)
-    # target_link_libraries(${PROJECT_NAME}_cv_benchmark ${PROJECT_NAME} GTest::gtest_main ${CUDA_LIBRARIES})
-    # 
-    # add_executable(simple_benchmark tests/simple_benchmark.cpp)
-    # target_link_libraries(simple_benchmark ${PROJECT_NAME} ${CUDA_LIBRARIES})
+    add_executable(hybridcvdv_single_gpu_experiments
+        experiments/cpp/single_gpu_experiments.cpp
+    )
+    target_link_libraries(hybridcvdv_single_gpu_experiments ${PROJECT_NAME} ${CUDA_LIBRARIES} CUDA::cublas)
+endif()
+
+# Profiling Test
+add_executable(${PROJECT_NAME}_profiling_test tests/analyze/profiling_test.cpp)
+target_link_libraries(${PROJECT_NAME}_profiling_test ${PROJECT_NAME})
+if(CUDA_FOUND)
+    target_link_libraries(${PROJECT_NAME}_profiling_test ${CUDA_LIBRARIES})
+endif()
+
+add_executable(${PROJECT_NAME}_gaussian_order_benchmark tests/analyze/gaussian_order_benchmark.cpp)
+target_link_libraries(${PROJECT_NAME}_gaussian_order_benchmark ${PROJECT_NAME})
+if(CUDA_FOUND)
+    target_link_libraries(${PROJECT_NAME}_gaussian_order_benchmark ${CUDA_LIBRARIES} CUDA::cublas)
+endif()
+
+add_executable(${PROJECT_NAME}_gaussian_mixture_benchmark tests/analyze/gaussian_mixture_benchmark.cpp)
+target_link_libraries(${PROJECT_NAME}_gaussian_mixture_benchmark ${PROJECT_NAME})
+if(CUDA_FOUND)
+    target_link_libraries(${PROJECT_NAME}_gaussian_mixture_benchmark ${CUDA_LIBRARIES} CUDA::cublas)
+endif()
+
+add_executable(${PROJECT_NAME}_random_circuit_benchmark tests/analyze/random_circuit_benchmark.cpp)
+target_link_libraries(${PROJECT_NAME}_random_circuit_benchmark ${PROJECT_NAME})
+if(CUDA_FOUND)
+    target_link_libraries(${PROJECT_NAME}_random_circuit_benchmark ${CUDA_LIBRARIES} CUDA::cublas)
+endif()
+
+if(CUDA_FOUND)
+    add_executable(${PROJECT_NAME}_gpu_precision_report tests/analyze/gpu_precision_report.cpp)
+    target_link_libraries(${PROJECT_NAME}_gpu_precision_report ${PROJECT_NAME} ${CUDA_LIBRARIES} CUDA::cublas)
 endif()
 
 # 测试 (使用自动下载的GoogleTest)
+if(HYBRIDCVDV_BUILD_TESTS)
     enable_testing()
 
     set(TEST_SOURCES
@@ -217,12 +242,15 @@ endif()
         tests/test_qubit_gates.cpp
         tests/test_validation.cpp
         tests/test_gpu_validation.cpp
+        tests/test_gaussian_symplectic.cpp
+        tests/test_gaussian_mixture.cpp
     )
 
     add_executable(${PROJECT_NAME}_tests ${TEST_SOURCES})
     target_link_libraries(${PROJECT_NAME}_tests ${PROJECT_NAME} GTest::gtest_main)
     include(GoogleTest)
     gtest_discover_tests(${PROJECT_NAME}_tests)
+endif()
 
 # 安装目标
 install(TARGETS ${PROJECT_NAME} ${PROJECT_NAME}_main ${PROJECT_NAME}_examples
@@ -230,6 +258,12 @@ install(TARGETS ${PROJECT_NAME} ${PROJECT_NAME}_main ${PROJECT_NAME}_examples
     ARCHIVE DESTINATION lib
     RUNTIME DESTINATION bin
 )
+
+if(CUDA_FOUND)
+    install(TARGETS hybridcvdv_single_gpu_experiments
+        RUNTIME DESTINATION bin
+    )
+endif()
 
 install(DIRECTORY include/ DESTINATION include/${PROJECT_NAME})
 
@@ -239,4 +273,7 @@ message(STATUS "Version: ${PROJECT_VERSION}")
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "CUDA found: ${CUDA_FOUND}")
 message(STATUS "CUDA version: ${CUDA_VERSION_STRING}")
-message(STATUS "GTest: Auto-downloaded and configured")
+message(STATUS "Build tests: ${HYBRIDCVDV_BUILD_TESTS}")
+if(HYBRIDCVDV_BUILD_TESTS)
+    message(STATUS "GTest: Auto-downloaded and configured")
+endif()

@@ -9,6 +9,30 @@
 #include <vector>
 #include <complex>
 #include <cmath>
+#include <stdexcept>
+#include <string>
+
+namespace {
+
+int compute_mode_right_stride(int trunc_dim, int target_qumode, int num_qumodes) {
+    if (trunc_dim <= 0) {
+        throw std::invalid_argument("truncation dimension must be positive");
+    }
+    if (num_qumodes <= 0) {
+        throw std::invalid_argument("number of qumodes must be positive");
+    }
+    if (target_qumode < 0 || target_qumode >= num_qumodes) {
+        throw std::out_of_range("target qumode is out of range");
+    }
+
+    int right_stride = 1;
+    for (int mode = target_qumode + 1; mode < num_qumodes; ++mode) {
+        right_stride *= trunc_dim;
+    }
+    return right_stride;
+}
+
+}  // namespace
 
 /**
  * GPU设备端函数: 计算挤压门矩阵元素
@@ -193,23 +217,26 @@ __global__ void apply_squeezing_ell_cached_kernel(
     int bandwidth,
     const int* target_indices,
     int batch_size,
-    cuDoubleComplex* temp_buffer
+    cuDoubleComplex* temp_buffer,
+    size_t buffer_stride,
+    int target_mode_right_stride
 ) {
     int batch_id = blockIdx.y;
     if (batch_id >= batch_size) return;
 
     int state_idx = target_indices[batch_id];
-    int row = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t flat_index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
 
-    if (row >= cutoff) return;
-    
     size_t offset = state_offsets[state_idx];
     int state_dim = state_dims[state_idx];
-    
-    if (state_dim < cutoff) return;
+    if (flat_index >= static_cast<size_t>(state_dim)) return;
 
     cuDoubleComplex* psi_in = &state_data[offset];
-    cuDoubleComplex* psi_out = &temp_buffer[batch_id * cutoff];
+    cuDoubleComplex* psi_out = &temp_buffer[batch_id * buffer_stride];
+
+    const size_t right_stride = static_cast<size_t>(target_mode_right_stride);
+    const int row = static_cast<int>((flat_index / right_stride) % cutoff);
+    const size_t base_index = flat_index - static_cast<size_t>(row) * right_stride;
 
     cuDoubleComplex sum = make_cuDoubleComplex(0.0, 0.0);
 
@@ -217,13 +244,12 @@ __global__ void apply_squeezing_ell_cached_kernel(
     for (int k = 0; k < bandwidth; ++k) {
         int col_idx = ell_col[row * bandwidth + k];
         if (col_idx == -1) break;
-        if (col_idx >= state_dim) continue;
 
         cuDoubleComplex val = ell_val[row * bandwidth + k];
-        sum = cuCadd(sum, cuCmul(val, psi_in[col_idx]));
+        sum = cuCadd(sum, cuCmul(val, psi_in[base_index + static_cast<size_t>(col_idx) * right_stride]));
     }
 
-    psi_out[row] = sum;
+    psi_out[flat_index] = sum;
 }
 
 /**
@@ -236,22 +262,20 @@ __global__ void copy_result_kernel(
     const cuDoubleComplex* temp_buffer,
     const int* target_indices,
     int batch_size,
-    int cutoff
+    size_t buffer_stride
 ) {
     int batch_id = blockIdx.y;
     if (batch_id >= batch_size) return;
 
     int state_idx = target_indices[batch_id];
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-
-    if (idx >= cutoff) return;
+    size_t idx = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
     
     size_t offset = state_offsets[state_idx];
     int state_dim = state_dims[state_idx];
     
-    if (idx < state_dim) {
-        state_data[offset + idx] = temp_buffer[batch_id * cutoff + idx];
-    }
+    if (idx >= static_cast<size_t>(state_dim)) return;
+
+    state_data[offset + idx] = temp_buffer[batch_id * buffer_stride + idx];
 }
 
 /**
@@ -360,20 +384,25 @@ void apply_squeezing_gate_gpu(
     const int* target_indices,
     int batch_size,
     double r,
-    double theta
+    double theta,
+    int target_qumode,
+    int num_qumodes
 ) {
     int cutoff = pool->d_trunc;
+    const int target_mode_right_stride =
+        compute_mode_right_stride(pool->d_trunc, target_qumode, num_qumodes);
     
     // 生成并缓存ELL矩阵（只在参数改变时重新生成）
     generate_and_cache_squeezing_ell(r, theta, cutoff);
     
     // 分配临时缓冲区
     cuDoubleComplex* d_temp_buffer;
-    cudaMalloc(&d_temp_buffer, batch_size * cutoff * sizeof(cuDoubleComplex));
+    const size_t buffer_stride = pool->max_total_dim;
+    cudaMalloc(&d_temp_buffer, static_cast<size_t>(batch_size) * buffer_stride * sizeof(cuDoubleComplex));
     
     // 启动内核
     dim3 block_dim(256);
-    dim3 grid_dim((cutoff + block_dim.x - 1) / block_dim.x, batch_size);
+    dim3 grid_dim((pool->max_total_dim + block_dim.x - 1) / block_dim.x, batch_size);
     
     apply_squeezing_ell_cached_kernel<<<grid_dim, block_dim>>>(
         pool->data,
@@ -385,7 +414,9 @@ void apply_squeezing_gate_gpu(
         g_cache.bandwidth,
         target_indices,
         batch_size,
-        d_temp_buffer
+        d_temp_buffer,
+        buffer_stride,
+        target_mode_right_stride
     );
     
     cudaDeviceSynchronize();
@@ -398,7 +429,7 @@ void apply_squeezing_gate_gpu(
         d_temp_buffer,
         target_indices,
         batch_size,
-        cutoff
+        buffer_stride
     );
     
     cudaDeviceSynchronize();

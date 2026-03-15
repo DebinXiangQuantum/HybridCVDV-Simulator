@@ -17,6 +17,20 @@ void apply_ckgate(CVStatePool* state_pool, const int* target_indices,
 
 // 递归光束分裂器
 void apply_beam_splitter_recursive(CVStatePool* state_pool, const int* target_indices,
-                                  int batch_size, double theta, double phi);
+                                  int batch_size, double theta, double phi,
+                                  int target_qumode1 = 0, int target_qumode2 = 1,
+                                  int num_qumodes = 2);
+
+// 双模挤压门 TMS(r, theta)
+void apply_two_mode_squeezing_recursive(CVStatePool* state_pool, const int* target_indices,
+                                       int batch_size, double r, double theta,
+                                       int target_qumode1 = 0, int target_qumode2 = 1,
+                                       int num_qumodes = 2);
+
+// SUM 门
+void apply_sum_gate(CVStatePool* state_pool, const int* target_indices,
+                   int batch_size, double scale, int cutoff_a, int cutoff_b,
+                   int target_qumode1 = 0, int target_qumode2 = 1,
+                   int num_qumodes = 2);
 
 #endif // TWO_MODE_GATES_H

@@ -5,6 +5,9 @@
 #include <memory>
 #include <string>
 #include <map>
+#include <utility>
+#include "gaussian_mixture.h"
+#include "symplectic_math.h"
 #include "cv_state_pool.h"
 #include "fock_ell_operator.h"
 #include "hdd_node.h"
@@ -30,6 +33,9 @@ enum class GateType {
     PHASE_ROTATION,  // R(θ) - 相位旋转
     KERR_GATE,       // Kerr门
     CONDITIONAL_PARITY, // 条件奇偶
+    SNAP_GATE,       // SNAP(θ, n)
+    MULTI_SNAP_GATE, // Multi-SNAP({θ_n})
+    CROSS_KERR_GATE, // Cross-Kerr / CK(κ)
     CREATION_OPERATOR,
     ANNIHILATION_OPERATOR,
     DISPLACEMENT,    // D(α) - 位移门
@@ -86,11 +92,14 @@ private:
     // 内部状态
     bool is_built_;               // 是否已构建
     bool is_executed_;            // 是否已执行
+    int shared_zero_state_id_;    // HDD共享零分支对应的隐藏零态
 
     // 时间统计
     double total_time_;           // 总执行时间 (毫秒)
     double transfer_time_;        // 传输时延 (毫秒)
     double computation_time_;     // 计算时延 (毫秒)
+    double planning_time_;        // 块级编译/规划时间 (毫秒)
+    int gaussian_symbolic_mode_limit_; // Gaussian symbolic路径的活跃mode上限
 
 public:
     /**
@@ -131,6 +140,16 @@ public:
      * 重置量子线路状态
      */
     void reset();
+
+    /**
+     * 设置Gaussian symbolic执行的活跃mode上限
+     */
+    void set_gaussian_symbolic_mode_limit(int limit);
+
+    /**
+     * 获取Gaussian symbolic执行的活跃mode上限
+     */
+    int get_gaussian_symbolic_mode_limit() const { return gaussian_symbolic_mode_limit_; }
 
     /**
      * 获取最终状态的振幅
@@ -181,6 +200,7 @@ public:
         double total_time;          // 总执行时间 (毫秒)
         double transfer_time;       // 传输时延 (毫秒)
         double computation_time;    // 计算时延 (毫秒)
+        double planning_time;       // 块级编译/规划时间 (毫秒)
     };
 
     /**
@@ -202,6 +222,34 @@ public:
     TimeStats get_time_stats() const;
 
 private:
+    enum class ExecutionBlockKind {
+        Gaussian,
+        DiagonalNonGaussian,
+        Other
+    };
+
+    struct ExecutionBlock {
+        ExecutionBlockKind kind;
+        size_t begin = 0;
+        size_t end = 0;
+    };
+
+    struct CompiledExecutionBlock {
+        ExecutionBlockKind kind = ExecutionBlockKind::Other;
+        size_t begin = 0;
+        size_t end = 0;
+        std::vector<GateParams> gates;
+        std::vector<SymplecticGate> gaussian_updates;
+        std::vector<GaussianMixtureApproximation> diagonal_mixture_updates;
+        double downstream_non_gaussianity = 0.0;
+        double compile_time_ms = 0.0;
+        double estimated_diagonal_l2_error = 0.0;
+        size_t mixture_branch_count = 0;
+        bool gaussian_ready = false;
+        bool diagonal_mixture_ready = false;
+        std::string compile_error;
+    };
+
     /**
      * 初始化HDD结构
      */
@@ -211,6 +259,44 @@ private:
      * 执行单个门操作
      */
     void execute_gate(const GateParams& gate);
+
+    /**
+     * 规范化执行门序列，合并并重排可交换的纯CV对角门窗口
+     */
+    std::vector<GateParams> canonicalize_gate_sequence_for_execution() const;
+
+    /**
+     * 将规范化后的门序列划分为最大执行块
+     */
+    std::vector<ExecutionBlock> partition_execution_blocks(
+        const std::vector<GateParams>& execution_sequence) const;
+
+    /**
+     * 编译单个执行块，预先生成Gaussian symplectic更新和执行策略元数据
+     */
+    CompiledExecutionBlock compile_execution_block(
+        const std::vector<GateParams>& execution_sequence,
+        const std::vector<ExecutionBlock>& execution_blocks,
+        size_t block_index) const;
+
+    /**
+     * 尝试用Gaussian symbolic track执行某个Gaussian块，并在需要时切回Fock张量态
+     * @return 是否成功完成块级加速切换
+     */
+    bool try_execute_gaussian_block_with_ede(
+        const CompiledExecutionBlock& compiled_block);
+
+    /**
+     * 尝试用Gaussian Mixture近似执行纯CV对角非高斯块
+     * @return 是否成功启用mixture路径
+     */
+    bool try_execute_diagonal_non_gaussian_block_with_mixture(
+        const CompiledExecutionBlock& compiled_block);
+
+    /**
+     * 替换当前HDD根节点并回收旧分支引用的状态
+     */
+    void replace_root_node(HDDNode* new_root);
 
     /**
      * 执行Level 0门 (对角门)
@@ -250,27 +336,27 @@ private:
     /**
      * 对单个状态应用位移门
      */
-    void apply_displacement_to_state(int state_id, std::complex<double> alpha);
+    void apply_displacement_to_state(int state_id, std::complex<double> alpha, int target_qumode = 0);
 
     /**
      * 对单个状态应用挤压门
      */
-    void apply_squeezing_to_state(int state_id, std::complex<double> xi);
+    void apply_squeezing_to_state(int state_id, std::complex<double> xi, int target_qumode = 0);
 
     /**
      * 对单个状态应用光束分裂器
      */
-    void apply_beam_splitter_to_state(int state_id, double theta, double phi, int max_photon);
+    void apply_beam_splitter_to_state(int state_id, double theta, double phi, int qumode1, int qumode2);
 
     /**
      * 对单个状态应用双模挤压门
      */
-    void apply_two_mode_squeezing_to_state(int state_id, std::complex<double> xi);
+    void apply_two_mode_squeezing_to_state(int state_id, int qumode1, int qumode2, std::complex<double> xi);
 
     /**
      * 对单个状态应用SUM门
      */
-    void apply_sum_to_state(int state_id, double theta, double phi);
+    void apply_sum_to_state(int state_id, int qumode1, int qumode2, double theta, double phi);
 
     /**
      * 对单个状态应用Rabi相互作用
@@ -301,6 +387,16 @@ private:
      * HDD节点加法: result = w1 * n1 + w2 * n2
      */
     HDDNode* hdd_add(HDDNode* n1, std::complex<double> w1, HDDNode* n2, std::complex<double> w2);
+
+    /**
+     * HDD节点数乘: result = weight * node
+     */
+    HDDNode* scale_hdd_node(HDDNode* node, std::complex<double> weight);
+
+    /**
+     * 复制并缩放终端节点状态
+     */
+    HDDNode* duplicate_scaled_terminal_node(HDDNode* terminal_node, std::complex<double> weight);
 
     /**
      * 递归应用单qubit门
@@ -348,9 +444,33 @@ private:
     HDDNode* apply_rabi_interaction_recursive(HDDNode* node, int control_qubit, int target_qumode, double theta);
 
     /**
+     * 对控制分支的低/高子树递归施加Rabi耦合
+     */
+    std::pair<HDDNode*, HDDNode*> apply_rabi_pair_recursive(
+        HDDNode* low_node,
+        std::complex<double> low_weight,
+        HDDNode* high_node,
+        std::complex<double> high_weight,
+        int target_qumode,
+        double theta);
+
+    /**
      * 递归应用Jaynes-Cummings相互作用
      */
     HDDNode* apply_jaynes_cummings_recursive(HDDNode* node, int control_qubit, int target_qumode, double theta, double phi);
+
+    /**
+     * 对控制分支的低/高子树递归施加JC/AJC耦合
+     */
+    std::pair<HDDNode*, HDDNode*> apply_jc_like_pair_recursive(
+        HDDNode* low_node,
+        std::complex<double> low_weight,
+        HDDNode* high_node,
+        std::complex<double> high_weight,
+        int target_qumode,
+        double theta,
+        double phi,
+        bool anti_jaynes_cummings);
 
     /**
      * 递归应用Anti-Jaynes-Cummings相互作用
@@ -443,6 +563,9 @@ namespace Gates {
     GateParams PhaseRotation(int qumode, double theta);
     GateParams KerrGate(int qumode, double chi);
     GateParams ConditionalParity(int qumode, double parity);
+    GateParams Snap(int qumode, double theta, int target_fock_state);
+    GateParams MultiSNAP(int qumode, const std::vector<double>& phase_map);
+    GateParams CrossKerr(int qumode1, int qumode2, double kappa);
     GateParams CreationOperator(int qumode);
     GateParams AnnihilationOperator(int qumode);
     GateParams Displacement(int qumode, std::complex<double> alpha);

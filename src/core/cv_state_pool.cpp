@@ -133,7 +133,12 @@ CVStatePool::CVStatePool(int trunc_dim, int max_states, int num_qumodes, size_t 
         throw std::runtime_error("无法初始化状态偏移量: " + std::string(cudaGetErrorString(err)));
     }
 
-    // 初始化主机端数据副本
+    // 初始化主机端状态跟踪和数据副本
+    free_state_ids.reserve(capacity);
+    for (int i = capacity - 1; i >= 0; --i) {
+        free_state_ids.push_back(i);
+    }
+    active_flags.assign(capacity, 0);
     host_data.resize(static_cast<size_t>(capacity) * max_total_dim, make_cuDoubleComplex(0.0, 0.0));
 
     std::cout << "CVStatePool 初始化完成: 单个qumode截断维度=" << d_trunc
@@ -189,20 +194,14 @@ CVStatePool::~CVStatePool() {
  * 从空闲列表中获取一个可用的状态ID
  */
 int CVStatePool::allocate_state() {
-    if (active_count >= capacity) {
+    if (static_cast<int>(free_state_ids.size()) == 0) {
         std::cerr << "警告：状态池已满，无法分配新状态" << std::endl;
         return -1;
     }
 
-    // 从空闲列表获取下一个可用的ID
-    int new_state_id;
-    cudaError_t err = cudaMemcpy(&new_state_id, free_list + active_count,
-                                 sizeof(int), cudaMemcpyDeviceToHost);
-    if (err != cudaSuccess) {
-        std::cerr << "无法从空闲列表获取状态ID: " << cudaGetErrorString(err) << std::endl;
-        return -1;
-    }
-
+    int new_state_id = free_state_ids.back();
+    free_state_ids.pop_back();
+    active_flags[new_state_id] = 1;
     active_count++;
     return new_state_id;
 }
@@ -212,25 +211,19 @@ int CVStatePool::allocate_state() {
  * 将状态ID返回到空闲列表中
  */
 void CVStatePool::free_state(int state_id) {
-    if (!is_valid_state(state_id)) {
+    if (state_id < 0 || state_id >= capacity) {
         std::cerr << "警告：尝试释放无效的状态ID: " << state_id << std::endl;
         return;
     }
 
-    if (active_count <= 0) {
-        std::cerr << "警告：状态池为空，无法释放状态" << std::endl;
+    if (!active_flags[state_id]) {
+        std::cerr << "警告：状态ID未处于活跃状态: " << state_id << std::endl;
         return;
     }
 
+    active_flags[state_id] = 0;
+    free_state_ids.push_back(state_id);
     active_count--;
-
-    // 将释放的状态ID放到空闲列表的末尾
-    cudaError_t err = cudaMemcpy(free_list + active_count, &state_id,
-                                 sizeof(int), cudaMemcpyHostToDevice);
-    if (err != cudaSuccess) {
-        std::cerr << "无法释放状态ID: " << cudaGetErrorString(err) << std::endl;
-        active_count++; // 恢复计数
-    }
 }
 
 /**
@@ -333,7 +326,9 @@ const cuDoubleComplex* CVStatePool::get_state_ptr(int state_id) const {
  * 检查状态ID是否有效
  */
 bool CVStatePool::is_valid_state(int state_id) const {
-    return state_id >= 0 && state_id < capacity;
+    return state_id >= 0 && state_id < capacity &&
+           state_id < static_cast<int>(active_flags.size()) &&
+           active_flags[state_id] != 0;
 }
 
 /**
@@ -341,21 +336,16 @@ bool CVStatePool::is_valid_state(int state_id) const {
  */
 std::vector<int> CVStatePool::get_active_state_ids() const {
     std::vector<int> active_ids;
-    if (active_count == 0 || !free_list) {
+    if (active_count == 0) {
         return active_ids;
     }
 
-    // 从GPU的free_list中读取活跃的状态ID
-    // free_list[0] 到 free_list[active_count-1] 是已分配的状态ID
-    std::vector<int> host_free_list(active_count);
-    cudaError_t err = cudaMemcpy(host_free_list.data(), free_list,
-                                 active_count * sizeof(int), cudaMemcpyDeviceToHost);
-    if (err != cudaSuccess) {
-        std::cerr << "无法从GPU读取活跃状态ID: " << cudaGetErrorString(err) << std::endl;
-        return active_ids;
+    active_ids.reserve(active_count);
+    for (int state_id = 0; state_id < capacity; ++state_id) {
+        if (active_flags[state_id]) {
+            active_ids.push_back(state_id);
+        }
     }
-
-    active_ids = host_free_list;
     return active_ids;
 }
 
@@ -374,6 +364,12 @@ void CVStatePool::reset() {
     }
 
     active_count = 0;
+    active_flags.assign(capacity, 0);
+    free_state_ids.clear();
+    free_state_ids.reserve(capacity);
+    for (int i = capacity - 1; i >= 0; --i) {
+        free_state_ids.push_back(i);
+    }
 
     // 重置空闲列表：0, 1, 2, ..., capacity-1
     std::vector<int> host_free_list(capacity);
@@ -391,6 +387,60 @@ void CVStatePool::reset() {
     // cudaMemset(data, 0, static_cast<size_t>(capacity) * total_dim * sizeof(cuDoubleComplex));
     
     std::cout << "CVStatePool 已重置" << std::endl;
+}
+
+/**
+ * 复制状态 (Deep Copy)
+ */
+int CVStatePool::duplicate_state(int state_id) {
+    if (!is_valid_state(state_id)) {
+        std::cerr << "无效的状态ID: " << state_id << std::endl;
+        return -1;
+    }
+
+    int new_state_id = allocate_state();
+    if (new_state_id == -1) {
+        std::cerr << "无法分配新状态用于复制" << std::endl;
+        return -1;
+    }
+
+    int state_dim = get_state_dim(state_id);
+    size_t src_offset = 0;
+    size_t dst_offset = 0;
+    cudaError_t err = cudaMemcpy(&src_offset, state_offsets + state_id,
+                                 sizeof(size_t), cudaMemcpyDeviceToHost);
+    if (err != cudaSuccess) {
+        free_state(new_state_id);
+        std::cerr << "无法读取源状态偏移量: " << cudaGetErrorString(err) << std::endl;
+        return -1;
+    }
+
+    err = cudaMemcpy(&dst_offset, state_offsets + new_state_id,
+                     sizeof(size_t), cudaMemcpyDeviceToHost);
+    if (err != cudaSuccess) {
+        free_state(new_state_id);
+        std::cerr << "无法读取目标状态偏移量: " << cudaGetErrorString(err) << std::endl;
+        return -1;
+    }
+
+    err = cudaMemcpy(state_dims + new_state_id, &state_dim,
+                     sizeof(int), cudaMemcpyHostToDevice);
+    if (err != cudaSuccess) {
+        free_state(new_state_id);
+        std::cerr << "无法写入复制状态维度: " << cudaGetErrorString(err) << std::endl;
+        return -1;
+    }
+
+    err = cudaMemcpy(data + dst_offset, data + src_offset,
+                     static_cast<size_t>(state_dim) * sizeof(cuDoubleComplex),
+                     cudaMemcpyDeviceToDevice);
+    if (err != cudaSuccess) {
+        free_state(new_state_id);
+        std::cerr << "无法复制状态数据: " << cudaGetErrorString(err) << std::endl;
+        return -1;
+    }
+
+    return new_state_id;
 }
 
 /**
@@ -491,9 +541,39 @@ int CVStatePool::tensor_product(int state1_id, int state2_id) {
         return -1;
     }
 
-    // 执行张量积计算
-    // 这里需要实现张量积的GPU内核，但暂时用简单的CPU实现作为占位符
-    // 实际实现需要一个专门的GPU内核来计算张量积
+    std::vector<cuDoubleComplex> state1_host;
+    std::vector<cuDoubleComplex> state2_host;
+    download_state(state1_id, state1_host);
+    download_state(state2_id, state2_host);
+
+    std::vector<cuDoubleComplex> product_state(static_cast<size_t>(new_dim),
+                                               make_cuDoubleComplex(0.0, 0.0));
+    for (int i = 0; i < dim1; ++i) {
+        for (int j = 0; j < dim2; ++j) {
+            product_state[static_cast<size_t>(i) * dim2 + j] =
+                cuCmul(state1_host[i], state2_host[j]);
+        }
+    }
+
+    err = cudaMemcpy(data + new_offset, product_state.data(),
+                     static_cast<size_t>(new_dim) * sizeof(cuDoubleComplex),
+                     cudaMemcpyHostToDevice);
+    if (err != cudaSuccess) {
+        std::cerr << "无法写入张量积状态: " << cudaGetErrorString(err) << std::endl;
+        free_state(new_state_id);
+        return -1;
+    }
+
+    if (host_data.size() < new_offset + static_cast<size_t>(new_dim)) {
+        host_data.resize(new_offset + static_cast<size_t>(new_dim),
+                         make_cuDoubleComplex(0.0, 0.0));
+    }
+    std::copy(product_state.begin(), product_state.end(), host_data.begin() + new_offset);
+
+    if (new_dim > max_total_dim) {
+        max_total_dim = new_dim;
+        total_dim = new_dim;
+    }
 
     std::cout << "创建张量积: 状态" << state1_id << " (dim=" << dim1 << ") ⊗ 状态"
               << state2_id << " (dim=" << dim2 << ") -> 状态" << new_state_id

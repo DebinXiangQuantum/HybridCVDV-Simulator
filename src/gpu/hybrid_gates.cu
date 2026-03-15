@@ -16,6 +16,28 @@
         } \
     } while (0)
 
+namespace {
+
+int compute_mode_right_stride(int trunc_dim, int target_qumode, int num_qumodes) {
+    if (trunc_dim <= 0) {
+        throw std::invalid_argument("truncation dimension must be positive");
+    }
+    if (num_qumodes <= 0) {
+        throw std::invalid_argument("number of qumodes must be positive");
+    }
+    if (target_qumode < 0 || target_qumode >= num_qumodes) {
+        throw std::out_of_range("target qumode is out of range");
+    }
+
+    int right_stride = 1;
+    for (int mode = target_qumode + 1; mode < num_qumodes; ++mode) {
+        right_stride *= trunc_dim;
+    }
+    return right_stride;
+}
+
+}  // namespace
+
 /**
  * Level 4: 混合控制门 (Hybrid Control Gates) GPU内核
  */
@@ -33,7 +55,9 @@ __global__ void apply_controlled_displacement_kernel(
     int num_states,
     cuDoubleComplex alpha,
     cuDoubleComplex* temp_buffer,
-    size_t buffer_stride // 新增参数，用于临时缓冲区的跨度
+    size_t buffer_stride,
+    int target_mode_dim,
+    int target_mode_right_stride
 ) {
     int batch_idx = blockIdx.y;
     if (batch_idx >= num_states) return;
@@ -41,28 +65,29 @@ __global__ void apply_controlled_displacement_kernel(
     int state_id = target_state_ids[batch_idx];
     if (state_id < 0 || state_id >= capacity) return;
 
-    int n = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t flat_index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
     int current_dim = state_dims[state_id]; // 获取当前状态的维度
-    
-    // 如果超出该状态的维度，则不处理
-    // 注意：这里不仅是优化，也是正确性要求，避免越界访问
-    if (n >= current_dim) return;
+    if (flat_index >= static_cast<size_t>(current_dim)) return;
 
     size_t offset = state_offsets[state_id];
     cuDoubleComplex* psi = &all_states_data[offset];
-    
-    // 计算缓冲区位置：假设缓冲区按固定stride排列
     cuDoubleComplex* psi_out = &temp_buffer[batch_idx * buffer_stride];
-    
+
+    const size_t right_stride = static_cast<size_t>(target_mode_right_stride);
+    const size_t mode_block = static_cast<size_t>(target_mode_dim) * right_stride;
+    if (mode_block == 0) return;
+
+    const size_t group_start =
+        (flat_index / mode_block) * mode_block + (flat_index % right_stride);
+    const int n = static_cast<int>((flat_index / right_stride) % target_mode_dim);
+
     cuDoubleComplex sum = make_cuDoubleComplex(0.0, 0.0);
-    
     double alpha_real = cuCreal(alpha);
     double alpha_imag = cuCimag(alpha);
     double alpha_norm_sq = alpha_real*alpha_real + alpha_imag*alpha_imag;
     double prefactor = exp(-alpha_norm_sq / 2.0);
 
-    // 使用 current_dim 而不是 total_dim
-    for (int m = 0; m < current_dim; ++m) {
+    for (int m = 0; m < target_mode_dim; ++m) {
         // Compute D_nm = <n|D(alpha)|m>
         double sqrt_fact_ratio = 1.0;
         if (n > m) {
@@ -100,10 +125,13 @@ __global__ void apply_controlled_displacement_kernel(
         
         double real_scale = prefactor * sqrt_fact_ratio * laguerre;
         cuDoubleComplex d_nm = make_cuDoubleComplex(real_scale * cuCreal(power_val), real_scale * cuCimag(power_val));
-        
-        sum = cuCadd(sum, cuCmul(d_nm, psi[m]));
+
+        const size_t source_index = group_start + static_cast<size_t>(m) * right_stride;
+        if (source_index < static_cast<size_t>(current_dim)) {
+            sum = cuCadd(sum, cuCmul(d_nm, psi[source_index]));
+        }
     }
-    psi_out[n] = sum;
+    psi_out[flat_index] = sum;
 }
 
 __global__ void copy_back_hybrid_kernel(
@@ -131,10 +159,15 @@ __global__ void copy_back_hybrid_kernel(
     all_states_data[offset + n] = temp_buffer[batch_idx * buffer_stride + n];
 }
 
-void apply_controlled_displacement(CVStatePool* state_pool,
-                                 const std::vector<int>& controlled_states,
-                                 cuDoubleComplex alpha) {
+void apply_controlled_displacement_on_mode(CVStatePool* state_pool,
+                                           const std::vector<int>& controlled_states,
+                                           cuDoubleComplex alpha,
+                                           int target_qumode,
+                                           int num_qumodes) {
     if (controlled_states.empty()) return;
+    const int target_mode_right_stride =
+        compute_mode_right_stride(state_pool->d_trunc, target_qumode, num_qumodes);
+    const int target_mode_dim = state_pool->d_trunc;
 
     // 验证所有状态ID的有效性
     for (int state_id : controlled_states) {
@@ -162,7 +195,13 @@ void apply_controlled_displacement(CVStatePool* state_pool,
         state_pool->state_offsets,
         state_pool->state_dims,
         state_pool->capacity,
-        d_state_ids, controlled_states.size(), alpha, temp_buffer, buffer_stride
+        d_state_ids,
+        controlled_states.size(),
+        alpha,
+        temp_buffer,
+        buffer_stride,
+        target_mode_dim,
+        target_mode_right_stride
     );
 
     CHECK_CUDA(cudaGetLastError());
@@ -180,6 +219,12 @@ void apply_controlled_displacement(CVStatePool* state_pool,
 
     CHECK_CUDA(cudaFree(d_state_ids));
     CHECK_CUDA(cudaFree(temp_buffer));
+}
+
+void apply_controlled_displacement(CVStatePool* state_pool,
+                                   const std::vector<int>& controlled_states,
+                                   cuDoubleComplex alpha) {
+    apply_controlled_displacement_on_mode(state_pool, controlled_states, alpha, 0, 1);
 }
 
 
@@ -283,10 +328,12 @@ __global__ void batch_mix_rabi_kernel(
     );
 }
 
-void apply_rabi_interaction(CVStatePool* state_pool,
-                          const std::vector<int>& qubit0_states,
-                          const std::vector<int>& qubit1_states,
-                          double theta) {
+void apply_rabi_interaction_on_mode(CVStatePool* state_pool,
+                                    const std::vector<int>& qubit0_states,
+                                    const std::vector<int>& qubit1_states,
+                                    double theta,
+                                    int target_qumode,
+                                    int num_qumodes) {
     if (qubit0_states.size() != qubit1_states.size()) throw std::invalid_argument("State lists mismatch");
     if (qubit0_states.empty()) return;
     
@@ -307,22 +354,16 @@ void apply_rabi_interaction(CVStatePool* state_pool,
         state_pool->state_dims,
         d_id0, d_id1, n, false
     );
-    
-    // ... (Displacement part needs similar update, reusing apply_controlled_displacement which is already updated)
+    CHECK_CUDA(cudaGetLastError());
+    CHECK_CUDA(cudaDeviceSynchronize());
     
     cuDoubleComplex alpha0 = make_cuDoubleComplex(0.0, -theta);
     cuDoubleComplex alpha1 = make_cuDoubleComplex(0.0, theta);
-    
-    // Reuse the updated apply_controlled_displacement (which allocates its own buffers)
-    // Note: The original implementation allocated one big buffer and reused it.
-    // The new apply_controlled_displacement allocates internally.
-    // To be efficient, we should probably expose a version that takes a buffer, but for now let's just call the wrapper.
-    
-    // However, the original code called kernels directly.
-    // Let's use the wrapper function apply_controlled_displacement which handles buffer allocation.
-    
-    apply_controlled_displacement(state_pool, qubit0_states, alpha0);
-    apply_controlled_displacement(state_pool, qubit1_states, alpha1);
+
+    apply_controlled_displacement_on_mode(
+        state_pool, qubit0_states, alpha0, target_qumode, num_qumodes);
+    apply_controlled_displacement_on_mode(
+        state_pool, qubit1_states, alpha1, target_qumode, num_qumodes);
 
     // 3. Transform back
     batch_mix_rabi_kernel<<<gd, bd>>>(
@@ -331,9 +372,18 @@ void apply_rabi_interaction(CVStatePool* state_pool,
         state_pool->state_dims,
         d_id0, d_id1, n, true
     );
+    CHECK_CUDA(cudaGetLastError());
+    CHECK_CUDA(cudaDeviceSynchronize());
     
     CHECK_CUDA(cudaFree(d_id0));
     CHECK_CUDA(cudaFree(d_id1));
+}
+
+void apply_rabi_interaction(CVStatePool* state_pool,
+                            const std::vector<int>& qubit0_states,
+                            const std::vector<int>& qubit1_states,
+                            double theta) {
+    apply_rabi_interaction_on_mode(state_pool, qubit0_states, qubit1_states, theta, 0, 1);
 }
 
 // ==========================================
@@ -348,7 +398,9 @@ __global__ void apply_jc_kernel(
     const int* id1_list,
     int num_pairs,
     double theta,
-    double phi
+    double phi,
+    int target_mode_dim,
+    int target_mode_right_stride
 ) {
     int batch_idx = blockIdx.y;
     if (batch_idx >= num_pairs) return;
@@ -356,26 +408,38 @@ __global__ void apply_jc_kernel(
     int id0 = id0_list[batch_idx];
     int id1 = id1_list[batch_idx];
 
-    int n = blockIdx.x * blockDim.x + threadIdx.x;
-    
-    // 需要检查是否越界，假设两个状态维度一致
     int current_dim = state_dims[id0];
-    // Coupling |1, n> and |0, n+1>
-    // Need access to index n and n+1
-    if (n >= current_dim - 1) return;
+    const size_t right_stride = static_cast<size_t>(target_mode_right_stride);
+    const size_t pair_group_span = static_cast<size_t>(target_mode_dim - 1) * right_stride;
+    if (pair_group_span == 0) return;
+
+    const size_t pair_index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const size_t group_count =
+        static_cast<size_t>(current_dim) / (static_cast<size_t>(target_mode_dim) * right_stride);
+    const size_t total_pairs = group_count * pair_group_span;
+    if (pair_index >= total_pairs) return;
 
     size_t offset0 = state_offsets[id0];
     size_t offset1 = state_offsets[id1];
 
     cuDoubleComplex* v0 = &all_states_data[offset0];
     cuDoubleComplex* v1 = &all_states_data[offset1];
+
+    const size_t group_index = pair_index / pair_group_span;
+    const size_t within_group = pair_index % pair_group_span;
+    const int n = static_cast<int>(within_group / right_stride);
+    const size_t right_index = within_group % right_stride;
+    const size_t group_start =
+        group_index * static_cast<size_t>(target_mode_dim) * right_stride + right_index;
+    const size_t idx1 = group_start + static_cast<size_t>(n) * right_stride;
+    const size_t idx0 = group_start + static_cast<size_t>(n + 1) * right_stride;
     
     double omega = theta * sqrt((double)(n + 1));
     double cos_w = cos(omega);
     double sin_w = sin(omega);
     
-    cuDoubleComplex c1 = v1[n];
-    cuDoubleComplex c0 = v0[n+1];
+    cuDoubleComplex c1 = v1[idx1];
+    cuDoubleComplex c0 = v0[idx0];
     
     // ... (rest of calculation remains the same)
     cuDoubleComplex factor01 = make_cuDoubleComplex(-sin(phi) * sin_w, -cos(phi) * sin_w);
@@ -387,15 +451,25 @@ __global__ void apply_jc_kernel(
     cuDoubleComplex new_c1 = cuCadd(cuCmul(factor10, c0),
                                     make_cuDoubleComplex(cos_w * cuCreal(c1), cos_w * cuCimag(c1)));
                                     
-    v0[n+1] = new_c0;
-    v1[n] = new_c1;
+    v0[idx0] = new_c0;
+    v1[idx1] = new_c1;
 }
 
-void apply_jaynes_cummings(CVStatePool* state_pool,
-                         const std::vector<int>& qubit0_states,
-                         const std::vector<int>& qubit1_states,
-                         double theta, double phi) {
-    if (qubit0_states.size() != qubit1_states.size()) return;
+void apply_jaynes_cummings_on_mode(CVStatePool* state_pool,
+                                   const std::vector<int>& qubit0_states,
+                                   const std::vector<int>& qubit1_states,
+                                   double theta,
+                                   double phi,
+                                   int target_qumode,
+                                   int num_qumodes) {
+    if (qubit0_states.size() != qubit1_states.size()) {
+        throw std::invalid_argument("State lists mismatch");
+    }
+    if (qubit0_states.empty()) return;
+
+    const int target_mode_right_stride =
+        compute_mode_right_stride(state_pool->d_trunc, target_qumode, num_qumodes);
+    const int target_mode_dim = state_pool->d_trunc;
     size_t n = qubit0_states.size();
     int *d0, *d1;
     CHECK_CUDA(cudaMalloc(&d0, n * sizeof(int)));
@@ -404,17 +478,30 @@ void apply_jaynes_cummings(CVStatePool* state_pool,
     CHECK_CUDA(cudaMemcpy(d1, qubit1_states.data(), n * sizeof(int), cudaMemcpyHostToDevice));
     
     dim3 bd(256);
-    dim3 gd((state_pool->max_total_dim + bd.x - 1)/bd.x, n);
+    const size_t max_pairs =
+        static_cast<size_t>(state_pool->max_total_dim / state_pool->d_trunc) *
+        static_cast<size_t>(state_pool->d_trunc - 1);
+    dim3 gd((max_pairs + bd.x - 1)/bd.x, n);
 
     apply_jc_kernel<<<gd, bd>>>(
         state_pool->data, 
         state_pool->state_offsets,
         state_pool->state_dims,
-        d0, d1, n, theta, phi
+        d0, d1, n, theta, phi, target_mode_dim, target_mode_right_stride
     );
+    CHECK_CUDA(cudaGetLastError());
+    CHECK_CUDA(cudaDeviceSynchronize());
     
     CHECK_CUDA(cudaFree(d0));
     CHECK_CUDA(cudaFree(d1));
+}
+
+void apply_jaynes_cummings(CVStatePool* state_pool,
+                           const std::vector<int>& qubit0_states,
+                           const std::vector<int>& qubit1_states,
+                           double theta,
+                           double phi) {
+    apply_jaynes_cummings_on_mode(state_pool, qubit0_states, qubit1_states, theta, phi, 0, 1);
 }
 
 // ==========================================
@@ -429,45 +516,72 @@ __global__ void apply_ajc_kernel(
     const int* id1_list,
     int num_pairs,
     double theta,
-    double phi
+    double phi,
+    int target_mode_dim,
+    int target_mode_right_stride
 ) {
     int batch_idx = blockIdx.y;
     if (batch_idx >= num_pairs) return;
     int id0 = id0_list[batch_idx];
     int id1 = id1_list[batch_idx];
-    int n = blockIdx.x * blockDim.x + threadIdx.x;
     
     int current_dim = state_dims[id0];
-    if (n >= current_dim - 1) return;
+    const size_t right_stride = static_cast<size_t>(target_mode_right_stride);
+    const size_t pair_group_span = static_cast<size_t>(target_mode_dim - 1) * right_stride;
+    if (pair_group_span == 0) return;
+
+    const size_t pair_index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const size_t group_count =
+        static_cast<size_t>(current_dim) / (static_cast<size_t>(target_mode_dim) * right_stride);
+    const size_t total_pairs = group_count * pair_group_span;
+    if (pair_index >= total_pairs) return;
 
     size_t offset0 = state_offsets[id0];
     size_t offset1 = state_offsets[id1];
 
     cuDoubleComplex* v0 = &all_states_data[offset0];
     cuDoubleComplex* v1 = &all_states_data[offset1];
+
+    const size_t group_index = pair_index / pair_group_span;
+    const size_t within_group = pair_index % pair_group_span;
+    const int n = static_cast<int>(within_group / right_stride);
+    const size_t right_index = within_group % right_stride;
+    const size_t group_start =
+        group_index * static_cast<size_t>(target_mode_dim) * right_stride + right_index;
+    const size_t idx0 = group_start + static_cast<size_t>(n) * right_stride;
+    const size_t idx1 = group_start + static_cast<size_t>(n + 1) * right_stride;
     
-    // ... (rest of calculation remains the same)
     double omega = theta * sqrt((double)(n + 1));
     double cos_w = cos(omega);
     double sin_w = sin(omega);
     
-    cuDoubleComplex c0 = v0[n];
-    cuDoubleComplex c1 = v1[n+1];
+    cuDoubleComplex c0 = v0[idx0];
+    cuDoubleComplex c1 = v1[idx1];
     
     cuDoubleComplex factor01 = make_cuDoubleComplex(-sin(phi) * sin_w, -cos(phi) * sin_w);
     cuDoubleComplex factor10 = make_cuDoubleComplex(sin(phi) * sin_w, -cos(phi) * sin_w);
     
-    v0[n] = cuCadd(make_cuDoubleComplex(cos_w * cuCreal(c0), cos_w * cuCimag(c0)),
-                   cuCmul(factor01, c1));
-    v1[n+1] = cuCadd(cuCmul(factor10, c0),
-                     make_cuDoubleComplex(cos_w * cuCreal(c1), cos_w * cuCimag(c1)));
+    v0[idx0] = cuCadd(make_cuDoubleComplex(cos_w * cuCreal(c0), cos_w * cuCimag(c0)),
+                      cuCmul(factor01, c1));
+    v1[idx1] = cuCadd(cuCmul(factor10, c0),
+                      make_cuDoubleComplex(cos_w * cuCreal(c1), cos_w * cuCimag(c1)));
 }
 
-void apply_anti_jaynes_cummings(CVStatePool* state_pool,
-                              const std::vector<int>& qubit0_states,
-                              const std::vector<int>& qubit1_states,
-                              double theta, double phi) {
-    if (qubit0_states.size() != qubit1_states.size()) return;
+void apply_anti_jaynes_cummings_on_mode(CVStatePool* state_pool,
+                                        const std::vector<int>& qubit0_states,
+                                        const std::vector<int>& qubit1_states,
+                                        double theta,
+                                        double phi,
+                                        int target_qumode,
+                                        int num_qumodes) {
+    if (qubit0_states.size() != qubit1_states.size()) {
+        throw std::invalid_argument("State lists mismatch");
+    }
+    if (qubit0_states.empty()) return;
+
+    const int target_mode_right_stride =
+        compute_mode_right_stride(state_pool->d_trunc, target_qumode, num_qumodes);
+    const int target_mode_dim = state_pool->d_trunc;
     size_t n = qubit0_states.size();
     int *d0, *d1;
     CHECK_CUDA(cudaMalloc(&d0, n * sizeof(int)));
@@ -476,17 +590,31 @@ void apply_anti_jaynes_cummings(CVStatePool* state_pool,
     CHECK_CUDA(cudaMemcpy(d1, qubit1_states.data(), n * sizeof(int), cudaMemcpyHostToDevice));
     
     dim3 bd(256);
-    dim3 gd((state_pool->max_total_dim + bd.x - 1)/bd.x, n);
+    const size_t max_pairs =
+        static_cast<size_t>(state_pool->max_total_dim / state_pool->d_trunc) *
+        static_cast<size_t>(state_pool->d_trunc - 1);
+    dim3 gd((max_pairs + bd.x - 1)/bd.x, n);
     
     apply_ajc_kernel<<<gd, bd>>>(
         state_pool->data, 
         state_pool->state_offsets,
         state_pool->state_dims,
-        d0, d1, n, theta, phi
+        d0, d1, n, theta, phi, target_mode_dim, target_mode_right_stride
     );
+    CHECK_CUDA(cudaGetLastError());
+    CHECK_CUDA(cudaDeviceSynchronize());
     
     CHECK_CUDA(cudaFree(d0));
     CHECK_CUDA(cudaFree(d1));
+}
+
+void apply_anti_jaynes_cummings(CVStatePool* state_pool,
+                                const std::vector<int>& qubit0_states,
+                                const std::vector<int>& qubit1_states,
+                                double theta,
+                                double phi) {
+    apply_anti_jaynes_cummings_on_mode(
+        state_pool, qubit0_states, qubit1_states, theta, phi, 0, 1);
 }
 
 // ==========================================
@@ -643,50 +771,7 @@ void copy_states(CVStatePool* state_pool,
 void apply_echo_controlled_displacement(CVStatePool* state_pool,
                                        const std::vector<int>& controlled_states,
                                        cuDoubleComplex theta) {
-    // ECD(θ) = CD(θ, -θ)
-    cuDoubleComplex beta = make_cuDoubleComplex(-cuCreal(theta), -cuCimag(theta));
-    
-    // 实现与 CD 相同，但 beta = -theta
-    // 复用 CD 的实现
-    if (controlled_states.empty()) return;
-
-    int* d_state_ids = nullptr;
-    CHECK_CUDA(cudaMalloc(&d_state_ids, controlled_states.size() * sizeof(int)));
-    CHECK_CUDA(cudaMemcpy(d_state_ids, controlled_states.data(),
-               controlled_states.size() * sizeof(int), cudaMemcpyHostToDevice));
-
-    size_t buffer_stride = state_pool->max_total_dim;
-    cuDoubleComplex* temp_buffer = nullptr;
-    size_t buffer_size = controlled_states.size() * buffer_stride * sizeof(cuDoubleComplex);
-    CHECK_CUDA(cudaMalloc(&temp_buffer, buffer_size));
-
-    dim3 block_dim(256);
-    dim3 grid_dim((state_pool->max_total_dim + block_dim.x - 1) / block_dim.x, controlled_states.size());
-
-    // 应用 D(theta) 到 |0⟩ 分量，D(-theta) 到 |1⟩ 分量
-    apply_controlled_displacement_kernel<<<grid_dim, block_dim>>>(
-        state_pool->data, 
-        state_pool->state_offsets,
-        state_pool->state_dims,
-        state_pool->capacity,
-        d_state_ids, controlled_states.size(), theta, temp_buffer, buffer_stride
-    );
-
-    CHECK_CUDA(cudaGetLastError());
-    CHECK_CUDA(cudaDeviceSynchronize());
-
-    copy_back_hybrid_kernel<<<grid_dim, block_dim>>>(
-        state_pool->data, 
-        state_pool->state_offsets,
-        state_pool->state_dims,
-        state_pool->capacity,
-        d_state_ids, controlled_states.size(), temp_buffer, buffer_stride
-    );
-    CHECK_CUDA(cudaGetLastError());
-    CHECK_CUDA(cudaDeviceSynchronize());
-
-    CHECK_CUDA(cudaFree(d_state_ids));
-    CHECK_CUDA(cudaFree(temp_buffer));
+    apply_controlled_displacement(state_pool, controlled_states, theta);
 }
 
 // ==========================================

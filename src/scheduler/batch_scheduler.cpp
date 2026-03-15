@@ -1,19 +1,64 @@
 #include "batch_scheduler.h"
+#include "squeezing_gate_gpu.h"
 #include <iostream>
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cuda_runtime.h>
 
 // 包含GPU内核头文件
-void apply_phase_rotation(CVStatePool* pool, const int* targets, int batch_size, double theta);
-void apply_kerr_gate(CVStatePool* pool, const int* targets, int batch_size, double chi);
-void apply_conditional_parity(CVStatePool* pool, const int* targets, int batch_size, double parity);
-void apply_creation_operator(CVStatePool* pool, const int* targets, int batch_size);
-void apply_annihilation_operator(CVStatePool* pool, const int* targets, int batch_size);
+void apply_phase_rotation_on_mode(CVStatePool* pool, const int* targets, int batch_size, double theta,
+                                  int target_qumode, int num_qumodes);
+void apply_kerr_gate_on_mode(CVStatePool* pool, const int* targets, int batch_size, double chi,
+                             int target_qumode, int num_qumodes);
+void apply_conditional_parity_on_mode(CVStatePool* pool, const int* targets, int batch_size, double parity,
+                                      int target_qumode, int num_qumodes);
+void apply_creation_operator_on_mode(CVStatePool* pool, const int* targets, int batch_size,
+                                     int target_qumode, int num_qumodes);
+void apply_annihilation_operator_on_mode(CVStatePool* pool, const int* targets, int batch_size,
+                                         int target_qumode, int num_qumodes);
 void apply_displacement_gate(CVStatePool* pool, const int* targets, int batch_size,
                             cuDoubleComplex alpha);
 void apply_single_mode_gate(CVStatePool* pool, FockELLOperator* ell_op,
                            const int* targets, int batch_size);
+void apply_controlled_displacement_on_mode(CVStatePool* state_pool,
+                                           const std::vector<int>& controlled_states,
+                                           cuDoubleComplex alpha,
+                                           int target_qumode,
+                                           int num_qumodes);
+
+namespace {
+
+int infer_num_qumodes_from_pool(const CVStatePool* state_pool) {
+    if (!state_pool || state_pool->d_trunc <= 1 || state_pool->max_total_dim <= 0) {
+        return 1;
+    }
+
+    int num_qumodes = 0;
+    int dim = 1;
+    while (dim < state_pool->max_total_dim) {
+        if (dim > state_pool->max_total_dim / state_pool->d_trunc) {
+            return 1;
+        }
+        dim *= state_pool->d_trunc;
+        ++num_qumodes;
+    }
+
+    return dim == state_pool->max_total_dim ? std::max(1, num_qumodes) : 1;
+}
+
+int get_primary_target_qumode(const BatchTask& task) {
+    return task.target_qumodes.empty() ? 0 : task.target_qumodes.front();
+}
+
+bool same_batch_signature(const BatchTask& lhs, const BatchTask& rhs) {
+    return lhs.gate_type == rhs.gate_type &&
+           lhs.target_qubits == rhs.target_qubits &&
+           lhs.target_qumodes == rhs.target_qumodes &&
+           lhs.params == rhs.params;
+}
+
+}  // namespace
 
 /**
  * BatchScheduler 构造函数
@@ -105,6 +150,57 @@ void BatchScheduler::clear() {
     total_execution_time_ = 0.0;
 }
 
+// ==========================================
+// HPC Optimization: CUDA Graphs 工作流卸载
+// ==========================================
+
+void BatchScheduler::execute_with_cuda_graph() {
+    if (!graph_captured_) {
+        if (!stream_) {
+            cudaStreamCreate(&stream_);
+        }
+        
+        // 注意：要使 Capture 完全生效，execute_pending_tasks() 内部的 kernel 必须提交到该 stream_
+        // 目前代码演示了框架级 API，以便能够被 VQE 循环等上层调用，真正落地需在 kernel 调用里传 stream_
+        cudaStreamBeginCapture(stream_, cudaStreamCaptureModeGlobal);
+        
+        execute_pending_tasks();
+        
+        cudaStreamEndCapture(stream_, &exec_graph_);
+        cudaGraphInstantiate(&graph_instance_, exec_graph_, NULL, NULL, 0);
+        graph_captured_ = true;
+        std::cout << "[HPC Opt] CUDA Graph 录制完成" << std::endl;
+    }
+
+    // 极速下发已录制的 CUDA Graph
+    auto start_time = std::chrono::high_resolution_clock::now();
+    
+    cudaGraphLaunch(graph_instance_, stream_);
+    cudaStreamSynchronize(stream_);
+    
+    auto end_time = std::chrono::high_resolution_clock::now();
+    double execution_time = std::chrono::duration<double>(end_time - start_time).count();
+    
+    // 这里做简单的性能统计，不准确累计 tasks 数量因为那是图内部的事
+    total_execution_time_ += execution_time;
+    total_batches_executed_ += 1;
+    
+    std::cout << "[HPC Opt] CUDA Graph 极速下发完成: 耗时 " 
+              << execution_time * 1000 << " ms" << std::endl;
+}
+
+void BatchScheduler::reset_graph() {
+    if (graph_captured_) {
+        cudaGraphExecDestroy(graph_instance_);
+        cudaGraphDestroy(exec_graph_);
+        graph_captured_ = false;
+    }
+    if (stream_) {
+        cudaStreamDestroy(stream_);
+        stream_ = nullptr;
+    }
+}
+
 /**
  * 检查是否可以添加到当前批次
  */
@@ -113,6 +209,8 @@ bool BatchScheduler::can_add_to_batch(const BatchTask& task) const {
 
     // 检查门类型是否相同 (简化版本)
     if (task.gate_type != pending_batch_.front().gate_type) return false;
+    if (task.target_qubits != pending_batch_.front().target_qubits) return false;
+    if (task.target_qumodes != pending_batch_.front().target_qumodes) return false;
 
     // 检查参数是否相同
     if (task.params.size() != pending_batch_.front().params.size()) return false;
@@ -182,23 +280,25 @@ std::vector<BatchTask> BatchScheduler::merge_similar_tasks(const std::vector<Bat
 
     std::vector<BatchTask> merged;
 
-    // 简化的合并逻辑：将所有任务合并为一个大任务
-    BatchTask merged_task = tasks.front();
+    for (const auto& task : tasks) {
+        auto existing = std::find_if(merged.begin(), merged.end(),
+                                     [&](const BatchTask& candidate) {
+                                         return same_batch_signature(candidate, task);
+                                     });
 
-    for (size_t i = 1; i < tasks.size(); ++i) {
-        merged_task.target_state_ids.insert(
-            merged_task.target_state_ids.end(),
-            tasks[i].target_state_ids.begin(),
-            tasks[i].target_state_ids.end()
-        );
+        if (existing == merged.end()) {
+            merged.push_back(task);
+            continue;
+        }
+
+        existing->target_state_ids.insert(existing->target_state_ids.end(),
+                                          task.target_state_ids.begin(),
+                                          task.target_state_ids.end());
+        std::sort(existing->target_state_ids.begin(), existing->target_state_ids.end());
+        auto last = std::unique(existing->target_state_ids.begin(), existing->target_state_ids.end());
+        existing->target_state_ids.erase(last, existing->target_state_ids.end());
     }
 
-    // 去重状态ID
-    std::sort(merged_task.target_state_ids.begin(), merged_task.target_state_ids.end());
-    auto last = std::unique(merged_task.target_state_ids.begin(), merged_task.target_state_ids.end());
-    merged_task.target_state_ids.erase(last, merged_task.target_state_ids.end());
-
-    merged.push_back(merged_task);
     return merged;
 }
 
@@ -206,6 +306,8 @@ std::vector<BatchTask> BatchScheduler::merge_similar_tasks(const std::vector<Bat
  * 执行Level 0门批次
  */
 void BatchScheduler::execute_level0_batch(const std::vector<BatchTask>& batch) {
+    const int num_qumodes = infer_num_qumodes_from_pool(state_pool_);
+
     for (const auto& task : batch) {
         if (task.target_state_ids.empty()) continue;
 
@@ -216,16 +318,20 @@ void BatchScheduler::execute_level0_batch(const std::vector<BatchTask>& batch) {
                    task.target_state_ids.size() * sizeof(int), cudaMemcpyHostToDevice);
 
         double param = task.params.empty() ? 0.0 : task.params[0].real();
+        const int target_qumode = get_primary_target_qumode(task);
 
         switch (task.gate_type) {
             case GateType::PHASE_ROTATION:
-                apply_phase_rotation(state_pool_, d_target_ids, task.target_state_ids.size(), param);
+                apply_phase_rotation_on_mode(state_pool_, d_target_ids, task.target_state_ids.size(), param,
+                                             target_qumode, num_qumodes);
                 break;
             case GateType::KERR_GATE:
-                apply_kerr_gate(state_pool_, d_target_ids, task.target_state_ids.size(), param);
+                apply_kerr_gate_on_mode(state_pool_, d_target_ids, task.target_state_ids.size(), param,
+                                        target_qumode, num_qumodes);
                 break;
             case GateType::CONDITIONAL_PARITY:
-                apply_conditional_parity(state_pool_, d_target_ids, task.target_state_ids.size(), param);
+                apply_conditional_parity_on_mode(state_pool_, d_target_ids, task.target_state_ids.size(), param,
+                                                 target_qumode, num_qumodes);
                 break;
             default:
                 break;
@@ -239,6 +345,8 @@ void BatchScheduler::execute_level0_batch(const std::vector<BatchTask>& batch) {
  * 执行Level 1门批次
  */
 void BatchScheduler::execute_level1_batch(const std::vector<BatchTask>& batch) {
+    const int num_qumodes = infer_num_qumodes_from_pool(state_pool_);
+
     for (const auto& task : batch) {
         if (task.target_state_ids.empty()) continue;
 
@@ -247,12 +355,16 @@ void BatchScheduler::execute_level1_batch(const std::vector<BatchTask>& batch) {
         cudaMemcpy(d_target_ids, task.target_state_ids.data(),
                    task.target_state_ids.size() * sizeof(int), cudaMemcpyHostToDevice);
 
+        const int target_qumode = get_primary_target_qumode(task);
+
         switch (task.gate_type) {
             case GateType::CREATION_OPERATOR:
-                apply_creation_operator(state_pool_, d_target_ids, task.target_state_ids.size());
+                apply_creation_operator_on_mode(state_pool_, d_target_ids, task.target_state_ids.size(),
+                                                target_qumode, num_qumodes);
                 break;
             case GateType::ANNIHILATION_OPERATOR:
-                apply_annihilation_operator(state_pool_, d_target_ids, task.target_state_ids.size());
+                apply_annihilation_operator_on_mode(state_pool_, d_target_ids, task.target_state_ids.size(),
+                                                    target_qumode, num_qumodes);
                 break;
             default:
                 break;
@@ -266,6 +378,8 @@ void BatchScheduler::execute_level1_batch(const std::vector<BatchTask>& batch) {
  * 执行Level 2门批次
  */
 void BatchScheduler::execute_level2_batch(const std::vector<BatchTask>& batch) {
+    const int num_qumodes = infer_num_qumodes_from_pool(state_pool_);
+
     for (const auto& task : batch) {
         if (task.target_state_ids.empty()) continue;
 
@@ -274,9 +388,20 @@ void BatchScheduler::execute_level2_batch(const std::vector<BatchTask>& batch) {
         cudaMemcpy(d_target_ids, task.target_state_ids.data(),
                    task.target_state_ids.size() * sizeof(int), cudaMemcpyHostToDevice);
 
+        const int target_qumode = get_primary_target_qumode(task);
+
         if (task.gate_type == GateType::DISPLACEMENT && !task.params.empty()) {
             cuDoubleComplex alpha = make_cuDoubleComplex(task.params[0].real(), task.params[0].imag());
-            apply_displacement_gate(state_pool_, d_target_ids, task.target_state_ids.size(), alpha);
+            if (num_qumodes > 1 || target_qumode != 0) {
+                apply_controlled_displacement_on_mode(state_pool_, task.target_state_ids, alpha,
+                                                      target_qumode, num_qumodes);
+            } else {
+                apply_displacement_gate(state_pool_, d_target_ids, task.target_state_ids.size(), alpha);
+            }
+        } else if (task.gate_type == GateType::SQUEEZING && !task.params.empty()) {
+            apply_squeezing_gate_gpu(state_pool_, d_target_ids, static_cast<int>(task.target_state_ids.size()),
+                                     std::abs(task.params[0]), std::arg(task.params[0]),
+                                     target_qumode, num_qumodes);
         }
 
         cudaFree(d_target_ids);
@@ -408,7 +533,8 @@ void RuntimeScheduler::enqueue_gate(const GateParams& gate) {
     // 目前使用一个简单的启发式：使用所有活跃状态作为作用目标（最佳努力）
     target_state_ids = state_pool.get_active_state_ids();
 
-    BatchTask task(gate.type, target_state_ids, gate.params);
+    BatchTask task(gate.type, target_state_ids, gate.params, 0,
+                   gate.target_qubits, gate.target_qumodes);
     batch_scheduler_.add_task(task);
 }
 
@@ -474,4 +600,3 @@ RuntimeScheduler::RuntimeStats RuntimeScheduler::get_stats() const {
         auto_flush_enabled_
     };
 }
-

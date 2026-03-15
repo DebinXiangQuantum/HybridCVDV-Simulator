@@ -1,0 +1,403 @@
+{
+  "schema_version": "1.0",
+  "generated_at_utc": "2026-03-13T01:58:45Z",
+  "simulator": "HybridCVDV-Simulator",
+  "single_gpu_only": true,
+  "requested_suite": "scaling",
+  "device": {
+    "available": true,
+    "device_index": 0,
+    "name": "NVIDIA H100 PCIe",
+    "compute_capability": "9.0",
+    "multiprocessor_count": 114,
+    "total_global_mem_bytes": 85017886720,
+    "shared_mem_per_block_bytes": 49152
+  },
+  "results": [
+    {
+      "name": "cv_qaoa_circuit_cutoff_16",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "depth": "2",
+        "num_qubits": "1",
+        "num_qumodes": "1",
+        "source_circuit": "circuit/src/qaoa_circuit.cpp",
+        "workload": "cv_qaoa_circuit"
+      },
+      "metrics": {
+        "median_active_states": 2,
+        "median_compute_ms": 0.809007,
+        "median_hdd_nodes": 3,
+        "median_memory_bytes": 16384,
+        "median_total_ms": 0.8297085,
+        "median_transfer_ms": 0.014577,
+        "throughput_ops_per_sec": 1205.24256410535
+      }
+    },
+    {
+      "name": "gkp_state_circuit_cutoff_16",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "depth": "9",
+        "num_qubits": "1",
+        "num_qumodes": "1",
+        "source_circuit": "circuit/src/gkp_state_circuit.cpp",
+        "workload": "gkp_state_circuit"
+      },
+      "metrics": {
+        "median_active_states": 2,
+        "median_compute_ms": 3.3112775,
+        "median_hdd_nodes": 3,
+        "median_memory_bytes": 32768,
+        "median_total_ms": 6.947096,
+        "median_transfer_ms": 1.867381,
+        "throughput_ops_per_sec": 143.945038329685
+      }
+    },
+    {
+      "name": "cv_qaoa_circuit_cutoff_32",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "32",
+        "depth": "2",
+        "num_qubits": "1",
+        "num_qumodes": "1",
+        "source_circuit": "circuit/src/qaoa_circuit.cpp",
+        "workload": "cv_qaoa_circuit"
+      },
+      "metrics": {
+        "median_active_states": 2,
+        "median_compute_ms": 3.4235615,
+        "median_hdd_nodes": 3,
+        "median_memory_bytes": 32768,
+        "median_total_ms": 3.445355,
+        "median_transfer_ms": 0.014602,
+        "throughput_ops_per_sec": 290.245852749571
+      }
+    },
+    {
+      "name": "gkp_state_circuit_cutoff_32",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "32",
+        "depth": "9",
+        "num_qubits": "1",
+        "num_qumodes": "1",
+        "source_circuit": "circuit/src/gkp_state_circuit.cpp",
+        "workload": "gkp_state_circuit"
+      },
+      "metrics": {
+        "median_active_states": 2,
+        "median_compute_ms": 13.616579,
+        "median_hdd_nodes": 3,
+        "median_memory_bytes": 65536,
+        "median_total_ms": 17.274392,
+        "median_transfer_ms": 1.888744,
+        "throughput_ops_per_sec": 57.8891575460369
+      }
+    },
+    {
+      "name": "cv_qaoa_circuit_cutoff_64",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "64",
+        "depth": "2",
+        "num_qubits": "1",
+        "num_qumodes": "1",
+        "source_circuit": "circuit/src/qaoa_circuit.cpp",
+        "workload": "cv_qaoa_circuit"
+      },
+      "metrics": {
+        "median_active_states": 2,
+        "median_compute_ms": 19.249707,
+        "median_hdd_nodes": 3,
+        "median_memory_bytes": 65536,
+        "median_total_ms": 19.2757225,
+        "median_transfer_ms": 0.0167655,
+        "throughput_ops_per_sec": 51.8787298374938
+      }
+    },
+    {
+      "name": "gkp_state_circuit_cutoff_64",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "64",
+        "depth": "9",
+        "num_qubits": "1",
+        "num_qumodes": "1",
+        "source_circuit": "circuit/src/gkp_state_circuit.cpp",
+        "workload": "gkp_state_circuit"
+      },
+      "metrics": {
+        "median_active_states": 2,
+        "median_compute_ms": 76.324683,
+        "median_hdd_nodes": 3,
+        "median_memory_bytes": 131072,
+        "median_total_ms": 80.0593995,
+        "median_transfer_ms": 1.910873,
+        "throughput_ops_per_sec": 12.4907257142242
+      }
+    },
+    {
+      "name": "cv_qaoa_circuit_cutoff_128",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "128",
+        "depth": "2",
+        "num_qubits": "1",
+        "num_qumodes": "1",
+        "source_circuit": "circuit/src/qaoa_circuit.cpp",
+        "workload": "cv_qaoa_circuit"
+      },
+      "metrics": {
+        "median_active_states": 2,
+        "median_compute_ms": 132.2121355,
+        "median_hdd_nodes": 3,
+        "median_memory_bytes": 131072,
+        "median_total_ms": 132.257875,
+        "median_transfer_ms": 0.0266655,
+        "throughput_ops_per_sec": 7.56098644409643
+      }
+    },
+    {
+      "name": "gkp_state_circuit_cutoff_128",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "128",
+        "depth": "9",
+        "num_qubits": "1",
+        "num_qumodes": "1",
+        "source_circuit": "circuit/src/gkp_state_circuit.cpp",
+        "workload": "gkp_state_circuit"
+      },
+      "metrics": {
+        "median_active_states": 2,
+        "median_compute_ms": 527.400516,
+        "median_hdd_nodes": 3,
+        "median_memory_bytes": 262144,
+        "median_total_ms": 531.481428,
+        "median_transfer_ms": 2.0189695,
+        "throughput_ops_per_sec": 1.88153329037868
+      }
+    },
+    {
+      "name": "jch_simulation_circuit_cutoff_8",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "8",
+        "depth": "5",
+        "num_qubits": "2",
+        "num_qumodes": "2",
+        "source_circuit": "circuit/src/jch_simulation_circuit.cpp",
+        "workload": "jch_simulation_circuit"
+      },
+      "metrics": {
+        "median_active_states": 4,
+        "median_compute_ms": 0.220044,
+        "median_hdd_nodes": 7,
+        "median_memory_bytes": 65536,
+        "median_total_ms": 3.708884,
+        "median_transfer_ms": 0.0423645,
+        "throughput_ops_per_sec": 269.622883864796
+      }
+    },
+    {
+      "name": "jch_simulation_circuit_cutoff_16",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "depth": "5",
+        "num_qubits": "2",
+        "num_qumodes": "2",
+        "source_circuit": "circuit/src/jch_simulation_circuit.cpp",
+        "workload": "jch_simulation_circuit"
+      },
+      "metrics": {
+        "median_active_states": 4,
+        "median_compute_ms": 0.401025,
+        "median_hdd_nodes": 7,
+        "median_memory_bytes": 262144,
+        "median_total_ms": 3.9283815,
+        "median_transfer_ms": 0.0437315,
+        "throughput_ops_per_sec": 254.557761256131
+      }
+    },
+    {
+      "name": "jch_simulation_circuit_cutoff_32",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "32",
+        "depth": "5",
+        "num_qubits": "2",
+        "num_qumodes": "2",
+        "source_circuit": "circuit/src/jch_simulation_circuit.cpp",
+        "workload": "jch_simulation_circuit"
+      },
+      "metrics": {
+        "median_active_states": 4,
+        "median_compute_ms": 1.0541165,
+        "median_hdd_nodes": 7,
+        "median_memory_bytes": 1048576,
+        "median_total_ms": 4.7242585,
+        "median_transfer_ms": 0.0435555,
+        "throughput_ops_per_sec": 211.673429809144
+      }
+    },
+    {
+      "name": "hdd_vs_full_tensor_qubits_2",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "num_qubits": "2",
+        "num_qumodes": "1",
+        "workload": "hdd_vs_full_tensor"
+      },
+      "metrics": {
+        "active_states": 2,
+        "active_tensor_bytes_estimate": 512,
+        "active_tensor_vs_naive_ratio": 2,
+        "hdd_node_bytes_estimate": 360,
+        "hdd_nodes": 5,
+        "naive_full_tensor_bytes": 1024,
+        "state_pool_reserved_bytes": 2048,
+        "state_pool_vs_naive_ratio": 0.5
+      }
+    },
+    {
+      "name": "hdd_vs_full_tensor_qubits_4",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "num_qubits": "4",
+        "num_qumodes": "1",
+        "workload": "hdd_vs_full_tensor"
+      },
+      "metrics": {
+        "active_states": 2,
+        "active_tensor_bytes_estimate": 512,
+        "active_tensor_vs_naive_ratio": 8,
+        "hdd_node_bytes_estimate": 648,
+        "hdd_nodes": 9,
+        "naive_full_tensor_bytes": 4096,
+        "state_pool_reserved_bytes": 2048,
+        "state_pool_vs_naive_ratio": 2
+      }
+    },
+    {
+      "name": "hdd_vs_full_tensor_qubits_8",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "num_qubits": "8",
+        "num_qumodes": "1",
+        "workload": "hdd_vs_full_tensor"
+      },
+      "metrics": {
+        "active_states": 2,
+        "active_tensor_bytes_estimate": 512,
+        "active_tensor_vs_naive_ratio": 128,
+        "hdd_node_bytes_estimate": 1224,
+        "hdd_nodes": 17,
+        "naive_full_tensor_bytes": 65536,
+        "state_pool_reserved_bytes": 2560,
+        "state_pool_vs_naive_ratio": 25.6
+      }
+    },
+    {
+      "name": "hdd_vs_full_tensor_qubits_12",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "num_qubits": "12",
+        "num_qumodes": "1",
+        "workload": "hdd_vs_full_tensor"
+      },
+      "metrics": {
+        "active_states": 2,
+        "active_tensor_bytes_estimate": 512,
+        "active_tensor_vs_naive_ratio": 2048,
+        "hdd_node_bytes_estimate": 1800,
+        "hdd_nodes": 25,
+        "naive_full_tensor_bytes": 1048576,
+        "state_pool_reserved_bytes": 3584,
+        "state_pool_vs_naive_ratio": 292.571428571429
+      }
+    },
+    {
+      "name": "hdd_vs_full_tensor_qubits_16",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "num_qubits": "16",
+        "num_qumodes": "1",
+        "workload": "hdd_vs_full_tensor"
+      },
+      "metrics": {
+        "active_states": 2,
+        "active_tensor_bytes_estimate": 512,
+        "active_tensor_vs_naive_ratio": 32768,
+        "hdd_node_bytes_estimate": 2376,
+        "hdd_nodes": 33,
+        "naive_full_tensor_bytes": 16777216,
+        "state_pool_reserved_bytes": 4608,
+        "state_pool_vs_naive_ratio": 3640.88888888889
+      }
+    },
+    {
+      "name": "hdd_vs_full_tensor_qubits_20",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "num_qubits": "20",
+        "num_qumodes": "1",
+        "workload": "hdd_vs_full_tensor"
+      },
+      "metrics": {
+        "active_states": 2,
+        "active_tensor_bytes_estimate": 512,
+        "active_tensor_vs_naive_ratio": 524288,
+        "hdd_node_bytes_estimate": 2952,
+        "hdd_nodes": 41,
+        "naive_full_tensor_bytes": 268435456,
+        "state_pool_reserved_bytes": 5632,
+        "state_pool_vs_naive_ratio": 47662.5454545455
+      }
+    }
+  ]
+}

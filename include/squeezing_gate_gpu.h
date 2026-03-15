@@ -16,7 +16,9 @@ void apply_squeezing_gate_gpu(
     const int* target_indices,
     int batch_size,
     double r,
-    double theta
+    double theta,
+    int target_qumode = 0,
+    int num_qumodes = 1
 );
 
 /**

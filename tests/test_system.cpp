@@ -1,7 +1,5 @@
 #include <gtest/gtest.h>
 #include "quantum_circuit.h"
-#include "batch_scheduler.h"
-#include <iostream>
 #include <cmath>
 
 /**
@@ -56,24 +54,6 @@ TEST_F(SystemTest, ExecuteCircuit) {
     // α = 0.1 时，exp(-0.01/2) ≈ 0.995
     double expected_vacuum_amplitude = std::exp(-0.01 / 2.0);
     EXPECT_NEAR(std::abs(amplitude), expected_vacuum_amplitude, 1e-6);  // 应该有非零振幅
-}
-
-// Disabled due to incomplete RuntimeScheduler implementation
-// The scheduler doesn't convert GateParams to BatchTasks
-TEST_F(SystemTest, DISABLED_BatchSchedulerIntegration) {
-    circuit->build();  // 先构建电路
-    RuntimeScheduler scheduler(circuit, 4);
-
-    // 添加多个门操作
-    scheduler.schedule_gate(Gates::PhaseRotation(0, M_PI / 4.0));
-    scheduler.schedule_gate(Gates::Displacement(0, std::complex<double>(0.05, 0.0)));
-    scheduler.schedule_gate(Gates::CreationOperator(0));
-
-    // 执行调度
-    scheduler.execute_all();
-
-    auto stats = scheduler.get_stats();
-    EXPECT_GE(stats.batch_stats.total_tasks, 3);
 }
 
 TEST_F(SystemTest, StatePoolIntegration) {
@@ -135,29 +115,4 @@ TEST_F(SystemTest, ResetAndReuse) {
     // 验证重置有效
     auto stats = circuit->get_stats();
     EXPECT_EQ(stats.num_gates, 1);
-}
-
-// 性能测试
-TEST_F(SystemTest, DISABLED_PerformanceTest) {
-    const int num_iterations = 100;
-
-    auto start_time = std::chrono::high_resolution_clock::now();
-
-    for (int i = 0; i < num_iterations; ++i) {
-        circuit->reset();
-        circuit->add_gates({
-            Gates::PhaseRotation(0, M_PI / 4.0),
-            Gates::Displacement(0, std::complex<double>(0.1, 0.0)),
-            Gates::CreationOperator(0),
-            Gates::BeamSplitter(0, 1, M_PI / 2.0)
-        });
-        circuit->build();
-        circuit->execute();
-    }
-
-    auto end_time = std::chrono::high_resolution_clock::now();
-    double total_time = std::chrono::duration<double>(end_time - start_time).count();
-
-    std::cout << "性能测试: " << num_iterations << " 次迭代, 总时间: "
-              << total_time << " 秒, 平均: " << total_time / num_iterations << " 秒/次" << std::endl;
 }

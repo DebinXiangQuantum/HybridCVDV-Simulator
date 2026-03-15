@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include "cv_state_pool.h"
 #include "two_mode_gates.h"
+#include "reference_gates.h"
 #include <vector>
 #include <cmath>
 #include <cuda_runtime.h>
@@ -82,6 +83,24 @@ protected:
         double real = cuCreal(state[idx]);
         double imag = cuCimag(state[idx]);
         return real * real + imag * imag;
+    }
+
+    Reference::Vector to_reference(const std::vector<cuDoubleComplex>& state) {
+        Reference::Vector result(state.size(), Reference::Complex(0.0, 0.0));
+        for (size_t i = 0; i < state.size(); ++i) {
+            result[i] = Reference::Complex(cuCreal(state[i]), cuCimag(state[i]));
+        }
+        return result;
+    }
+
+    double compute_error(const std::vector<cuDoubleComplex>& gpu_state,
+                         const Reference::Vector& reference_state) {
+        double error_sq = 0.0;
+        for (size_t i = 0; i < gpu_state.size(); ++i) {
+            const Reference::Complex gpu(cuCreal(gpu_state[i]), cuCimag(gpu_state[i]));
+            error_sq += std::norm(gpu - reference_state[i]);
+        }
+        return std::sqrt(error_sq);
     }
 };
 
@@ -454,4 +473,56 @@ TEST_F(SFTwoModeGatesTest, CombinedGates_CZ_CK) {
     double total_phase = M_PI / 2.0 + M_PI / 2.0;  // CZ + CK
     EXPECT_NEAR(cuCreal(result[idx]), cos(total_phase), 1e-10);
     EXPECT_NEAR(cuCimag(result[idx]), sin(total_phase), 1e-10);
+}
+
+TEST_F(SFTwoModeGatesTest, TMSGate_MatchesReference) {
+    set_two_mode_fock_state(0, 0);
+
+    int host_targets[] = {state_id};
+    int* d_targets = nullptr;
+    ALLOC_DEVICE_TARGETS(d_targets, host_targets, 1);
+
+    const double r = 0.2;
+    const double theta = 0.1;
+    apply_two_mode_squeezing_recursive(pool, d_targets, 1, r, theta);
+
+    FREE_DEVICE_TARGETS(d_targets);
+
+    std::vector<cuDoubleComplex> result;
+    pool->download_state(state_id, result);
+    expect_normalized(result);
+
+    Reference::Vector input(d_trunc, Reference::Complex(0.0, 0.0));
+    input[0] = Reference::Complex(1.0, 0.0);
+    const auto reference =
+        Reference::TwoModeGatesExtended::apply_two_mode_squeezing(
+            input, Reference::Complex(r * std::cos(theta), r * std::sin(theta)));
+
+    EXPECT_LT(compute_error(result, reference), 1e-8);
+    EXPECT_GT(get_fock_probability(result, 1, 1), 1e-4);
+    EXPECT_NEAR(get_fock_probability(result, 1, 0), 0.0, 1e-8);
+}
+
+TEST_F(SFTwoModeGatesTest, SUMGate_MatchesReference) {
+    set_two_mode_fock_state(1, 0);
+
+    int host_targets[] = {state_id};
+    int* d_targets = nullptr;
+    ALLOC_DEVICE_TARGETS(d_targets, host_targets, 1);
+
+    const double scale = 0.15;
+    apply_sum_gate(pool, d_targets, 1, scale, cutoff_a, cutoff_b);
+
+    FREE_DEVICE_TARGETS(d_targets);
+
+    std::vector<cuDoubleComplex> result;
+    pool->download_state(state_id, result);
+    expect_normalized(result, 1e-5);
+
+    Reference::Vector input(d_trunc, Reference::Complex(0.0, 0.0));
+    input[cutoff_b] = Reference::Complex(1.0, 0.0);
+    const auto reference = Reference::TwoModeGatesExtended::apply_sum_gate(input, scale, 0.0);
+
+    EXPECT_LT(compute_error(result, reference), 1e-8);
+    EXPECT_GT(get_fock_probability(result, 0, 1), 1e-4);
 }

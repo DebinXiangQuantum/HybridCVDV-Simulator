@@ -113,3 +113,38 @@ TEST_F(CVStatePoolTest, StateReuse) {
     EXPECT_GE(state_id2, 0);
     EXPECT_EQ(pool->active_count, 1);
 }
+
+TEST(CVStatePoolTensorProductTest, TensorProductProducesExpectedState) {
+    CVStatePool pool(4, 8, 1);
+
+    const int state_a = pool.allocate_state();
+    const int state_b = pool.allocate_state();
+    ASSERT_GE(state_a, 0);
+    ASSERT_GE(state_b, 0);
+
+    std::vector<cuDoubleComplex> first_state(4, make_cuDoubleComplex(0.0, 0.0));
+    std::vector<cuDoubleComplex> second_state(4, make_cuDoubleComplex(0.0, 0.0));
+    first_state[1] = make_cuDoubleComplex(1.0, 0.0);
+    second_state[2] = make_cuDoubleComplex(0.5, -0.25);
+
+    pool.upload_state(state_a, first_state);
+    pool.upload_state(state_b, second_state);
+
+    const int product_state_id = pool.tensor_product(state_a, state_b);
+    ASSERT_GE(product_state_id, 0);
+    EXPECT_EQ(pool.get_state_dim(product_state_id), 16);
+
+    std::vector<cuDoubleComplex> product_state;
+    pool.download_state(product_state_id, product_state);
+    ASSERT_EQ(product_state.size(), 16U);
+
+    for (size_t idx = 0; idx < product_state.size(); ++idx) {
+        if (idx == 6U) {
+            EXPECT_NEAR(cuCreal(product_state[idx]), 0.5, 1e-10);
+            EXPECT_NEAR(cuCimag(product_state[idx]), -0.25, 1e-10);
+        } else {
+            EXPECT_NEAR(cuCreal(product_state[idx]), 0.0, 1e-10);
+            EXPECT_NEAR(cuCimag(product_state[idx]), 0.0, 1e-10);
+        }
+    }
+}

@@ -1,0 +1,142 @@
+{
+  "schema_version": "2.0",
+  "telemetry_interval_ms": 200,
+  "gaussian_symbolic_mode_limit": 16,
+  "backend_python_map": {
+    "strawberryfields_tf": ".venv-sf-gpu/bin/python",
+    "mrmustard_jax": ".venv-mm-gpu/bin/python"
+  },
+  "cases": [
+    {
+      "name": "cv_qaoa_modes_1_layers_2_cutoff_16",
+      "workload": "cv_qaoa",
+      "cutoff": 16,
+      "num_modes": 1,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 8,
+      "internal_name_filter": "cv_qaoa_modes_1_layers_2_cutoff_16",
+      "backends": ["hybridcvdv", "strawberryfields_tf", "mrmustard_jax"]
+    },
+    {
+      "name": "cv_qaoa_modes_1_layers_2_cutoff_32",
+      "workload": "cv_qaoa",
+      "cutoff": 32,
+      "num_modes": 1,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 8,
+      "internal_name_filter": "cv_qaoa_modes_1_layers_2_cutoff_32",
+      "backends": ["hybridcvdv", "strawberryfields_tf", "mrmustard_jax"]
+    },
+    {
+      "name": "cv_qaoa_modes_1_layers_2_cutoff_64",
+      "workload": "cv_qaoa",
+      "cutoff": 64,
+      "num_modes": 1,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 8,
+      "internal_name_filter": "cv_qaoa_modes_1_layers_2_cutoff_64",
+      "backends": ["hybridcvdv", "strawberryfields_tf", "mrmustard_jax"]
+    },
+    {
+      "name": "cv_qaoa_modes_2_layers_4_cutoff_16",
+      "workload": "cv_qaoa",
+      "cutoff": 16,
+      "num_modes": 2,
+      "layers": 4,
+      "warmup_runs": 2,
+      "measured_runs": 8,
+      "internal_name_filter": "cv_qaoa_modes_2_layers_4_cutoff_16",
+      "backends": ["hybridcvdv", "strawberryfields_tf", "mrmustard_jax"]
+    },
+    {
+      "name": "cv_qaoa_modes_2_layers_4_cutoff_32",
+      "workload": "cv_qaoa",
+      "cutoff": 32,
+      "num_modes": 2,
+      "layers": 4,
+      "warmup_runs": 2,
+      "measured_runs": 8,
+      "internal_name_filter": "cv_qaoa_modes_2_layers_4_cutoff_32",
+      "backends": ["hybridcvdv", "strawberryfields_tf", "mrmustard_jax"]
+    },
+    {
+      "name": "jch_photonic_chain_modes_2_timesteps_5_cutoff_16",
+      "workload": "jch_photonic_chain",
+      "cutoff": 16,
+      "num_modes": 2,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 8,
+      "internal_name_filter": "jch_photonic_chain_modes_2_timesteps_5_cutoff_16",
+      "backends": ["hybridcvdv", "strawberryfields_tf", "mrmustard_jax"]
+    },
+    {
+      "name": "jch_photonic_chain_modes_2_timesteps_5_cutoff_32",
+      "workload": "jch_photonic_chain",
+      "cutoff": 32,
+      "num_modes": 2,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 8,
+      "internal_name_filter": "jch_photonic_chain_modes_2_timesteps_5_cutoff_32",
+      "backends": ["hybridcvdv", "strawberryfields_tf", "mrmustard_jax"]
+    },
+    {
+      "name": "cat_state_alpha_1.0_cutoff_32",
+      "workload": "cv_qaoa",
+      "cutoff": 32,
+      "num_modes": 1,
+      "layers": 2,
+      "internal_name_filter": "cat_state_alpha_1.0_cutoff_32",
+      "backends": ["hybridcvdv"]
+    },
+    {
+      "name": "gkp_rounds_9_cutoff_32",
+      "workload": "cv_qaoa",
+      "cutoff": 32,
+      "num_modes": 1,
+      "layers": 2,
+      "internal_name_filter": "gkp_rounds_9_cutoff_32",
+      "backends": ["hybridcvdv"]
+    },
+    {
+      "name": "state_transfer_cvtodv_qubits_2_cutoff_32",
+      "workload": "cv_qaoa",
+      "cutoff": 32,
+      "num_modes": 2,
+      "layers": 2,
+      "internal_name_filter": "state_transfer_cvtodv_qubits_2_cutoff_32",
+      "backends": ["hybridcvdv"]
+    },
+    {
+      "name": "state_transfer_dvtocv_qubits_2_cutoff_32",
+      "workload": "cv_qaoa",
+      "cutoff": 32,
+      "num_modes": 2,
+      "layers": 2,
+      "internal_name_filter": "state_transfer_dvtocv_qubits_2_cutoff_32",
+      "backends": ["hybridcvdv"]
+    },
+    {
+      "name": "jch_full_qubits_2_sites_2_timesteps_5_cutoff_16",
+      "workload": "jch_photonic_chain",
+      "cutoff": 16,
+      "num_modes": 2,
+      "timesteps": 5,
+      "internal_name_filter": "jch_full_qubits_2_sites_2_timesteps_5_cutoff_16",
+      "backends": ["hybridcvdv"]
+    },
+    {
+      "name": "vqe_qubits_2_qumodes_2_depth_2_cutoff_32",
+      "workload": "cv_qaoa",
+      "cutoff": 32,
+      "num_modes": 2,
+      "layers": 2,
+      "internal_name_filter": "vqe_qubits_2_qumodes_2_depth_2_cutoff_32",
+      "backends": ["hybridcvdv"]
+    }
+  ]
+}

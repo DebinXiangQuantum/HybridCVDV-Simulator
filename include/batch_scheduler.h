@@ -12,13 +12,22 @@
 struct BatchTask {
     std::vector<int> target_state_ids;    // 目标状态ID列表
     GateType gate_type;                   // 门类型
+    std::vector<int> target_qubits;       // 目标qubit索引
+    std::vector<int> target_qumodes;      // 目标qumode索引
     std::vector<std::complex<double>> params;  // 门参数
     int priority;                         // 任务优先级 (0=最高)
 
     // 构造函数
     BatchTask(GateType type, const std::vector<int>& state_ids,
-              const std::vector<std::complex<double>>& p = {}, int prio = 0)
-        : target_state_ids(state_ids), gate_type(type), params(p), priority(prio) {}
+              const std::vector<std::complex<double>>& p = {}, int prio = 0,
+              const std::vector<int>& qubits = {},
+              const std::vector<int>& qumodes = {})
+        : target_state_ids(state_ids),
+          gate_type(type),
+          target_qubits(qubits),
+          target_qumodes(qumodes),
+          params(p),
+          priority(prio) {}
 
     // 比较运算符 (用于优先级队列)
     bool operator<(const BatchTask& other) const {
@@ -76,6 +85,25 @@ public:
      * 清空所有任务
      */
     void clear();
+
+    // ==========================================
+    // HPC Optimization: CUDA Graphs 工作流卸载
+    // ==========================================
+    bool graph_captured_ = false;
+    cudaGraph_t exec_graph_;
+    cudaGraphExec_t graph_instance_;
+    cudaStream_t stream_ = nullptr;
+
+    /**
+     * 使用 CUDA Graph 捕获并极速执行当前待处理任务
+     * 极大地降低 CPU 端 Kernel Launch Overhead
+     */
+    void execute_with_cuda_graph();
+
+    /**
+     * 重置已录制的 CUDA Graph
+     */
+    void reset_graph();
 
     /**
      * 获取统计信息
