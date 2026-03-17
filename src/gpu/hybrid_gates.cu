@@ -176,22 +176,23 @@ void apply_controlled_displacement_on_mode(CVStatePool* state_pool,
         }
     }
 
-    int* d_state_ids = nullptr;
-    CHECK_CUDA(cudaMalloc(&d_state_ids, controlled_states.size() * sizeof(int)));
+    const size_t ids_bytes = controlled_states.size() * sizeof(int);
+    int* d_state_ids = static_cast<int*>(
+        state_pool->scratch_target_ids.ensure(ids_bytes));
     CHECK_CUDA(cudaMemcpy(d_state_ids, controlled_states.data(),
-               controlled_states.size() * sizeof(int), cudaMemcpyHostToDevice));
+               ids_bytes, cudaMemcpyHostToDevice));
 
-    // 使用 max_total_dim 作为 stride 分配足够大的缓冲区
+    // 使用 max_total_dim 作为 stride，从scratch buffer获取临时缓冲区
     size_t buffer_stride = state_pool->max_total_dim;
-    cuDoubleComplex* temp_buffer = nullptr;
     size_t buffer_size = controlled_states.size() * buffer_stride * sizeof(cuDoubleComplex);
-    CHECK_CUDA(cudaMalloc(&temp_buffer, buffer_size));
+    cuDoubleComplex* temp_buffer = static_cast<cuDoubleComplex*>(
+        state_pool->scratch_temp.ensure(buffer_size));
 
     dim3 block_dim(256);
     dim3 grid_dim((state_pool->max_total_dim + block_dim.x - 1) / block_dim.x, controlled_states.size());
 
     apply_controlled_displacement_kernel<<<grid_dim, block_dim>>>(
-        state_pool->data, 
+        state_pool->data,
         state_pool->state_offsets,
         state_pool->state_dims,
         state_pool->capacity,
@@ -208,7 +209,7 @@ void apply_controlled_displacement_on_mode(CVStatePool* state_pool,
     CHECK_CUDA(cudaDeviceSynchronize());
 
     copy_back_hybrid_kernel<<<grid_dim, block_dim>>>(
-        state_pool->data, 
+        state_pool->data,
         state_pool->state_offsets,
         state_pool->state_dims,
         state_pool->capacity,
@@ -216,9 +217,6 @@ void apply_controlled_displacement_on_mode(CVStatePool* state_pool,
     );
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
-
-    CHECK_CUDA(cudaFree(d_state_ids));
-    CHECK_CUDA(cudaFree(temp_buffer));
 }
 
 void apply_controlled_displacement(CVStatePool* state_pool,
@@ -262,20 +260,20 @@ void apply_controlled_rotation(CVStatePool* state_pool,
                                const std::vector<int>& controlled_states,
                                double theta) {
     if (controlled_states.empty()) return;
-    int* d_ids = nullptr;
-    CHECK_CUDA(cudaMalloc(&d_ids, controlled_states.size() * sizeof(int)));
-    CHECK_CUDA(cudaMemcpy(d_ids, controlled_states.data(), controlled_states.size() * sizeof(int), cudaMemcpyHostToDevice));
-    
+    const size_t ids_bytes = controlled_states.size() * sizeof(int);
+    int* d_ids = static_cast<int*>(
+        state_pool->scratch_target_ids.ensure(ids_bytes));
+    CHECK_CUDA(cudaMemcpy(d_ids, controlled_states.data(), ids_bytes, cudaMemcpyHostToDevice));
+
     dim3 block_dim(256);
     dim3 grid_dim((state_pool->max_total_dim + block_dim.x - 1) / block_dim.x, controlled_states.size());
 
     apply_controlled_rotation_kernel<<<grid_dim, block_dim>>>(
-        state_pool->data, 
+        state_pool->data,
         state_pool->state_offsets,
         state_pool->state_dims,
         d_ids, controlled_states.size(), theta
     );
-    CHECK_CUDA(cudaFree(d_ids));
 }
 
 void apply_controlled_parity(CVStatePool* state_pool, const std::vector<int>& controlled_states) {
@@ -338,25 +336,26 @@ void apply_rabi_interaction_on_mode(CVStatePool* state_pool,
     if (qubit0_states.empty()) return;
     
     size_t n = qubit0_states.size();
-    int *d_id0, *d_id1;
-    CHECK_CUDA(cudaMalloc(&d_id0, n * sizeof(int)));
-    CHECK_CUDA(cudaMalloc(&d_id1, n * sizeof(int)));
+    const size_t pair_bytes = 2 * n * sizeof(int);
+    char* aux = static_cast<char*>(state_pool->scratch_aux.ensure(pair_bytes));
+    int* d_id0 = reinterpret_cast<int*>(aux);
+    int* d_id1 = reinterpret_cast<int*>(aux + n * sizeof(int));
     CHECK_CUDA(cudaMemcpy(d_id0, qubit0_states.data(), n * sizeof(int), cudaMemcpyHostToDevice));
     CHECK_CUDA(cudaMemcpy(d_id1, qubit1_states.data(), n * sizeof(int), cudaMemcpyHostToDevice));
-    
+
     dim3 bd(256);
     dim3 gd((state_pool->max_total_dim + bd.x - 1)/bd.x, n);
 
     // 1. Transform to X basis
     batch_mix_rabi_kernel<<<gd, bd>>>(
-        state_pool->data, 
+        state_pool->data,
         state_pool->state_offsets,
         state_pool->state_dims,
         d_id0, d_id1, n, false
     );
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
-    
+
     cuDoubleComplex alpha0 = make_cuDoubleComplex(0.0, -theta);
     cuDoubleComplex alpha1 = make_cuDoubleComplex(0.0, theta);
 
@@ -365,18 +364,22 @@ void apply_rabi_interaction_on_mode(CVStatePool* state_pool,
     apply_controlled_displacement_on_mode(
         state_pool, qubit1_states, alpha1, target_qumode, num_qumodes);
 
+    // Re-obtain pointers (scratch_aux may have been reallocated by displacement calls)
+    aux = static_cast<char*>(state_pool->scratch_aux.ensure(pair_bytes));
+    d_id0 = reinterpret_cast<int*>(aux);
+    d_id1 = reinterpret_cast<int*>(aux + n * sizeof(int));
+    CHECK_CUDA(cudaMemcpy(d_id0, qubit0_states.data(), n * sizeof(int), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(d_id1, qubit1_states.data(), n * sizeof(int), cudaMemcpyHostToDevice));
+
     // 3. Transform back
     batch_mix_rabi_kernel<<<gd, bd>>>(
-        state_pool->data, 
+        state_pool->data,
         state_pool->state_offsets,
         state_pool->state_dims,
         d_id0, d_id1, n, true
     );
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
-    
-    CHECK_CUDA(cudaFree(d_id0));
-    CHECK_CUDA(cudaFree(d_id1));
 }
 
 void apply_rabi_interaction(CVStatePool* state_pool,
@@ -471,12 +474,13 @@ void apply_jaynes_cummings_on_mode(CVStatePool* state_pool,
         compute_mode_right_stride(state_pool->d_trunc, target_qumode, num_qumodes);
     const int target_mode_dim = state_pool->d_trunc;
     size_t n = qubit0_states.size();
-    int *d0, *d1;
-    CHECK_CUDA(cudaMalloc(&d0, n * sizeof(int)));
-    CHECK_CUDA(cudaMalloc(&d1, n * sizeof(int)));
+    const size_t pair_bytes = 2 * n * sizeof(int);
+    char* aux = static_cast<char*>(state_pool->scratch_aux.ensure(pair_bytes));
+    int* d0 = reinterpret_cast<int*>(aux);
+    int* d1 = reinterpret_cast<int*>(aux + n * sizeof(int));
     CHECK_CUDA(cudaMemcpy(d0, qubit0_states.data(), n * sizeof(int), cudaMemcpyHostToDevice));
     CHECK_CUDA(cudaMemcpy(d1, qubit1_states.data(), n * sizeof(int), cudaMemcpyHostToDevice));
-    
+
     dim3 bd(256);
     const size_t max_pairs =
         static_cast<size_t>(state_pool->max_total_dim / state_pool->d_trunc) *
@@ -484,16 +488,13 @@ void apply_jaynes_cummings_on_mode(CVStatePool* state_pool,
     dim3 gd((max_pairs + bd.x - 1)/bd.x, n);
 
     apply_jc_kernel<<<gd, bd>>>(
-        state_pool->data, 
+        state_pool->data,
         state_pool->state_offsets,
         state_pool->state_dims,
         d0, d1, n, theta, phi, target_mode_dim, target_mode_right_stride
     );
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
-    
-    CHECK_CUDA(cudaFree(d0));
-    CHECK_CUDA(cudaFree(d1));
 }
 
 void apply_jaynes_cummings(CVStatePool* state_pool,
@@ -583,29 +584,27 @@ void apply_anti_jaynes_cummings_on_mode(CVStatePool* state_pool,
         compute_mode_right_stride(state_pool->d_trunc, target_qumode, num_qumodes);
     const int target_mode_dim = state_pool->d_trunc;
     size_t n = qubit0_states.size();
-    int *d0, *d1;
-    CHECK_CUDA(cudaMalloc(&d0, n * sizeof(int)));
-    CHECK_CUDA(cudaMalloc(&d1, n * sizeof(int)));
+    const size_t pair_bytes = 2 * n * sizeof(int);
+    char* aux = static_cast<char*>(state_pool->scratch_aux.ensure(pair_bytes));
+    int* d0 = reinterpret_cast<int*>(aux);
+    int* d1 = reinterpret_cast<int*>(aux + n * sizeof(int));
     CHECK_CUDA(cudaMemcpy(d0, qubit0_states.data(), n * sizeof(int), cudaMemcpyHostToDevice));
     CHECK_CUDA(cudaMemcpy(d1, qubit1_states.data(), n * sizeof(int), cudaMemcpyHostToDevice));
-    
+
     dim3 bd(256);
     const size_t max_pairs =
         static_cast<size_t>(state_pool->max_total_dim / state_pool->d_trunc) *
         static_cast<size_t>(state_pool->d_trunc - 1);
     dim3 gd((max_pairs + bd.x - 1)/bd.x, n);
-    
+
     apply_ajc_kernel<<<gd, bd>>>(
-        state_pool->data, 
+        state_pool->data,
         state_pool->state_offsets,
         state_pool->state_dims,
         d0, d1, n, theta, phi, target_mode_dim, target_mode_right_stride
     );
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
-    
-    CHECK_CUDA(cudaFree(d0));
-    CHECK_CUDA(cudaFree(d1));
 }
 
 void apply_anti_jaynes_cummings(CVStatePool* state_pool,
@@ -679,36 +678,31 @@ void apply_sqr(CVStatePool* state_pool,
                const std::vector<double>& phis) {
     if (qubit0_states.size() != qubit1_states.size()) return;
     size_t n_pairs = qubit0_states.size();
-    int *d0, *d1;
-    double *d_thetas, *d_phis;
-    
-    CHECK_CUDA(cudaMalloc(&d0, n_pairs * sizeof(int)));
-    CHECK_CUDA(cudaMalloc(&d1, n_pairs * sizeof(int)));
-    // 使用 max_total_dim 分配参数数组
-    CHECK_CUDA(cudaMalloc(&d_thetas, state_pool->max_total_dim * sizeof(double)));
-    CHECK_CUDA(cudaMalloc(&d_phis, state_pool->max_total_dim * sizeof(double)));
+    const size_t ids_bytes = 2 * n_pairs * sizeof(int);
+    const size_t params_bytes = 2 * static_cast<size_t>(state_pool->max_total_dim) * sizeof(double);
+    const size_t total_bytes = ids_bytes + params_bytes;
+
+    char* buf = static_cast<char*>(state_pool->scratch_aux.ensure(total_bytes));
+    int* d0 = reinterpret_cast<int*>(buf);
+    int* d1 = reinterpret_cast<int*>(buf + n_pairs * sizeof(int));
+    double* d_thetas = reinterpret_cast<double*>(buf + ids_bytes);
+    double* d_phis = reinterpret_cast<double*>(buf + ids_bytes +
+                     static_cast<size_t>(state_pool->max_total_dim) * sizeof(double));
 
     CHECK_CUDA(cudaMemcpy(d0, qubit0_states.data(), n_pairs * sizeof(int), cudaMemcpyHostToDevice));
     CHECK_CUDA(cudaMemcpy(d1, qubit1_states.data(), n_pairs * sizeof(int), cudaMemcpyHostToDevice));
-    // 注意：这里假设输入 thetas/phis 的大小匹配 max_total_dim，或者至少覆盖了所有状态的维度
-    // 为了安全，应该传递实际数据大小，或者在调用方保证
     CHECK_CUDA(cudaMemcpy(d_thetas, thetas.data(), state_pool->max_total_dim * sizeof(double), cudaMemcpyHostToDevice));
     CHECK_CUDA(cudaMemcpy(d_phis, phis.data(), state_pool->max_total_dim * sizeof(double), cudaMemcpyHostToDevice));
 
     dim3 bd(256);
     dim3 gd((state_pool->max_total_dim + bd.x - 1)/bd.x, n_pairs);
-    
+
     apply_sqr_kernel<<<gd, bd>>>(
-        state_pool->data, 
+        state_pool->data,
         state_pool->state_offsets,
         state_pool->state_dims,
         d0, d1, n_pairs, d_thetas, d_phis
     );
-    
-    CHECK_CUDA(cudaFree(d0));
-    CHECK_CUDA(cudaFree(d1));
-    CHECK_CUDA(cudaFree(d_thetas));
-    CHECK_CUDA(cudaFree(d_phis));
 }
 
 // ==========================================
@@ -744,24 +738,22 @@ void copy_states(CVStatePool* state_pool,
                 const std::vector<int>& dest_ids) {
     if (source_ids.size() != dest_ids.size()) return;
     if (source_ids.empty()) return;
-    int *d_src, *d_dst;
-    CHECK_CUDA(cudaMalloc(&d_src, source_ids.size() * sizeof(int)));
-    CHECK_CUDA(cudaMalloc(&d_dst, dest_ids.size() * sizeof(int)));
+    const size_t pair_bytes = 2 * source_ids.size() * sizeof(int);
+    char* aux = static_cast<char*>(state_pool->scratch_aux.ensure(pair_bytes));
+    int* d_src = reinterpret_cast<int*>(aux);
+    int* d_dst = reinterpret_cast<int*>(aux + source_ids.size() * sizeof(int));
     CHECK_CUDA(cudaMemcpy(d_src, source_ids.data(), source_ids.size() * sizeof(int), cudaMemcpyHostToDevice));
     CHECK_CUDA(cudaMemcpy(d_dst, dest_ids.data(), dest_ids.size() * sizeof(int), cudaMemcpyHostToDevice));
-    
+
     dim3 bd(256);
     dim3 gd((state_pool->max_total_dim + bd.x - 1)/bd.x, source_ids.size());
-    
+
     copy_states_kernel<<<gd, bd>>>(
-        state_pool->data, 
+        state_pool->data,
         state_pool->state_offsets,
         state_pool->state_dims,
         d_src, d_dst, source_ids.size()
     );
-    
-    CHECK_CUDA(cudaFree(d_src));
-    CHECK_CUDA(cudaFree(d_dst));
 }
 
 // ==========================================
@@ -809,20 +801,20 @@ void apply_controlled_x_rotation(CVStatePool* state_pool,
                                  const std::vector<int>& controlled_states,
                                  double theta) {
     if (controlled_states.empty()) return;
-    int* d_ids = nullptr;
-    CHECK_CUDA(cudaMalloc(&d_ids, controlled_states.size() * sizeof(int)));
-    CHECK_CUDA(cudaMemcpy(d_ids, controlled_states.data(), controlled_states.size() * sizeof(int), cudaMemcpyHostToDevice));
-    
+    const size_t ids_bytes = controlled_states.size() * sizeof(int);
+    int* d_ids = static_cast<int*>(
+        state_pool->scratch_target_ids.ensure(ids_bytes));
+    CHECK_CUDA(cudaMemcpy(d_ids, controlled_states.data(), ids_bytes, cudaMemcpyHostToDevice));
+
     dim3 block_dim(256);
     dim3 grid_dim((state_pool->max_total_dim + block_dim.x - 1) / block_dim.x, controlled_states.size());
 
     apply_controlled_x_rotation_kernel<<<grid_dim, block_dim>>>(
-        state_pool->data, 
+        state_pool->data,
         state_pool->state_offsets,
         state_pool->state_dims,
         d_ids, controlled_states.size(), theta
     );
-    CHECK_CUDA(cudaFree(d_ids));
 }
 
 __global__ void apply_controlled_y_rotation_kernel(
@@ -855,20 +847,20 @@ void apply_controlled_y_rotation(CVStatePool* state_pool,
                                  const std::vector<int>& controlled_states,
                                  double theta) {
     if (controlled_states.empty()) return;
-    int* d_ids = nullptr;
-    CHECK_CUDA(cudaMalloc(&d_ids, controlled_states.size() * sizeof(int)));
-    CHECK_CUDA(cudaMemcpy(d_ids, controlled_states.data(), controlled_states.size() * sizeof(int), cudaMemcpyHostToDevice));
-    
+    const size_t ids_bytes = controlled_states.size() * sizeof(int);
+    int* d_ids = static_cast<int*>(
+        state_pool->scratch_target_ids.ensure(ids_bytes));
+    CHECK_CUDA(cudaMemcpy(d_ids, controlled_states.data(), ids_bytes, cudaMemcpyHostToDevice));
+
     dim3 block_dim(256);
     dim3 grid_dim((state_pool->max_total_dim + block_dim.x - 1) / block_dim.x, controlled_states.size());
 
     apply_controlled_y_rotation_kernel<<<grid_dim, block_dim>>>(
-        state_pool->data, 
+        state_pool->data,
         state_pool->state_offsets,
         state_pool->state_dims,
         d_ids, controlled_states.size(), theta
     );
-    CHECK_CUDA(cudaFree(d_ids));
 }
 
 // Legacy Interface Wrapper (to satisfy existing calls)

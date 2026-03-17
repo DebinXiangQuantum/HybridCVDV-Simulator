@@ -353,13 +353,9 @@ void apply_cached_two_mode_tensor_gate(CVStatePool* state_pool,
         compute_mode_right_stride(single_mode_cutoff, target_qumode2, num_qumodes);
     const size_t buffer_stride = state_pool->max_total_dim;
 
-    cuDoubleComplex* temp_state = nullptr;
-    cudaError_t err = cudaMalloc(
-        &temp_state, static_cast<size_t>(batch_size) * buffer_stride * sizeof(cuDoubleComplex));
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Failed to allocate temporary two-mode buffer: " +
-                                 std::string(cudaGetErrorString(err)));
-    }
+    const size_t temp_bytes = static_cast<size_t>(batch_size) * buffer_stride * sizeof(cuDoubleComplex);
+    cuDoubleComplex* temp_state = static_cast<cuDoubleComplex*>(
+        state_pool->scratch_temp.ensure(temp_bytes));
 
     dim3 block_dim(256);
     dim3 grid_dim((state_pool->max_total_dim + block_dim.x - 1) / block_dim.x, batch_size);
@@ -377,16 +373,14 @@ void apply_cached_two_mode_tensor_gate(CVStatePool* state_pool,
         temp_state,
         buffer_stride
     );
-    err = cudaGetLastError();
+    cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        cudaFree(temp_state);
         throw std::runtime_error("Two-mode tensor kernel launch failed: " +
                                  std::string(cudaGetErrorString(err)));
     }
 
     err = cudaDeviceSynchronize();
     if (err != cudaSuccess) {
-        cudaFree(temp_state);
         throw std::runtime_error("Two-mode tensor kernel synchronization failed: " +
                                  std::string(cudaGetErrorString(err)));
     }
@@ -401,7 +395,6 @@ void apply_cached_two_mode_tensor_gate(CVStatePool* state_pool,
         buffer_stride
     );
     err = cudaGetLastError();
-    cudaFree(temp_state);
     if (err != cudaSuccess) {
         throw std::runtime_error("Two-mode tensor write-back failed: " +
                                  std::string(cudaGetErrorString(err)));
@@ -1215,8 +1208,9 @@ void apply_three_mode_squeezing(CVStatePool* state_pool, const int* target_indic
                                 int batch_size, cuDoubleComplex theta,
                                 int cutoff_a, int cutoff_b, int cutoff_c) {
     size_t buffer_stride = cutoff_a * cutoff_b * cutoff_c;
-    cuDoubleComplex* temp_buffer = nullptr;
-    cudaMalloc(&temp_buffer, batch_size * buffer_stride * sizeof(cuDoubleComplex));
+    const size_t temp_bytes = static_cast<size_t>(batch_size) * buffer_stride * sizeof(cuDoubleComplex);
+    cuDoubleComplex* temp_buffer = static_cast<cuDoubleComplex*>(
+        state_pool->scratch_temp.ensure(temp_bytes));
 
     dim3 block_dim(8, 8, 4);
     dim3 grid_dim((cutoff_a + 7) / 8, (cutoff_b + 7) / 8, batch_size);
@@ -1232,14 +1226,12 @@ void apply_three_mode_squeezing(CVStatePool* state_pool, const int* target_indic
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        cudaFree(temp_buffer);
         throw std::runtime_error("Three-mode squeezing kernel launch failed: " +
                                 std::string(cudaGetErrorString(err)));
     }
 
     err = cudaDeviceSynchronize();
     if (err != cudaSuccess) {
-        cudaFree(temp_buffer);
         throw std::runtime_error("Three-mode squeezing kernel synchronization failed: " +
                                 std::string(cudaGetErrorString(err)));
     }
@@ -1248,20 +1240,16 @@ void apply_three_mode_squeezing(CVStatePool* state_pool, const int* target_indic
     for (int b = 0; b < batch_size; ++b) {
         cuDoubleComplex* state_ptr = state_pool->get_state_ptr(host_targets[b]);
         if (!state_ptr) {
-            cudaFree(temp_buffer);
             throw std::runtime_error("Invalid state ID for three-mode squeezing");
         }
 
         cudaError_t copy_err = cudaMemcpy(state_ptr, &temp_buffer[static_cast<size_t>(b) * buffer_stride],
                                           buffer_stride * sizeof(cuDoubleComplex), cudaMemcpyDeviceToDevice);
         if (copy_err != cudaSuccess) {
-            cudaFree(temp_buffer);
             throw std::runtime_error("Three-mode squeezing write-back failed: " +
                                      std::string(cudaGetErrorString(copy_err)));
         }
     }
-
-    cudaFree(temp_buffer);
 }
 
 /**

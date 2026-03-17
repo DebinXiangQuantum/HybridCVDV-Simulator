@@ -27,6 +27,12 @@ int compute_mode_right_stride(int trunc_dim, int target_qumode, int num_qumodes)
     return right_stride;
 }
 
+void check_kernel_launch(cudaError_t err, const char* message) {
+    if (err != cudaSuccess) {
+        throw std::runtime_error(std::string(message) + cudaGetErrorString(err));
+    }
+}
+
 }  // namespace
 
 /**
@@ -166,14 +172,15 @@ __global__ void apply_conditional_parity_kernel(
  */
 void apply_phase_rotation_on_mode(CVStatePool* state_pool, const int* target_indices,
                                   int batch_size, double theta,
-                                  int target_qumode, int num_qumodes) {
+                                  int target_qumode, int num_qumodes,
+                                  cudaStream_t stream, bool synchronize) {
     const int target_mode_right_stride =
         compute_mode_right_stride(state_pool->d_trunc, target_qumode, num_qumodes);
 
     dim3 block_dim(256);
     dim3 grid_dim((state_pool->max_total_dim + block_dim.x - 1) / block_dim.x, batch_size);
 
-    apply_phase_rotation_kernel<<<grid_dim, block_dim>>>(
+    apply_phase_rotation_kernel<<<grid_dim, block_dim, 0, stream>>>(
         state_pool->data,
         state_pool->state_offsets,
         state_pool->state_dims,
@@ -181,23 +188,18 @@ void apply_phase_rotation_on_mode(CVStatePool* state_pool, const int* target_ind
         , state_pool->d_trunc, target_mode_right_stride
     );
 
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Phase Rotation kernel launch failed: " +
-                                std::string(cudaGetErrorString(err)));
-    }
-
-    // 同步等待内核完成
-    err = cudaDeviceSynchronize();
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Phase Rotation kernel synchronization failed: " +
-                                std::string(cudaGetErrorString(err)));
+    check_kernel_launch(cudaGetLastError(), "Phase Rotation kernel launch failed: ");
+    if (synchronize) {
+        check_kernel_launch(
+            cudaStreamSynchronize(stream),
+            "Phase Rotation kernel synchronization failed: ");
     }
 }
 
 void apply_phase_rotation(CVStatePool* state_pool, const int* target_indices,
                          int batch_size, double theta) {
-    apply_phase_rotation_on_mode(state_pool, target_indices, batch_size, theta, 0, 1);
+    apply_phase_rotation_on_mode(
+        state_pool, target_indices, batch_size, theta, 0, 1, nullptr, true);
 }
 
 /**
@@ -206,14 +208,15 @@ void apply_phase_rotation(CVStatePool* state_pool, const int* target_indices,
  */
 void apply_kerr_gate_on_mode(CVStatePool* state_pool, const int* target_indices,
                              int batch_size, double chi,
-                             int target_qumode, int num_qumodes) {
+                             int target_qumode, int num_qumodes,
+                             cudaStream_t stream, bool synchronize) {
     const int target_mode_right_stride =
         compute_mode_right_stride(state_pool->d_trunc, target_qumode, num_qumodes);
 
     dim3 block_dim(256);
     dim3 grid_dim((state_pool->max_total_dim + block_dim.x - 1) / block_dim.x, batch_size);
 
-    apply_kerr_kernel<<<grid_dim, block_dim>>>(
+    apply_kerr_kernel<<<grid_dim, block_dim, 0, stream>>>(
         state_pool->data,
         state_pool->state_offsets,
         state_pool->state_dims,
@@ -221,23 +224,18 @@ void apply_kerr_gate_on_mode(CVStatePool* state_pool, const int* target_indices,
         , state_pool->d_trunc, target_mode_right_stride
     );
 
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Kerr gate kernel launch failed: " +
-                                std::string(cudaGetErrorString(err)));
-    }
-
-    // 同步等待内核完成
-    err = cudaDeviceSynchronize();
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Kerr gate kernel synchronization failed: " +
-                                std::string(cudaGetErrorString(err)));
+    check_kernel_launch(cudaGetLastError(), "Kerr gate kernel launch failed: ");
+    if (synchronize) {
+        check_kernel_launch(
+            cudaStreamSynchronize(stream),
+            "Kerr gate kernel synchronization failed: ");
     }
 }
 
 void apply_kerr_gate(CVStatePool* state_pool, const int* target_indices,
                     int batch_size, double chi) {
-    apply_kerr_gate_on_mode(state_pool, target_indices, batch_size, chi, 0, 1);
+    apply_kerr_gate_on_mode(
+        state_pool, target_indices, batch_size, chi, 0, 1, nullptr, true);
 }
 
 /**
@@ -246,14 +244,15 @@ void apply_kerr_gate(CVStatePool* state_pool, const int* target_indices,
  */
 void apply_conditional_parity_on_mode(CVStatePool* state_pool, const int* target_indices,
                                       int batch_size, double parity,
-                                      int target_qumode, int num_qumodes) {
+                                      int target_qumode, int num_qumodes,
+                                      cudaStream_t stream, bool synchronize) {
     const int target_mode_right_stride =
         compute_mode_right_stride(state_pool->d_trunc, target_qumode, num_qumodes);
 
     dim3 block_dim(256);
     dim3 grid_dim((state_pool->max_total_dim + block_dim.x - 1) / block_dim.x, batch_size);
 
-    apply_conditional_parity_kernel<<<grid_dim, block_dim>>>(
+    apply_conditional_parity_kernel<<<grid_dim, block_dim, 0, stream>>>(
         state_pool->data,
         state_pool->state_offsets,
         state_pool->state_dims,
@@ -261,23 +260,18 @@ void apply_conditional_parity_on_mode(CVStatePool* state_pool, const int* target
         , state_pool->d_trunc, target_mode_right_stride
     );
 
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Conditional Parity kernel launch failed: " +
-                                std::string(cudaGetErrorString(err)));
-    }
-
-    // 同步等待内核完成
-    err = cudaDeviceSynchronize();
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Conditional Parity kernel synchronization failed: " +
-                                std::string(cudaGetErrorString(err)));
+    check_kernel_launch(cudaGetLastError(), "Conditional Parity kernel launch failed: ");
+    if (synchronize) {
+        check_kernel_launch(
+            cudaStreamSynchronize(stream),
+            "Conditional Parity kernel synchronization failed: ");
     }
 }
 
 void apply_conditional_parity(CVStatePool* state_pool, const int* target_indices,
                              int batch_size, double parity) {
-    apply_conditional_parity_on_mode(state_pool, target_indices, batch_size, parity, 0, 1);
+    apply_conditional_parity_on_mode(
+        state_pool, target_indices, batch_size, parity, 0, 1, nullptr, true);
 }
 
 /**
@@ -563,7 +557,7 @@ void axpy_state_device(CVStatePool* state_pool,
     }
 }
 
-void classify_vacuum_ray_device(const CVStatePool* state_pool,
+void classify_vacuum_ray_device(CVStatePool* state_pool,
                                 int state_id,
                                 double tolerance,
                                 int* is_zero,
@@ -585,28 +579,12 @@ void classify_vacuum_ray_device(const CVStatePool* state_pool,
 
     int host_is_zero = 1;
     int host_is_scaled_vacuum = 1;
-    int* d_is_zero = nullptr;
-    int* d_is_scaled_vacuum = nullptr;
-    cuDoubleComplex* d_scale = nullptr;
 
-    cudaError_t err = cudaMalloc(&d_is_zero, sizeof(int));
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Vacuum classification alloc failed: " +
-                                 std::string(cudaGetErrorString(err)));
-    }
-    err = cudaMalloc(&d_is_scaled_vacuum, sizeof(int));
-    if (err != cudaSuccess) {
-        cudaFree(d_is_zero);
-        throw std::runtime_error("Vacuum classification alloc failed: " +
-                                 std::string(cudaGetErrorString(err)));
-    }
-    err = cudaMalloc(&d_scale, sizeof(cuDoubleComplex));
-    if (err != cudaSuccess) {
-        cudaFree(d_is_zero);
-        cudaFree(d_is_scaled_vacuum);
-        throw std::runtime_error("Vacuum classification alloc failed: " +
-                                 std::string(cudaGetErrorString(err)));
-    }
+    size_t aux_size = 2 * sizeof(int) + sizeof(cuDoubleComplex);
+    char* aux = static_cast<char*>(state_pool->scratch_aux.ensure(aux_size));
+    int* d_is_zero = reinterpret_cast<int*>(aux);
+    int* d_is_scaled_vacuum = reinterpret_cast<int*>(aux + sizeof(int));
+    cuDoubleComplex* d_scale = reinterpret_cast<cuDoubleComplex*>(aux + 2 * sizeof(int));
 
     cudaMemcpy(d_is_zero, &host_is_zero, sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(d_is_scaled_vacuum, &host_is_scaled_vacuum, sizeof(int), cudaMemcpyHostToDevice);
@@ -617,14 +595,11 @@ void classify_vacuum_ray_device(const CVStatePool* state_pool,
     inspect_scaled_vacuum_kernel<<<grid_dim, block_dim>>>(
         state_ptr, state_dim, tolerance, d_is_zero, d_is_scaled_vacuum, d_scale);
 
-    err = cudaGetLastError();
+    cudaError_t err = cudaGetLastError();
     if (err == cudaSuccess) {
         err = cudaDeviceSynchronize();
     }
     if (err != cudaSuccess) {
-        cudaFree(d_is_zero);
-        cudaFree(d_is_scaled_vacuum);
-        cudaFree(d_scale);
         throw std::runtime_error("Vacuum classification kernel failed: " +
                                  std::string(cudaGetErrorString(err)));
     }
@@ -632,8 +607,100 @@ void classify_vacuum_ray_device(const CVStatePool* state_pool,
     cudaMemcpy(is_zero, d_is_zero, sizeof(int), cudaMemcpyDeviceToHost);
     cudaMemcpy(is_scaled_vacuum, d_is_scaled_vacuum, sizeof(int), cudaMemcpyDeviceToHost);
     cudaMemcpy(scale, d_scale, sizeof(cuDoubleComplex), cudaMemcpyDeviceToHost);
+}
 
-    cudaFree(d_is_zero);
-    cudaFree(d_is_scaled_vacuum);
-    cudaFree(d_scale);
+// =====================================================================
+// Cross-mode fused diagonal kernel
+// Applies PhaseRotation + Kerr + ConditionalParity across ALL target
+// modes in a single pass, eliminating per-mode kernel launch overhead.
+// =====================================================================
+
+/**
+ * Per-mode descriptor uploaded to device constant or global memory.
+ * phase(n) = -(theta * n + chi * n^2 + parity * pi * (n%2))
+ */
+struct FusedDiagonalOp {
+    int right_stride;    // D^(modes_to_the_right)
+    double theta;        // PhaseRotation parameter
+    double chi;          // Kerr parameter
+    double parity;       // ConditionalParity parameter
+};
+
+__global__ void apply_fused_diagonal_kernel(
+    cuDoubleComplex* __restrict__ state_data,
+    const size_t* __restrict__ state_offsets,
+    const int* __restrict__ state_dims,
+    const int* __restrict__ target_indices,
+    int batch_size,
+    const FusedDiagonalOp* __restrict__ ops,
+    int num_ops,
+    int trunc_dim
+) {
+    int batch_id = blockIdx.y;
+    if (batch_id >= batch_size) return;
+
+    int state_idx = target_indices[batch_id];
+    size_t flat_index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+
+    int current_dim = state_dims[state_idx];
+    if (flat_index >= static_cast<size_t>(current_dim)) return;
+
+    size_t offset = state_offsets[state_idx];
+    cuDoubleComplex* psi = &state_data[offset];
+
+    // Accumulate total phase from all ops
+    double total_phase = 0.0;
+    for (int op_idx = 0; op_idx < num_ops; ++op_idx) {
+        const FusedDiagonalOp& op = ops[op_idx];
+        int n = static_cast<int>((flat_index / static_cast<size_t>(op.right_stride)) % trunc_dim);
+        double dn = static_cast<double>(n);
+        total_phase += -(op.theta * dn + op.chi * dn * dn +
+                         op.parity * M_PI * static_cast<double>(n % 2));
+    }
+
+    cuDoubleComplex phase_factor = make_cuDoubleComplex(cos(total_phase), sin(total_phase));
+    cuDoubleComplex current_val = psi[flat_index];
+    psi[flat_index] = cuCmul(current_val, phase_factor);
+}
+
+/**
+ * Host-side: apply fused diagonal operations across multiple modes in one kernel.
+ *
+ * @param ops_host  Vector of per-mode descriptors (theta/chi/parity per mode)
+ * @param target_indices  Device pointer to target state IDs
+ * @param batch_size  Number of states
+ */
+void apply_fused_diagonal_gates(
+    CVStatePool* state_pool,
+    const int* target_indices,
+    int batch_size,
+    const std::vector<FusedDiagonalOp>& ops_host,
+    int num_qumodes
+) {
+    if (ops_host.empty() || batch_size <= 0) return;
+
+    // Upload ops to device via scratch_aux
+    const size_t ops_bytes = ops_host.size() * sizeof(FusedDiagonalOp);
+    FusedDiagonalOp* d_ops = static_cast<FusedDiagonalOp*>(
+        state_pool->scratch_aux.ensure(ops_bytes));
+    cudaError_t err = cudaMemcpy(d_ops, ops_host.data(), ops_bytes, cudaMemcpyHostToDevice);
+    if (err != cudaSuccess) {
+        throw std::runtime_error("Fused diagonal ops upload failed: " +
+                                 std::string(cudaGetErrorString(err)));
+    }
+
+    dim3 block_dim(256);
+    dim3 grid_dim((state_pool->max_total_dim + block_dim.x - 1) / block_dim.x, batch_size);
+
+    apply_fused_diagonal_kernel<<<grid_dim, block_dim>>>(
+        state_pool->data,
+        state_pool->state_offsets,
+        state_pool->state_dims,
+        target_indices, batch_size,
+        d_ops, static_cast<int>(ops_host.size()),
+        state_pool->d_trunc
+    );
+
+    check_kernel_launch(cudaGetLastError(), "Fused diagonal kernel launch failed: ");
+    check_kernel_launch(cudaDeviceSynchronize(), "Fused diagonal kernel sync failed: ");
 }

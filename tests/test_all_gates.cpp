@@ -992,6 +992,169 @@ TEST_F(GateTest, TestGaussianBlockSupportsControlledGaussianTrack) {
     }
 }
 
+TEST_F(GateTest, TestGaussianBlockSupportsControlledTwoModeGaussianTrack) {
+    try {
+        constexpr int cutoff = 10;
+        QuantumCircuit circuit(1, 2, cutoff, 2048);
+
+        const std::complex<double> xi(0.16, 0.05);
+        const double theta = 0.11;
+        const double rotation = -0.17;
+
+        circuit.add_gate(Gates::Hadamard(0));
+        circuit.add_gate(Gates::ConditionalTwoModeSqueezing(0, 0, 1, xi));
+        circuit.add_gate(Gates::ConditionalSUM(0, 0, 1, theta, 0.0));
+        circuit.add_gate(Gates::PhaseRotation(1, rotation));
+
+        circuit.build();
+
+        testing::internal::CaptureStdout();
+        circuit.execute();
+        const std::string execution_log = testing::internal::GetCapturedStdout();
+
+        EXPECT_NE(execution_log.find("Gaussian EDE块级加速已启用，块门数=3"), std::string::npos);
+
+        Reference::Vector vacuum(cutoff, {0.0, 0.0});
+        vacuum[0] = {1.0, 0.0};
+
+        Reference::Vector expected_low = Reference::tensor_product(vacuum, vacuum);
+        expected_low = apply_two_mode_transform(
+            expected_low,
+            cutoff,
+            2,
+            0,
+            1,
+            [xi](const Reference::Vector& local_state) {
+                return Reference::TwoModeGatesExtended::apply_two_mode_squeezing(local_state, xi);
+            });
+        expected_low = apply_two_mode_transform(
+            expected_low,
+            cutoff,
+            2,
+            0,
+            1,
+            [theta](const Reference::Vector& local_state) {
+                return Reference::TwoModeGatesExtended::apply_sum_gate(local_state, theta, 0.0);
+            });
+        expected_low = apply_single_mode_transform(
+            expected_low,
+            cutoff,
+            2,
+            1,
+            [rotation](const Reference::Vector& local_state) {
+                return Reference::DiagonalGates::apply_phase_rotation(local_state, rotation);
+            });
+
+        Reference::Vector expected_high = Reference::tensor_product(vacuum, vacuum);
+        expected_high = apply_two_mode_transform(
+            expected_high,
+            cutoff,
+            2,
+            0,
+            1,
+            [xi](const Reference::Vector& local_state) {
+                return Reference::TwoModeGatesExtended::apply_two_mode_squeezing(local_state, -xi);
+            });
+        expected_high = apply_two_mode_transform(
+            expected_high,
+            cutoff,
+            2,
+            0,
+            1,
+            [theta](const Reference::Vector& local_state) {
+                return Reference::TwoModeGatesExtended::apply_sum_gate(local_state, -theta, 0.0);
+            });
+        expected_high = apply_single_mode_transform(
+            expected_high,
+            cutoff,
+            2,
+            1,
+            [rotation](const Reference::Vector& local_state) {
+                return Reference::DiagonalGates::apply_phase_rotation(local_state, rotation);
+            });
+
+        const double branch_scale = 1.0 / std::sqrt(2.0);
+        for (std::complex<double>& amplitude : expected_low) {
+            amplitude *= branch_scale;
+        }
+        for (std::complex<double>& amplitude : expected_high) {
+            amplitude *= branch_scale;
+        }
+
+        Reference::Vector actual_low(static_cast<size_t>(cutoff * cutoff), {0.0, 0.0});
+        Reference::Vector actual_high(static_cast<size_t>(cutoff * cutoff), {0.0, 0.0});
+        for (int n0 = 0; n0 < cutoff; ++n0) {
+            std::vector<std::complex<double>> basis0(cutoff, {0.0, 0.0});
+            basis0[n0] = {1.0, 0.0};
+            for (int n1 = 0; n1 < cutoff; ++n1) {
+                std::vector<std::complex<double>> basis1(cutoff, {0.0, 0.0});
+                basis1[n1] = {1.0, 0.0};
+                const size_t linear_index = static_cast<size_t>(n0 * cutoff + n1);
+                actual_low[linear_index] = circuit.get_amplitude({0}, {basis0, basis1});
+                actual_high[linear_index] = circuit.get_amplitude({1}, {basis0, basis1});
+            }
+        }
+
+        EXPECT_LT(compute_error(expected_low, actual_low), 1e-4);
+        EXPECT_LT(compute_error(expected_high, actual_high), 1e-4);
+    } catch (const std::exception& e) {
+        FAIL() << "受控双模Gaussian block测试失败: " << e.what();
+    }
+}
+
+TEST_F(GateTest, TestPureQubitBlockPreservesGaussianSymbolicTrack) {
+    try {
+        constexpr int cutoff = 10;
+        QuantumCircuit circuit(1, 1, cutoff, 2048);
+
+        const std::complex<double> alpha(0.18, -0.04);
+        const std::complex<double> xi(0.13, 0.02);
+        const double rotation = 0.27;
+
+        circuit.add_gate(Gates::Displacement(0, alpha));
+        circuit.add_gate(Gates::Squeezing(0, xi));
+        circuit.add_gate(Gates::Hadamard(0));
+        circuit.add_gate(Gates::PhaseRotation(0, rotation));
+
+        circuit.build();
+
+        testing::internal::CaptureStdout();
+        circuit.execute();
+        const std::string execution_log = testing::internal::GetCapturedStdout();
+
+        EXPECT_NE(execution_log.find("Gaussian EDE块级加速已启用，块门数=2"), std::string::npos);
+        EXPECT_NE(execution_log.find("Gaussian EDE块级加速已启用，块门数=1"), std::string::npos);
+        EXPECT_EQ(execution_log.find("Gaussian EDE块回退到全量Fock执行"), std::string::npos);
+
+        Reference::Vector vacuum(cutoff, {0.0, 0.0});
+        vacuum[0] = {1.0, 0.0};
+
+        Reference::Vector expected =
+            Reference::SingleModeGates::apply_displacement_gate(vacuum, alpha);
+        expected = Reference::SingleModeGates::apply_squeezing_gate(expected, xi);
+        expected = Reference::DiagonalGates::apply_phase_rotation(expected, rotation);
+
+        const double branch_scale = 1.0 / std::sqrt(2.0);
+        for (std::complex<double>& amplitude : expected) {
+            amplitude *= branch_scale;
+        }
+
+        Reference::Vector actual_low(static_cast<size_t>(cutoff), {0.0, 0.0});
+        Reference::Vector actual_high(static_cast<size_t>(cutoff), {0.0, 0.0});
+        for (int n = 0; n < cutoff; ++n) {
+            std::vector<std::complex<double>> basis(cutoff, {0.0, 0.0});
+            basis[n] = {1.0, 0.0};
+            actual_low[static_cast<size_t>(n)] = circuit.get_amplitude({0}, {basis});
+            actual_high[static_cast<size_t>(n)] = circuit.get_amplitude({1}, {basis});
+        }
+
+        EXPECT_LT(compute_error(expected, actual_low), 1e-4);
+        EXPECT_LT(compute_error(expected, actual_high), 1e-4);
+    } catch (const std::exception& e) {
+        FAIL() << "纯qubit block保留Gaussian symbolic track测试失败: " << e.what();
+    }
+}
+
 TEST_F(GateTest, TestDiagonalNonGaussianBlockUsesGaussianMixture) {
     try {
         constexpr int cutoff = 16;

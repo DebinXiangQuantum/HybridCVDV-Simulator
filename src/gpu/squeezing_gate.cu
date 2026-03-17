@@ -398,7 +398,7 @@ void apply_squeezing_gate_gpu(
     // 分配临时缓冲区
     cuDoubleComplex* d_temp_buffer;
     const size_t buffer_stride = pool->max_total_dim;
-    cudaMalloc(&d_temp_buffer, static_cast<size_t>(batch_size) * buffer_stride * sizeof(cuDoubleComplex));
+    d_temp_buffer = static_cast<cuDoubleComplex*>(pool->scratch_temp.ensure(static_cast<size_t>(batch_size) * buffer_stride * sizeof(cuDoubleComplex)));
     
     // 启动内核
     dim3 block_dim(256);
@@ -433,9 +433,6 @@ void apply_squeezing_gate_gpu(
     );
     
     cudaDeviceSynchronize();
-    
-    // 清理临时缓冲区
-    cudaFree(d_temp_buffer);
 }
 
 /**

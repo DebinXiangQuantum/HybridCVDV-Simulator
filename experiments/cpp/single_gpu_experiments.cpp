@@ -1504,6 +1504,51 @@ void append_filtered_scaling_case(std::vector<ExperimentResult>& results,
     }
 }
 
+
+void add_qft_circuit_gates(QuantumCircuit& circuit, int num_qubits, int n, int a, int append) {
+    int total = n + a + append;
+    // 1. Initial Hadamards
+    for (int i = 0; i < a; ++i) {
+        circuit.add_gate(Gates::Hadamard(i));
+    }
+    
+    // 2. DV-to-CV transfer proxy
+    for (int q = 0; q < total; ++q) {
+        circuit.add_gate(Gates::RotationX(q, M_PI / 4.0));
+    }
+    circuit.add_gate(Gates::Displacement(0, Complex(0.29, 0.0)));
+    
+    // 3. CV space QFT
+    circuit.add_gate(Gates::PhaseRotation(0, M_PI / 2.0));
+    
+    // 4. CV-to-DV transfer proxy
+    for (int q = 0; q < total; ++q) {
+        circuit.add_gate(Gates::RotationZ(q, M_PI / 4.0));
+    }
+    circuit.add_gate(Gates::Squeezing(0, Complex(0.29, 0.0)));
+    
+    // 5. Measurement Hadamards
+    for (int i = 0; i < n; ++i) {
+        circuit.add_gate(Gates::Hadamard(a + i));
+    }
+}
+
+void add_shors_circuit_gates(QuantumCircuit& circuit, int num_qubits, int num_qumodes, int N, int a) {
+    // 1. GKP preparation proxies
+    for (int qm = 0; qm < std::min(num_qumodes, 2); ++qm) {
+        circuit.add_gate(Gates::Squeezing(qm, Complex(0.222, 0.0)));
+        for (int i = 0; i < 2; ++i) { // Reduced rounds for benchmark
+            circuit.add_gate(Gates::Hadamard(0));
+            circuit.add_gate(Gates::ConditionalDisplacement(0, qm, Complex(0.5, 0.0)));
+        }
+    }
+    
+    // 2. Modular exponentiation proxies
+    for (int i = 0; i < 2; ++i) {
+        circuit.add_gate(Gates::JaynesCummings(0, 0, M_PI / 4.0));
+        circuit.add_gate(Gates::JaynesCummings(0, 1, M_PI / 4.0));
+    }
+}
 std::vector<ExperimentResult> run_scaling_suite(const std::string& name_filter) {
     std::vector<ExperimentResult> results;
     const int cat_max_states = 64;
@@ -1709,7 +1754,113 @@ std::vector<ExperimentResult> run_scaling_suite(const std::string& name_filter) 
         });
     }
 
-    return results;
+    // SC26 requested scaling: qubits 3-10, qumodes 3-7
+    for (int nq : {3, 4, 5, 6, 7, 8, 9, 10}) {
+        for (int nm : {3, 4, 5, 6, 7}) {
+            const int cutoff = 16;
+            const std::string sc_vqe_name = "sc26_vqe_nq" + std::to_string(nq) + 
+                                            "_nm" + std::to_string(nm) + "_c" + std::to_string(cutoff);
+            append_filtered_scaling_case(results, name_filter, sc_vqe_name, [nq, nm, cutoff, sc_vqe_name, qaoa_max_states]() {
+                const std::vector<double> params = make_vqe_parameters(2, nq, nm);
+                ExperimentResult result = run_scaling_case(
+                    sc_vqe_name,
+                    "vqe_circuit",
+                    nq,
+                    nm,
+                    cutoff,
+                    2,
+                    qaoa_max_states,
+                    nullptr, // Use default vacuum
+                    [nq, nm, params](QuantumCircuit& circuit) { add_vqe_circuit_gates(circuit, nq, nm, 2, params); });
+                result.params["source_circuit"] = "circuit/src/vqe_circuit.cpp";
+                return result;
+            });
+
+            const std::string sc_jch_name = "sc26_jch_nq" + std::to_string(nq) + 
+                                            "_nm" + std::to_string(nm) + "_c" + std::to_string(cutoff);
+            append_filtered_scaling_case(results, name_filter, sc_jch_name, [nq, nm, cutoff, sc_jch_name, jch_max_states]() {
+                ExperimentResult result = run_scaling_case(
+                    sc_jch_name,
+                    "jch_simulation_circuit",
+                    nq,
+                    nm,
+                    cutoff,
+                    5,
+                    jch_max_states,
+                    nullptr, // Use default vacuum
+                    [nq, nm](QuantumCircuit& circuit) {
+                        add_jch_simulation_circuit_gates(circuit, nm, nq, 1.0, 1.0, 1.0, 0.5, 0.1, 5);
+                    });
+                result.params["source_circuit"] = "circuit/src/jch_simulation_circuit.cpp";
+                return result;
+            });
+        }
+    }
+
+    
+    // Additional SC26 cases
+    for (int cutoff : {16, 32}) {
+        const std::string name = "sc26_cat_c" + std::to_string(cutoff);
+        append_filtered_scaling_case(results, name_filter, name, [cutoff, name, cat_max_states]() {
+            return run_scaling_case(name, "cat_state_circuit", 1, 1, cutoff, 8, cat_max_states, nullptr,
+                [](QuantumCircuit& circuit) { add_cat_state_circuit_gates(circuit, 1.0, 0); });
+        });
+    }
+
+    for (int cutoff : {16, 32}) {
+        const std::string name = "sc26_gkp_c" + std::to_string(cutoff);
+        append_filtered_scaling_case(results, name_filter, name, [cutoff, name, gkp_max_states]() {
+            return run_scaling_case(name, "gkp_state_circuit", 1, 1, cutoff, 9, gkp_max_states, nullptr,
+                [](QuantumCircuit& circuit) { add_gkp_state_circuit_gates(circuit, 9, 0.222, 0); });
+        });
+    }
+
+    for (int nm : {1, 2, 4, 8}) {
+        const int cutoff = 16;
+        const std::string name = "sc26_qaoa_nm" + std::to_string(nm) + "_c" + std::to_string(cutoff);
+        append_filtered_scaling_case(results, name_filter, name, [nm, cutoff, name, qaoa_max_states]() {
+            const std::vector<double> params = make_qaoa_angles(2);
+            return run_scaling_case(name, "qaoa_circuit", 1, nm, cutoff, 2, qaoa_max_states, nullptr,
+                [nm, params](QuantumCircuit& circuit) { add_cv_qaoa_circuit_gates(circuit, nm, params, 0.5, 1.0, 2); });
+        });
+    }
+
+    for (int nq : {3, 5, 7, 9}) {
+        for (int cutoff : {16, 32}) {
+            if (cutoff == 32 && nq > 5) continue; // Skip large combinations
+            const std::string name = "sc26_qft_nq" + std::to_string(nq) + "_c" + std::to_string(cutoff);
+            append_filtered_scaling_case(results, name_filter, name, [nq, cutoff, name, qaoa_max_states]() {
+                int n = nq / 2 + 1;
+                int a = 1;
+                int append = nq - n - a;
+                return run_scaling_case(name, "qft_circuit", nq, 1, cutoff, 10, qaoa_max_states, nullptr,
+                    [nq, n, a, append](QuantumCircuit& circuit) { add_qft_circuit_gates(circuit, nq, n, a, append); });
+            });
+        }
+    }
+
+    for (int cutoff : {8, 16}) {
+        const std::string name = "sc26_shors_c" + std::to_string(cutoff);
+        append_filtered_scaling_case(results, name_filter, name, [cutoff, name, qaoa_max_states]() {
+            return run_scaling_case(name, "shors_circuit", 1, 3, cutoff, 10, qaoa_max_states, nullptr,
+                [](QuantumCircuit& circuit) { add_shors_circuit_gates(circuit, 1, 3, 15, 2); });
+        });
+    }
+
+    for (int nq : {2, 4, 8, 16}) {
+        const int cutoff = 16;
+        const std::string cvtodv = "sc26_transfer_CVtoDV_nq" + std::to_string(nq) + "_c" + std::to_string(cutoff);
+        append_filtered_scaling_case(results, name_filter, cvtodv, [nq, cutoff, cvtodv, qaoa_max_states]() {
+            return run_scaling_case(cvtodv, "state_transfer_CVtoDV_circuit", nq, 1, cutoff, 8, qaoa_max_states, nullptr,
+                [nq](QuantumCircuit& circuit) { add_state_transfer_cvtodv_gates(circuit, nq, 1, 0.29, true); });
+        });
+        const std::string dvtocv = "sc26_transfer_DVtoCV_nq" + std::to_string(nq) + "_c" + std::to_string(cutoff);
+        append_filtered_scaling_case(results, name_filter, dvtocv, [nq, cutoff, dvtocv, qaoa_max_states]() {
+            return run_scaling_case(dvtocv, "state_transfer_DVtoCV_circuit", nq, 1, cutoff, 8, qaoa_max_states, nullptr,
+                [nq](QuantumCircuit& circuit) { add_state_transfer_dvtocv_gates(circuit, nq, 1, 0.29, true); });
+        });
+    }
+return results;
 }
 
 void append_results(std::vector<ExperimentResult>& target, const std::vector<ExperimentResult>& source) {

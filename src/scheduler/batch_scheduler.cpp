@@ -8,11 +8,14 @@
 
 // 包含GPU内核头文件
 void apply_phase_rotation_on_mode(CVStatePool* pool, const int* targets, int batch_size, double theta,
-                                  int target_qumode, int num_qumodes);
+                                  int target_qumode, int num_qumodes,
+                                  cudaStream_t stream = nullptr, bool synchronize = true);
 void apply_kerr_gate_on_mode(CVStatePool* pool, const int* targets, int batch_size, double chi,
-                             int target_qumode, int num_qumodes);
+                             int target_qumode, int num_qumodes,
+                             cudaStream_t stream = nullptr, bool synchronize = true);
 void apply_conditional_parity_on_mode(CVStatePool* pool, const int* targets, int batch_size, double parity,
-                                      int target_qumode, int num_qumodes);
+                                      int target_qumode, int num_qumodes,
+                                      cudaStream_t stream = nullptr, bool synchronize = true);
 void apply_creation_operator_on_mode(CVStatePool* pool, const int* targets, int batch_size,
                                      int target_qumode, int num_qumodes);
 void apply_annihilation_operator_on_mode(CVStatePool* pool, const int* targets, int batch_size,
@@ -58,6 +61,23 @@ bool same_batch_signature(const BatchTask& lhs, const BatchTask& rhs) {
            lhs.params == rhs.params;
 }
 
+bool is_level0_gate(GateType gate_type) {
+    switch (gate_type) {
+        case GateType::PHASE_ROTATION:
+        case GateType::KERR_GATE:
+        case GateType::CONDITIONAL_PARITY:
+            return true;
+        default:
+            return false;
+    }
+}
+
+void check_cuda_status(cudaError_t err, const char* message) {
+    if (err != cudaSuccess) {
+        throw std::runtime_error(std::string(message) + cudaGetErrorString(err));
+    }
+}
+
 }  // namespace
 
 /**
@@ -71,6 +91,10 @@ BatchScheduler::BatchScheduler(CVStatePool* state_pool, size_t max_batch_size)
     if (!state_pool) {
         throw std::invalid_argument("状态池指针不能为空");
     }
+}
+
+BatchScheduler::~BatchScheduler() {
+    reset_graph();
 }
 
 /**
@@ -148,6 +172,7 @@ void BatchScheduler::clear() {
     total_tasks_processed_ = 0;
     total_batches_executed_ = 0;
     total_execution_time_ = 0.0;
+    reset_graph();
 }
 
 // ==========================================
@@ -155,36 +180,76 @@ void BatchScheduler::clear() {
 // ==========================================
 
 void BatchScheduler::execute_with_cuda_graph() {
-    if (!graph_captured_) {
-        if (!stream_) {
-            cudaStreamCreate(&stream_);
+    if (!pending_batch_.empty()) {
+        std::string reason;
+        if (!can_capture_pending_batch_with_cuda_graph(&reason)) {
+            throw std::runtime_error("CUDA Graph capture unsupported: " + reason);
         }
-        
-        // 注意：要使 Capture 完全生效，execute_pending_tasks() 内部的 kernel 必须提交到该 stream_
-        // 目前代码演示了框架级 API，以便能够被 VQE 循环等上层调用，真正落地需在 kernel 调用里传 stream_
-        cudaStreamBeginCapture(stream_, cudaStreamCaptureModeGlobal);
-        
-        execute_pending_tasks();
-        
-        cudaStreamEndCapture(stream_, &exec_graph_);
-        cudaGraphInstantiate(&graph_instance_, exec_graph_, NULL, NULL, 0);
-        graph_captured_ = true;
-        std::cout << "[HPC Opt] CUDA Graph 录制完成" << std::endl;
+
+        reset_graph();
+        if (!stream_) {
+            check_cuda_status(cudaStreamCreate(&stream_), "Failed to create CUDA stream: ");
+        }
+
+        const auto merged_batch = merge_similar_tasks(pending_batch_);
+        captured_graph_tasks_.clear();
+        captured_graph_tasks_.reserve(merged_batch.size());
+
+        for (const auto& task : merged_batch) {
+            CapturedGraphTask prepared{task, nullptr};
+            if (!task.target_state_ids.empty()) {
+                check_cuda_status(
+                    cudaMalloc(&prepared.d_target_ids, task.target_state_ids.size() * sizeof(int)),
+                    "Failed to allocate CUDA Graph target buffer: ");
+                check_cuda_status(
+                    cudaMemcpy(
+                        prepared.d_target_ids,
+                        task.target_state_ids.data(),
+                        task.target_state_ids.size() * sizeof(int),
+                        cudaMemcpyHostToDevice),
+                    "Failed to upload CUDA Graph target buffer: ");
+            }
+            captured_graph_tasks_.push_back(prepared);
+        }
+
+        check_cuda_status(
+            cudaStreamBeginCapture(stream_, cudaStreamCaptureModeGlobal),
+            "Failed to begin CUDA Graph capture: ");
+        try {
+            execute_prepared_level0_batch(captured_graph_tasks_, stream_);
+            check_cuda_status(
+                cudaStreamEndCapture(stream_, &exec_graph_),
+                "Failed to end CUDA Graph capture: ");
+            check_cuda_status(
+                cudaGraphInstantiate(&graph_instance_, exec_graph_, nullptr, nullptr, 0),
+                "Failed to instantiate CUDA Graph: ");
+            graph_captured_ = true;
+            pending_batch_.clear();
+            current_batch_memory_ = 0;
+            std::cout << "[HPC Opt] CUDA Graph 录制完成" << std::endl;
+        } catch (...) {
+            cudaStreamEndCapture(stream_, &exec_graph_);
+            release_captured_graph_tasks();
+            throw;
+        }
+    } else if (!graph_captured_) {
+        std::cout << "[HPC Opt] 没有可录制的CUDA Graph任务" << std::endl;
+        return;
     }
 
     // 极速下发已录制的 CUDA Graph
     auto start_time = std::chrono::high_resolution_clock::now();
-    
-    cudaGraphLaunch(graph_instance_, stream_);
-    cudaStreamSynchronize(stream_);
-    
+
+    check_cuda_status(cudaGraphLaunch(graph_instance_, stream_), "Failed to launch CUDA Graph: ");
+    check_cuda_status(cudaStreamSynchronize(stream_), "Failed to synchronize CUDA Graph stream: ");
+
     auto end_time = std::chrono::high_resolution_clock::now();
     double execution_time = std::chrono::duration<double>(end_time - start_time).count();
-    
+
     // 这里做简单的性能统计，不准确累计 tasks 数量因为那是图内部的事
     total_execution_time_ += execution_time;
     total_batches_executed_ += 1;
-    
+
     std::cout << "[HPC Opt] CUDA Graph 极速下发完成: 耗时 " 
               << execution_time * 1000 << " ms" << std::endl;
 }
@@ -195,9 +260,106 @@ void BatchScheduler::reset_graph() {
         cudaGraphDestroy(exec_graph_);
         graph_captured_ = false;
     }
+    release_captured_graph_tasks();
     if (stream_) {
         cudaStreamDestroy(stream_);
         stream_ = nullptr;
+    }
+}
+
+bool BatchScheduler::can_capture_pending_batch_with_cuda_graph(std::string* reason) const {
+    if (!task_queue_.empty()) {
+        if (reason) {
+            *reason = "priority queue tasks are not capture-safe yet";
+        }
+        return false;
+    }
+    if (pending_batch_.empty()) {
+        if (reason) {
+            *reason = "pending batch is empty";
+        }
+        return false;
+    }
+
+    for (const auto& task : pending_batch_) {
+        if (!is_level0_gate(task.gate_type)) {
+            if (reason) {
+                *reason = "only Level 0 diagonal gates are supported, got gate type " +
+                          std::to_string(static_cast<int>(task.gate_type));
+            }
+            return false;
+        }
+        if (task.target_state_ids.empty()) {
+            if (reason) {
+                *reason = "batch task has no target states";
+            }
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void BatchScheduler::release_captured_graph_tasks() {
+    for (auto& task : captured_graph_tasks_) {
+        if (task.d_target_ids) {
+            cudaFree(task.d_target_ids);
+            task.d_target_ids = nullptr;
+        }
+    }
+    captured_graph_tasks_.clear();
+}
+
+void BatchScheduler::execute_prepared_level0_batch(const std::vector<CapturedGraphTask>& batch,
+                                                   cudaStream_t stream) {
+    const int num_qumodes = infer_num_qumodes_from_pool(state_pool_);
+
+    for (const auto& prepared : batch) {
+        if (!prepared.d_target_ids || prepared.task.target_state_ids.empty()) {
+            continue;
+        }
+
+        const BatchTask& task = prepared.task;
+        const double param = task.params.empty() ? 0.0 : task.params[0].real();
+        const int target_qumode = get_primary_target_qumode(task);
+
+        switch (task.gate_type) {
+            case GateType::PHASE_ROTATION:
+                apply_phase_rotation_on_mode(
+                    state_pool_,
+                    prepared.d_target_ids,
+                    static_cast<int>(task.target_state_ids.size()),
+                    param,
+                    target_qumode,
+                    num_qumodes,
+                    stream,
+                    false);
+                break;
+            case GateType::KERR_GATE:
+                apply_kerr_gate_on_mode(
+                    state_pool_,
+                    prepared.d_target_ids,
+                    static_cast<int>(task.target_state_ids.size()),
+                    param,
+                    target_qumode,
+                    num_qumodes,
+                    stream,
+                    false);
+                break;
+            case GateType::CONDITIONAL_PARITY:
+                apply_conditional_parity_on_mode(
+                    state_pool_,
+                    prepared.d_target_ids,
+                    static_cast<int>(task.target_state_ids.size()),
+                    param,
+                    target_qumode,
+                    num_qumodes,
+                    stream,
+                    false);
+                break;
+            default:
+                throw std::runtime_error("unexpected non-Level0 gate during CUDA Graph capture");
+        }
     }
 }
 
@@ -311,11 +473,13 @@ void BatchScheduler::execute_level0_batch(const std::vector<BatchTask>& batch) {
     for (const auto& task : batch) {
         if (task.target_state_ids.empty()) continue;
 
-        // 上传状态ID到GPU
-        int* d_target_ids = nullptr;
-        cudaMalloc(&d_target_ids, task.target_state_ids.size() * sizeof(int));
-        cudaMemcpy(d_target_ids, task.target_state_ids.data(),
-                   task.target_state_ids.size() * sizeof(int), cudaMemcpyHostToDevice);
+        // 上传状态ID到GPU (scratch buffer)
+        const size_t ids_bytes = task.target_state_ids.size() * sizeof(int);
+        int* d_target_ids = static_cast<int*>(state_pool_->scratch_target_ids.ensure(ids_bytes));
+        check_cuda_status(
+            cudaMemcpy(d_target_ids, task.target_state_ids.data(),
+                       ids_bytes, cudaMemcpyHostToDevice),
+            "execute_level0_batch: cudaMemcpy target_ids failed: ");
 
         double param = task.params.empty() ? 0.0 : task.params[0].real();
         const int target_qumode = get_primary_target_qumode(task);
@@ -336,8 +500,6 @@ void BatchScheduler::execute_level0_batch(const std::vector<BatchTask>& batch) {
             default:
                 break;
         }
-
-        cudaFree(d_target_ids);
     }
 }
 
@@ -350,10 +512,12 @@ void BatchScheduler::execute_level1_batch(const std::vector<BatchTask>& batch) {
     for (const auto& task : batch) {
         if (task.target_state_ids.empty()) continue;
 
-        int* d_target_ids = nullptr;
-        cudaMalloc(&d_target_ids, task.target_state_ids.size() * sizeof(int));
-        cudaMemcpy(d_target_ids, task.target_state_ids.data(),
-                   task.target_state_ids.size() * sizeof(int), cudaMemcpyHostToDevice);
+        const size_t ids_bytes = task.target_state_ids.size() * sizeof(int);
+        int* d_target_ids = static_cast<int*>(state_pool_->scratch_target_ids.ensure(ids_bytes));
+        check_cuda_status(
+            cudaMemcpy(d_target_ids, task.target_state_ids.data(),
+                       ids_bytes, cudaMemcpyHostToDevice),
+            "execute_level1_batch: cudaMemcpy target_ids failed: ");
 
         const int target_qumode = get_primary_target_qumode(task);
 
@@ -369,8 +533,6 @@ void BatchScheduler::execute_level1_batch(const std::vector<BatchTask>& batch) {
             default:
                 break;
         }
-
-        cudaFree(d_target_ids);
     }
 }
 
@@ -383,10 +545,12 @@ void BatchScheduler::execute_level2_batch(const std::vector<BatchTask>& batch) {
     for (const auto& task : batch) {
         if (task.target_state_ids.empty()) continue;
 
-        int* d_target_ids = nullptr;
-        cudaMalloc(&d_target_ids, task.target_state_ids.size() * sizeof(int));
-        cudaMemcpy(d_target_ids, task.target_state_ids.data(),
-                   task.target_state_ids.size() * sizeof(int), cudaMemcpyHostToDevice);
+        const size_t ids_bytes = task.target_state_ids.size() * sizeof(int);
+        int* d_target_ids = static_cast<int*>(state_pool_->scratch_target_ids.ensure(ids_bytes));
+        check_cuda_status(
+            cudaMemcpy(d_target_ids, task.target_state_ids.data(),
+                       ids_bytes, cudaMemcpyHostToDevice),
+            "execute_level2_batch: cudaMemcpy target_ids failed: ");
 
         const int target_qumode = get_primary_target_qumode(task);
 
@@ -403,8 +567,6 @@ void BatchScheduler::execute_level2_batch(const std::vector<BatchTask>& batch) {
                                      std::abs(task.params[0]), std::arg(task.params[0]),
                                      target_qumode, num_qumodes);
         }
-
-        cudaFree(d_target_ids);
     }
 }
 

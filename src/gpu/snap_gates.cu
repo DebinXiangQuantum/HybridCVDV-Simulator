@@ -287,9 +287,8 @@ void apply_multisnap_on_mode(CVStatePool* state_pool, const int* target_indices,
         compute_mode_right_stride(state_pool->d_trunc, target_qumode, num_qumodes);
 
     // 将 phase_map 上传到设备
-    double* d_phase_map = nullptr;
-    cudaMalloc(&d_phase_map, phase_map.size() * sizeof(double));
-    cudaMemcpy(d_phase_map, phase_map.data(), 
+    double* d_phase_map = static_cast<double*>(state_pool->scratch_aux.ensure(phase_map.size() * sizeof(double)));
+    cudaMemcpy(d_phase_map, phase_map.data(),
                phase_map.size() * sizeof(double), cudaMemcpyHostToDevice);
 
     dim3 block_dim(256);
@@ -306,14 +305,12 @@ void apply_multisnap_on_mode(CVStatePool* state_pool, const int* target_indices,
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        cudaFree(d_phase_map);
         throw std::runtime_error("Multi-SNAP kernel launch failed: " +
                                 std::string(cudaGetErrorString(err)));
     }
 
     err = cudaDeviceSynchronize();
-    cudaFree(d_phase_map);
-    
+
     if (err != cudaSuccess) {
         throw std::runtime_error("Multi-SNAP kernel synchronization failed: " +
                                 std::string(cudaGetErrorString(err)));
@@ -373,9 +370,8 @@ void apply_csnap(CVStatePool* state_pool, const int* target_indices,
 void apply_cmultisnap(CVStatePool* state_pool, const int* target_indices,
                       int batch_size, const std::vector<double>& phase_map, int cutoff) {
     // 将 phase_map 上传到设备
-    double* d_phase_map = nullptr;
-    cudaMalloc(&d_phase_map, phase_map.size() * sizeof(double));
-    cudaMemcpy(d_phase_map, phase_map.data(), 
+    double* d_phase_map = static_cast<double*>(state_pool->scratch_aux.ensure(phase_map.size() * sizeof(double)));
+    cudaMemcpy(d_phase_map, phase_map.data(),
                phase_map.size() * sizeof(double), cudaMemcpyHostToDevice);
 
     dim3 block_dim(256);
@@ -391,14 +387,12 @@ void apply_cmultisnap(CVStatePool* state_pool, const int* target_indices,
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        cudaFree(d_phase_map);
         throw std::runtime_error("CMulti-SNAP kernel launch failed: " +
                                 std::string(cudaGetErrorString(err)));
     }
 
     err = cudaDeviceSynchronize();
-    cudaFree(d_phase_map);
-    
+
     if (err != cudaSuccess) {
         throw std::runtime_error("CMulti-SNAP kernel synchronization failed: " +
                                 std::string(cudaGetErrorString(err)));

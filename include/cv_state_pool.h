@@ -5,6 +5,43 @@
 
 #include <vector>
 #include <cstdint>
+#include <stdexcept>
+#include <string>
+
+/**
+ * High-water-mark GPU scratch buffer.
+ * Grows on demand, never shrinks during a circuit execution.
+ * Eliminates per-gate cudaMalloc/cudaFree overhead.
+ */
+struct GPUScratchBuffer {
+    void* ptr = nullptr;
+    size_t capacity_bytes = 0;
+
+    void* ensure(size_t required_bytes) {
+        if (required_bytes <= capacity_bytes) return ptr;
+        if (ptr) { cudaFree(ptr); ptr = nullptr; capacity_bytes = 0; }
+        cudaError_t err = cudaMalloc(&ptr, required_bytes);
+        if (err != cudaSuccess) {
+            throw std::runtime_error(
+                "GPUScratchBuffer::ensure cudaMalloc failed (" +
+                std::to_string(required_bytes) + " bytes): " +
+                std::string(cudaGetErrorString(err)));
+        }
+        capacity_bytes = required_bytes;
+        return ptr;
+    }
+
+    void release() {
+        if (ptr) { cudaFree(ptr); ptr = nullptr; capacity_bytes = 0; }
+    }
+
+    ~GPUScratchBuffer() { release(); }
+
+    // Non-copyable
+    GPUScratchBuffer() = default;
+    GPUScratchBuffer(const GPUScratchBuffer&) = delete;
+    GPUScratchBuffer& operator=(const GPUScratchBuffer&) = delete;
+};
 
 /**
  * 连续变量状态池 (CV State Pool)
@@ -155,6 +192,11 @@ struct CVStatePool {
      * @return 活跃状态ID的向量
      */
     std::vector<int> get_active_state_ids() const;
+
+    // ── Scratch buffers (reused across gate executions) ──────────────
+    GPUScratchBuffer scratch_target_ids;  // for d_target_ids (int arrays)
+    GPUScratchBuffer scratch_temp;        // for gate temp buffers (cuDoubleComplex)
+    GPUScratchBuffer scratch_aux;         // for small auxiliary allocations
 
 private:
     struct FreeBlock {

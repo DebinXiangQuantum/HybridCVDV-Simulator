@@ -21,6 +21,11 @@ namespace {
 
 constexpr double kPi = 3.14159265358979323846;
 
+enum class NonGaussianProfile {
+    General,
+    DiagonalOnly
+};
+
 struct BenchmarkOptions {
     int num_qubits = 2;
     int num_qumodes = 3;
@@ -28,6 +33,11 @@ struct BenchmarkOptions {
     int max_states = 4096;
     int total_gates = 72;
     std::uint64_t seed = 20260315ULL;
+    bool gaussian_only = false;
+    int non_gaussian_gates = -1;
+    NonGaussianProfile non_gaussian_profile = NonGaussianProfile::General;
+    bool exclude_ladder_gates = false;
+    bool exclude_advanced_hybrid_gates = false;
 };
 
 struct BuiltGate {
@@ -73,6 +83,16 @@ std::complex<double> random_complex(std::mt19937_64& rng, double radius_low, dou
     return std::polar(radius, phase);
 }
 
+NonGaussianProfile parse_non_gaussian_profile(const std::string& value) {
+    if (value == "general") {
+        return NonGaussianProfile::General;
+    }
+    if (value == "diagonal") {
+        return NonGaussianProfile::DiagonalOnly;
+    }
+    throw std::invalid_argument("unknown non-gaussian-profile: " + value);
+}
+
 BenchmarkOptions parse_args(int argc, char** argv) {
     BenchmarkOptions options;
 
@@ -97,6 +117,17 @@ BenchmarkOptions parse_args(int argc, char** argv) {
             options.total_gates = std::stoi(require_value("--total-gates"));
         } else if (arg == "--seed") {
             options.seed = static_cast<std::uint64_t>(std::stoull(require_value("--seed")));
+        } else if (arg == "--gaussian-only") {
+            options.gaussian_only = true;
+        } else if (arg == "--non-gaussian-gates") {
+            options.non_gaussian_gates = std::stoi(require_value("--non-gaussian-gates"));
+        } else if (arg == "--non-gaussian-profile") {
+            options.non_gaussian_profile =
+                parse_non_gaussian_profile(require_value("--non-gaussian-profile"));
+        } else if (arg == "--exclude-ladder-gates") {
+            options.exclude_ladder_gates = true;
+        } else if (arg == "--exclude-advanced-hybrid-gates") {
+            options.exclude_advanced_hybrid_gates = true;
         } else {
             throw std::invalid_argument("unknown argument: " + arg);
         }
@@ -113,6 +144,15 @@ BenchmarkOptions parse_args(int argc, char** argv) {
     }
     if (options.max_states <= 0 || options.total_gates <= 0) {
         throw std::invalid_argument("max_states and total_gates must be positive");
+    }
+    if (options.gaussian_only && options.non_gaussian_gates >= 0) {
+        throw std::invalid_argument("gaussian-only and non-gaussian-gates cannot be used together");
+    }
+    if (options.non_gaussian_gates > options.total_gates) {
+        throw std::invalid_argument("non-gaussian-gates cannot exceed total-gates");
+    }
+    if (options.non_gaussian_gates < -1) {
+        throw std::invalid_argument("non-gaussian-gates must be -1 or a non-negative integer");
     }
 
     return options;
@@ -273,10 +313,77 @@ BuiltGate make_random_two_mode_hybrid(std::mt19937_64& rng, const BenchmarkOptio
     };
 }
 
+std::vector<GateBuilder> make_gaussian_builders(const BenchmarkOptions& options) {
+    return {
+        [&](std::mt19937_64& local_rng) { return make_random_single_mode_gaussian(local_rng, options); },
+        [&](std::mt19937_64& local_rng) { return make_random_two_mode_gaussian(local_rng, options); }
+    };
+}
+
+std::vector<GateBuilder> make_non_gaussian_builders(const BenchmarkOptions& options) {
+    if (options.non_gaussian_profile == NonGaussianProfile::DiagonalOnly) {
+        return {
+            [&](std::mt19937_64& local_rng) { return make_random_diagonal_non_gaussian(local_rng, options); }
+        };
+    }
+
+    return {
+        [&](std::mt19937_64& local_rng) { return make_random_diagonal_non_gaussian(local_rng, options); },
+        [&](std::mt19937_64& local_rng) { return make_random_ladder_gate(local_rng, options); }
+    };
+}
+
+void append_random_gates(std::vector<BuiltGate>* gates,
+                         int count,
+                         const std::vector<GateBuilder>& builders,
+                         std::mt19937_64* rng,
+                         bool ensure_coverage) {
+    if (!gates || !rng || count <= 0 || builders.empty()) {
+        return;
+    }
+
+    if (ensure_coverage) {
+        const int coverage = std::min(count, static_cast<int>(builders.size()));
+        for (int i = 0; i < coverage; ++i) {
+            gates->push_back(builders[static_cast<size_t>(i)](*rng));
+        }
+    }
+
+    while (static_cast<int>(gates->size()) < count) {
+        const int family = random_index(*rng, static_cast<int>(builders.size()));
+        gates->push_back(builders[static_cast<size_t>(family)](*rng));
+    }
+}
+
 std::vector<BuiltGate> build_random_circuit(const BenchmarkOptions& options) {
     std::mt19937_64 rng(options.seed);
     std::vector<BuiltGate> gates;
     gates.reserve(static_cast<size_t>(options.total_gates));
+
+    if (options.gaussian_only) {
+        const std::vector<GateBuilder> gaussian_builders = make_gaussian_builders(options);
+        append_random_gates(&gates, options.total_gates, gaussian_builders, &rng, true);
+        std::shuffle(gates.begin(), gates.end(), rng);
+        return gates;
+    }
+
+    if (options.non_gaussian_gates >= 0) {
+        const int gaussian_gate_count = options.total_gates - options.non_gaussian_gates;
+        std::vector<BuiltGate> gaussian_gates;
+        std::vector<BuiltGate> non_gaussian_gates;
+        gaussian_gates.reserve(static_cast<size_t>(gaussian_gate_count));
+        non_gaussian_gates.reserve(static_cast<size_t>(options.non_gaussian_gates));
+
+        const std::vector<GateBuilder> gaussian_builders = make_gaussian_builders(options);
+        const std::vector<GateBuilder> non_gaussian_builders = make_non_gaussian_builders(options);
+        append_random_gates(&gaussian_gates, gaussian_gate_count, gaussian_builders, &rng, true);
+        append_random_gates(&non_gaussian_gates, options.non_gaussian_gates, non_gaussian_builders, &rng, true);
+
+        gates.insert(gates.end(), gaussian_gates.begin(), gaussian_gates.end());
+        gates.insert(gates.end(), non_gaussian_gates.begin(), non_gaussian_gates.end());
+        std::shuffle(gates.begin(), gates.end(), rng);
+        return gates;
+    }
 
     gates.push_back({Gates::Hadamard(0), "Hadamard"});
     gates.push_back({Gates::Hadamard(1), "Hadamard"});
@@ -288,10 +395,17 @@ std::vector<BuiltGate> build_random_circuit(const BenchmarkOptions& options) {
         [&](std::mt19937_64& local_rng) { return make_random_single_mode_gaussian(local_rng, options); },
         [&](std::mt19937_64& local_rng) { return make_random_two_mode_gaussian(local_rng, options); },
         [&](std::mt19937_64& local_rng) { return make_random_diagonal_non_gaussian(local_rng, options); },
-        [&](std::mt19937_64& local_rng) { return make_random_ladder_gate(local_rng, options); },
-        [&](std::mt19937_64& local_rng) { return make_random_controlled_gaussian(local_rng, options); },
-        [&](std::mt19937_64& local_rng) { return make_random_two_mode_hybrid(local_rng, options); }
+        [&](std::mt19937_64& local_rng) { return make_random_controlled_gaussian(local_rng, options); }
     };
+    if (!options.exclude_ladder_gates) {
+        coverage_builders.insert(
+            coverage_builders.begin() + 6,
+            [&](std::mt19937_64& local_rng) { return make_random_ladder_gate(local_rng, options); });
+    }
+    if (!options.exclude_advanced_hybrid_gates) {
+        coverage_builders.push_back(
+            [&](std::mt19937_64& local_rng) { return make_random_two_mode_hybrid(local_rng, options); });
+    }
 
     std::vector<BuiltGate> randomized_tail;
     randomized_tail.reserve(static_cast<size_t>(std::max(0, options.total_gates - 2)));
@@ -302,7 +416,7 @@ std::vector<BuiltGate> build_random_circuit(const BenchmarkOptions& options) {
 
     while (static_cast<int>(gates.size() + randomized_tail.size()) < options.total_gates) {
         const int family = random_index(rng, static_cast<int>(coverage_builders.size()));
-        randomized_tail.push_back(coverage_builders[family](rng));
+        randomized_tail.push_back(coverage_builders[static_cast<size_t>(family)](rng));
     }
 
     std::shuffle(randomized_tail.begin(), randomized_tail.end(), rng);
@@ -350,7 +464,25 @@ int main(int argc, char** argv) {
                   << ", qumodes=" << options.num_qumodes
                   << ", cutoff=" << options.cutoff
                   << ", max_states=" << options.max_states
-                  << ", total_gates=" << options.total_gates << '\n';
+                  << ", total_gates=" << options.total_gates;
+        if (options.gaussian_only) {
+            std::cout << ", workload=gaussian-only";
+        } else if (options.non_gaussian_gates >= 0) {
+            std::cout << ", workload=gaussian-plus-" << options.non_gaussian_gates << "-non-gaussian";
+            std::cout << ", non_gaussian_profile="
+                      << (options.non_gaussian_profile == NonGaussianProfile::DiagonalOnly
+                              ? "diagonal"
+                              : "general");
+        } else {
+            std::cout << ", workload=mixed";
+            if (options.exclude_ladder_gates) {
+                std::cout << "-no-ladder";
+            }
+            if (options.exclude_advanced_hybrid_gates) {
+                std::cout << "-no-advanced-hybrid";
+            }
+        }
+        std::cout << '\n';
         print_gate_histogram(gates);
         print_gate_preview(gates);
         std::cout << "=================================================\n";

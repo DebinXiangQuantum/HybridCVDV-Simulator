@@ -348,12 +348,9 @@ void apply_displacement_gate(CVStatePool* state_pool, const int* target_indices,
         dim3 block_dim(256);
         dim3 grid_dim((state_dim + block_dim.x - 1) / block_dim.x, 1);
 
-        // 创建临时缓冲区用于输出
-        cuDoubleComplex* temp_buffer = nullptr;
-        err = cudaMalloc(&temp_buffer, state_dim * sizeof(cuDoubleComplex));
-        if (err != cudaSuccess) {
-            throw std::runtime_error("无法分配临时缓冲区: " + std::string(cudaGetErrorString(err)));
-        }
+        // 使用scratch buffer作为临时缓冲区
+        cuDoubleComplex* temp_buffer = static_cast<cuDoubleComplex*>(
+            state_pool->scratch_temp.ensure(state_dim * sizeof(cuDoubleComplex)));
 
         // 调用内核，传递输入和输出指针
         apply_displacement_direct_kernel<<<grid_dim, block_dim>>>(
@@ -362,7 +359,6 @@ void apply_displacement_gate(CVStatePool* state_pool, const int* target_indices,
 
         err = cudaGetLastError();
         if (err != cudaSuccess) {
-            cudaFree(temp_buffer);
             throw std::runtime_error("Displacement gate kernel launch failed: " +
                                     std::string(cudaGetErrorString(err)));
         }
@@ -370,14 +366,12 @@ void apply_displacement_gate(CVStatePool* state_pool, const int* target_indices,
         // 同步GPU操作
         err = cudaDeviceSynchronize();
         if (err != cudaSuccess) {
-            cudaFree(temp_buffer);
             throw std::runtime_error("Displacement gate kernel synchronization failed: " +
                                     std::string(cudaGetErrorString(err)));
         }
 
         // 复制结果回原位置
         err = cudaMemcpy(state_ptr, temp_buffer, state_dim * sizeof(cuDoubleComplex), cudaMemcpyDeviceToDevice);
-        cudaFree(temp_buffer);
 
         if (err != cudaSuccess) {
             throw std::runtime_error("无法复制结果: " + std::string(cudaGetErrorString(err)));
@@ -690,8 +684,9 @@ __global__ void apply_fouriergate_kernel(
 void apply_xgate(CVStatePool* state_pool, const int* target_indices,
                 int batch_size, double x) {
     size_t buffer_stride = state_pool->max_total_dim;
-    cuDoubleComplex* temp_buffer = nullptr;
-    cudaMalloc(&temp_buffer, batch_size * buffer_stride * sizeof(cuDoubleComplex));
+    size_t buffer_size = batch_size * buffer_stride * sizeof(cuDoubleComplex);
+    cuDoubleComplex* temp_buffer = static_cast<cuDoubleComplex*>(
+        state_pool->scratch_temp.ensure(buffer_size));
 
     dim3 block_dim(256);
     dim3 grid_dim((state_pool->max_total_dim + block_dim.x - 1) / block_dim.x, batch_size);
@@ -706,14 +701,12 @@ void apply_xgate(CVStatePool* state_pool, const int* target_indices,
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        cudaFree(temp_buffer);
         throw std::runtime_error("Xgate kernel launch failed: " +
                                 std::string(cudaGetErrorString(err)));
     }
 
     err = cudaDeviceSynchronize();
     if (err != cudaSuccess) {
-        cudaFree(temp_buffer);
         throw std::runtime_error("Xgate kernel synchronization failed: " +
                                 std::string(cudaGetErrorString(err)));
     }
@@ -722,18 +715,16 @@ void apply_xgate(CVStatePool* state_pool, const int* target_indices,
     for (int b = 0; b < batch_size; ++b) {
         int state_idx;
         cudaMemcpy(&state_idx, &target_indices[b], sizeof(int), cudaMemcpyDeviceToHost);
-        
+
         // 从GPU复制state_dims和state_offsets到CPU
         int state_dim;
         size_t offset;
         cudaMemcpy(&state_dim, &state_pool->state_dims[state_idx], sizeof(int), cudaMemcpyDeviceToHost);
         cudaMemcpy(&offset, &state_pool->state_offsets[state_idx], sizeof(size_t), cudaMemcpyDeviceToHost);
-        
+
         cudaMemcpy(&state_pool->data[offset], &temp_buffer[b * buffer_stride],
                    state_dim * sizeof(cuDoubleComplex), cudaMemcpyDeviceToDevice);
     }
-
-    cudaFree(temp_buffer);
 }
 
 /**
@@ -742,8 +733,9 @@ void apply_xgate(CVStatePool* state_pool, const int* target_indices,
 void apply_zgate(CVStatePool* state_pool, const int* target_indices,
                 int batch_size, double p) {
     size_t buffer_stride = state_pool->max_total_dim;
-    cuDoubleComplex* temp_buffer = nullptr;
-    cudaMalloc(&temp_buffer, batch_size * buffer_stride * sizeof(cuDoubleComplex));
+    size_t buffer_size = batch_size * buffer_stride * sizeof(cuDoubleComplex);
+    cuDoubleComplex* temp_buffer = static_cast<cuDoubleComplex*>(
+        state_pool->scratch_temp.ensure(buffer_size));
 
     dim3 block_dim(256);
     dim3 grid_dim((state_pool->max_total_dim + block_dim.x - 1) / block_dim.x, batch_size);
@@ -758,14 +750,12 @@ void apply_zgate(CVStatePool* state_pool, const int* target_indices,
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        cudaFree(temp_buffer);
         throw std::runtime_error("Zgate kernel launch failed: " +
                                 std::string(cudaGetErrorString(err)));
     }
 
     err = cudaDeviceSynchronize();
     if (err != cudaSuccess) {
-        cudaFree(temp_buffer);
         throw std::runtime_error("Zgate kernel synchronization failed: " +
                                 std::string(cudaGetErrorString(err)));
     }
@@ -774,18 +764,16 @@ void apply_zgate(CVStatePool* state_pool, const int* target_indices,
     for (int b = 0; b < batch_size; ++b) {
         int state_idx;
         cudaMemcpy(&state_idx, &target_indices[b], sizeof(int), cudaMemcpyDeviceToHost);
-        
+
         // 从GPU复制state_dims和state_offsets到CPU
         int state_dim;
         size_t offset;
         cudaMemcpy(&state_dim, &state_pool->state_dims[state_idx], sizeof(int), cudaMemcpyDeviceToHost);
         cudaMemcpy(&offset, &state_pool->state_offsets[state_idx], sizeof(size_t), cudaMemcpyDeviceToHost);
-        
+
         cudaMemcpy(&state_pool->data[offset], &temp_buffer[b * buffer_stride],
                    state_dim * sizeof(cuDoubleComplex), cudaMemcpyDeviceToDevice);
     }
-
-    cudaFree(temp_buffer);
 }
 
 /**
@@ -822,8 +810,9 @@ void apply_pgate(CVStatePool* state_pool, const int* target_indices,
 void apply_vgate(CVStatePool* state_pool, const int* target_indices,
                 int batch_size, double gamma) {
     size_t buffer_stride = state_pool->max_total_dim;
-    cuDoubleComplex* temp_buffer = nullptr;
-    cudaMalloc(&temp_buffer, batch_size * buffer_stride * sizeof(cuDoubleComplex));
+    size_t buffer_size = batch_size * buffer_stride * sizeof(cuDoubleComplex);
+    cuDoubleComplex* temp_buffer = static_cast<cuDoubleComplex*>(
+        state_pool->scratch_temp.ensure(buffer_size));
 
     dim3 block_dim(256);
     dim3 grid_dim((state_pool->max_total_dim + block_dim.x - 1) / block_dim.x, batch_size);
@@ -838,14 +827,12 @@ void apply_vgate(CVStatePool* state_pool, const int* target_indices,
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        cudaFree(temp_buffer);
         throw std::runtime_error("Vgate kernel launch failed: " +
                                 std::string(cudaGetErrorString(err)));
     }
 
     err = cudaDeviceSynchronize();
     if (err != cudaSuccess) {
-        cudaFree(temp_buffer);
         throw std::runtime_error("Vgate kernel synchronization failed: " +
                                 std::string(cudaGetErrorString(err)));
     }
@@ -854,18 +841,16 @@ void apply_vgate(CVStatePool* state_pool, const int* target_indices,
     for (int b = 0; b < batch_size; ++b) {
         int state_idx;
         cudaMemcpy(&state_idx, &target_indices[b], sizeof(int), cudaMemcpyDeviceToHost);
-        
+
         // 从GPU复制state_dims和state_offsets到CPU
         int state_dim;
         size_t offset;
         cudaMemcpy(&state_dim, &state_pool->state_dims[state_idx], sizeof(int), cudaMemcpyDeviceToHost);
         cudaMemcpy(&offset, &state_pool->state_offsets[state_idx], sizeof(size_t), cudaMemcpyDeviceToHost);
-        
+
         cudaMemcpy(&state_pool->data[offset], &temp_buffer[b * buffer_stride],
                    state_dim * sizeof(cuDoubleComplex), cudaMemcpyDeviceToDevice);
     }
-
-    cudaFree(temp_buffer);
 }
 
 /**

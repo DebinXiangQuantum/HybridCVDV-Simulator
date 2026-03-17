@@ -27,12 +27,15 @@ class WorkloadSpec:
     workload: str
     cutoff: int
     num_modes: int
+    num_qubits: int
     layers: int
     timesteps: int
     squeezing_r: float
     displacement_scale: float
     j_coupling: float
     omega_r: float
+    omega_q: float
+    g_coupling: float
     tau: float
     warmup_runs: int
     measured_runs: int
@@ -77,8 +80,8 @@ def flatten_norm(array: Any) -> float:
     return float(np.linalg.norm(host.reshape(-1)))
 
 
-def estimate_state_vector_bytes(cutoff: int, num_modes: int) -> int:
-    return (cutoff**num_modes) * 16
+def estimate_state_vector_bytes(cutoff: int, num_modes: int, num_qubits: int) -> int:
+    return (2**num_qubits) * (cutoff**num_modes) * 16
 
 
 def summarize_samples(samples: list[dict[str, float]]) -> dict[str, float]:
@@ -111,7 +114,7 @@ def benchmark_callable(
 
     samples = [run_once() for _ in range(spec.measured_runs)]
     metrics = summarize_samples(samples)
-    metrics["state_vector_bytes_estimate"] = float(estimate_state_vector_bytes(spec.cutoff, spec.num_modes))
+    metrics["state_vector_bytes_estimate"] = float(estimate_state_vector_bytes(spec.cutoff, spec.num_modes, spec.num_qubits))
     return {
         "name": case_name,
         "category": category,
@@ -121,6 +124,7 @@ def benchmark_callable(
             "workload": spec.workload,
             "cutoff": str(spec.cutoff),
             "num_modes": str(spec.num_modes),
+            "num_qubits": str(spec.num_qubits),
             "layers": str(spec.layers),
             "timesteps": str(spec.timesteps),
             "warmup_runs": str(spec.warmup_runs),
@@ -129,6 +133,8 @@ def benchmark_callable(
             "displacement_scale": str(spec.displacement_scale),
             "j_coupling": str(spec.j_coupling),
             "omega_r": str(spec.omega_r),
+            "omega_q": str(spec.omega_q),
+            "g_coupling": str(spec.g_coupling),
             "tau": str(spec.tau),
         },
         "metrics": metrics,
@@ -136,87 +142,69 @@ def benchmark_callable(
 
 
 def build_case_name(spec: WorkloadSpec) -> str:
-    if spec.workload == "cv_qaoa":
-        return f"cv_qaoa_modes_{spec.num_modes}_layers_{spec.layers}_cutoff_{spec.cutoff}"
-    if spec.workload == "jch_photonic_chain":
-        return (
-            f"jch_photonic_chain_modes_{spec.num_modes}"
-            f"_timesteps_{spec.timesteps}_cutoff_{spec.cutoff}"
-        )
-    raise ValueError(f"unsupported workload: {spec.workload}")
+    return f"{spec.workload}_nq{spec.num_qubits}_nm{spec.num_modes}_c{spec.cutoff}"
 
 
 def build_metric_note(backend_name: str, workload: str) -> str:
     notes = {
-        "cv_qaoa": "communication time is measured as final state materialization from device to host",
-        "jch_photonic_chain": "derived from circuit/src/jch_simulation_circuit.cpp by keeping only bosonic R and BS terms",
+        "vqe_circuit": "Full VQE circuit evaluation",
+        "jch_simulation_circuit": "Full JCH simulation circuit evaluation",
+        "cv_qaoa": "CV-QAOA bosonic-only circuit",
+        "cat_state_circuit": "Cat state preparation via conditional displacement",
+        "gkp_state_circuit": "GKP state preparation via iterative conditional displacement",
+        "qaoa_circuit": "CV-QAOA circuit implementation",
+        "qft_circuit": "Quantum Fourier Transform via CV-DV hybrid state transfer",
+        "shors_circuit": "Shor's algorithm implementation using GKP and modular exponentiation",
+        "state_transfer_CVtoDV_circuit": "Continuous-to-Discrete state transfer protocol",
+        "state_transfer_DVtoCV_circuit": "Discrete-to-Continuous state transfer protocol",
     }
-    return f"{backend_name}; {notes[workload]}"
-
-
-def build_strawberryfields_program(sf, ops, spec: WorkloadSpec):
-    prog = sf.Program(spec.num_modes)
-    with prog.context as registers:
-        if spec.workload == "cv_qaoa":
-            params = make_qaoa_angles(spec.layers)
-            for mode in range(spec.num_modes):
-                ops.Sgate(spec.squeezing_r, 0.0) | registers[mode]
-            for layer in range(spec.layers):
-                gamma = params[layer]
-                eta = params[spec.layers + layer]
-                for mode in range(spec.num_modes):
-                    ops.Dgate(spec.displacement_scale * gamma, 0.0) | registers[mode]
-                for mode in range(spec.num_modes):
-                    ops.Sgate(eta, 0.0) | registers[mode]
-        elif spec.workload == "jch_photonic_chain":
-            for _ in range(spec.timesteps):
-                for mode in range(spec.num_modes):
-                    ops.Rgate(spec.omega_r * spec.tau) | registers[mode]
-                for mode in range(spec.num_modes - 1):
-                    ops.BSgate(spec.j_coupling * spec.tau, 0.0) | (registers[mode], registers[mode + 1])
-        else:
-            raise ValueError(f"unsupported Strawberry Fields workload: {spec.workload}")
-    return prog
-
-
-def configure_tensorflow_gpu(tf) -> list[str]:
-    gpu_devices = tf.config.list_physical_devices("GPU")
-    for device in gpu_devices:
-        try:
-            tf.config.experimental.set_memory_growth(device, True)
-        except Exception:
-            pass
-    return [device.name for device in gpu_devices]
+    return f"{backend_name}; {notes.get(workload, workload)}"
 
 
 def run_strawberryfields_backend(spec: WorkloadSpec) -> dict[str, Any]:
     sf = optional_import("strawberryfields")
     tf = optional_import("tensorflow")
     if sf is None or tf is None:
-        missing = []
-        if sf is None:
-            missing.append("strawberryfields")
-        if tf is None:
-            missing.append("tensorflow")
+        return unsupported_backend_payload("strawberryfields_tf", "missing strawberryfields or tensorflow")
+
+    if spec.num_qubits > 0:
         return unsupported_backend_payload(
             "strawberryfields_tf",
-            f"missing importable package(s): {', '.join(missing)}",
+            f"Strawberry Fields does not natively support hybrid DV+CV circuits (num_qubits={spec.num_qubits}). "
+            "It lacks a native hybrid state space and discrete-continuous coupling gates (e.g. Jaynes-Cummings)."
         )
 
-    gpu_devices = configure_tensorflow_gpu(tf)
-    if not gpu_devices:
-        return unsupported_backend_payload(
-            "strawberryfields_tf",
-            "TensorFlow did not report a visible GPU device",
-        )
-
-    from strawberryfields import ops  # type: ignore
+    from strawberryfields import ops
 
     def run_once() -> dict[str, float]:
-        program = build_strawberryfields_program(sf, ops, spec)
+        prog = sf.Program(spec.num_modes)
+        with prog.context as registers:
+            if spec.workload == "cv_qaoa" or spec.workload == "qaoa_circuit":
+                params = make_qaoa_angles(spec.layers)
+                for mode in range(spec.num_modes):
+                    ops.Sgate(spec.squeezing_r, 0.0) | registers[mode]
+                for layer in range(spec.layers):
+                    gamma = params[layer]
+                    eta = params[spec.layers + layer]
+                    for mode in range(spec.num_modes):
+                        ops.Dgate(spec.displacement_scale * gamma, 0.0) | registers[mode]
+                    for mode in range(spec.num_modes):
+                        ops.Sgate(eta, 0.0) | registers[mode]
+            elif spec.workload == "jch_photonic_chain" or spec.workload == "jch_simulation_circuit":
+                for _ in range(spec.timesteps):
+                    for mode in range(spec.num_modes):
+                        ops.Rgate(spec.omega_r * spec.tau) | registers[mode]
+                    for mode in range(spec.num_modes - 1):
+                        ops.BSgate(spec.j_coupling * spec.tau, 0.0) | (registers[mode], registers[mode + 1])
+            else:
+                # Other workloads are likely hybrid and caught by num_qubits > 0 check,
+                # but if one slipped through, it's unsupported here.
+                raise ValueError(f"unsupported Strawberry Fields workload: {spec.workload}")
+
+        gpu_devices = configure_tensorflow_gpu(tf)
         engine = sf.Engine("tf", backend_options={"cutoff_dim": spec.cutoff})
         compute_start = time.perf_counter()
-        result = engine.run(program)
+        result = engine.run(prog)
         compute_end = time.perf_counter()
         ket = result.state.ket()
         host = np.asarray(ket.numpy() if hasattr(ket, "numpy") else ket)
@@ -228,147 +216,52 @@ def run_strawberryfields_backend(spec: WorkloadSpec) -> dict[str, Any]:
             "output_norm": flatten_norm(host),
         }
 
-    payload = benchmark_callable(
-        case_name=build_case_name(spec),
-        category="baseline_scaling",
-        backend_note=build_metric_note("Strawberry Fields tf backend", spec.workload),
-        spec=spec,
-        run_once=run_once,
-    )
     return {
         "schema_version": "2.0",
         "generated_at_utc": iso_now(),
         "backend": "strawberryfields_tf",
-        "single_gpu_focus": True,
         "status": "ok",
-        "backend_runtime": {
-            "strawberryfields_version": getattr(sf, "__version__", "unknown"),
-            "tensorflow_version": getattr(tf, "__version__", "unknown"),
-            "visible_gpu_devices": gpu_devices,
-        },
-        "results": [payload],
+        "results": [benchmark_callable(build_case_name(spec), "baseline", build_metric_note("SF", spec.workload), spec, run_once)],
     }
-
-
-def import_mrmustard_symbols():
-    math_module = importlib.import_module("mrmustard.math")
-    try:
-        from mrmustard.lab.states import Vacuum  # type: ignore
-        from mrmustard.lab.transformations import BSgate, Dgate, Rgate, Sgate  # type: ignore
-    except ImportError:
-        from mrmustard.lab import BSgate, Dgate, Rgate, Sgate, Vacuum  # type: ignore
-    return math_module, Vacuum, Dgate, Sgate, BSgate, Rgate
-
-
-def call_with_supported_keywords(factory, **kwargs):
-    try:
-        signature = inspect.signature(factory)
-        accepted = {key: value for key, value in kwargs.items() if key in signature.parameters}
-        if accepted:
-            return factory(**accepted)
-    except (TypeError, ValueError):
-        pass
-    return factory(**kwargs)
-
-
-def make_mrmustard_vacuum(Vacuum, num_modes: int):
-    for kwargs in (
-        {"num_modes": num_modes},
-        {"modes": tuple(range(num_modes))},
-        {"modes": list(range(num_modes))},
-    ):
-        try:
-            return call_with_supported_keywords(Vacuum, **kwargs)
-        except TypeError:
-            continue
-    return Vacuum(num_modes)
-
-
-def materialize_mrmustard_ket(state, cutoffs: list[int]):
-    for kwargs in ({"cutoffs": cutoffs}, {"cutoff": cutoffs}, {"shape": cutoffs}):
-        try:
-            return state.ket(**kwargs)
-        except TypeError:
-            continue
-    return state.ket(cutoffs)
-
-
-def build_mrmustard_state(spec: WorkloadSpec, Vacuum, Dgate, Sgate, BSgate, Rgate):
-    state = make_mrmustard_vacuum(Vacuum, spec.num_modes)
-    if spec.workload == "cv_qaoa":
-        params = make_qaoa_angles(spec.layers)
-        for mode in range(spec.num_modes):
-            state = state >> call_with_supported_keywords(Sgate, mode=mode, r=spec.squeezing_r, phi=0.0)
-        for layer in range(spec.layers):
-            gamma = params[layer]
-            eta = params[spec.layers + layer]
-            for mode in range(spec.num_modes):
-                state = state >> call_with_supported_keywords(
-                    Dgate,
-                    mode=mode,
-                    x=spec.displacement_scale * gamma,
-                    y=0.0,
-                )
-            for mode in range(spec.num_modes):
-                state = state >> call_with_supported_keywords(Sgate, mode=mode, r=eta, phi=0.0)
-        return state
-
-    if spec.workload == "jch_photonic_chain":
-        for _ in range(spec.timesteps):
-            for mode in range(spec.num_modes):
-                state = state >> call_with_supported_keywords(
-                    Rgate,
-                    mode=mode,
-                    angle=spec.omega_r * spec.tau,
-                    phi=spec.omega_r * spec.tau,
-                )
-            for mode in range(spec.num_modes - 1):
-                state = state >> call_with_supported_keywords(
-                    BSgate,
-                    modes=(mode, mode + 1),
-                    theta=spec.j_coupling * spec.tau,
-                    phi=0.0,
-                )
-        return state
-
-    raise ValueError(f"unsupported MrMustard workload: {spec.workload}")
 
 
 def run_mrmustard_backend(spec: WorkloadSpec) -> dict[str, Any]:
     mm = optional_import("mrmustard")
     jax = optional_import("jax")
     if mm is None or jax is None:
-        missing = []
-        if mm is None:
-            missing.append("mrmustard")
-        if jax is None:
-            missing.append("jax")
+        return unsupported_backend_payload("mrmustard_jax", "missing mrmustard or jax")
+
+    if spec.num_qubits > 0:
         return unsupported_backend_payload(
             "mrmustard_jax",
-            f"missing importable package(s): {', '.join(missing)}",
+            f"MrMustard does not natively support hybrid DV+CV circuits (num_qubits={spec.num_qubits}). "
+            "It lacks a native hybrid state space and discrete-continuous coupling gates (e.g. Jaynes-Cummings)."
         )
 
-    gpu_devices = [str(device) for device in jax.devices() if getattr(device, "platform", "") == "gpu"]
-    if not gpu_devices:
-        return unsupported_backend_payload(
-            "mrmustard_jax",
-            "JAX did not report a visible GPU device",
-        )
-
-    try:
-        math_module, Vacuum, Dgate, Sgate, BSgate, Rgate = import_mrmustard_symbols()
-    except Exception as exc:
-        return unsupported_backend_payload("mrmustard_jax", f"failed to import API symbols: {exc}")
-
-    if not hasattr(math_module, "change_backend"):
-        return unsupported_backend_payload("mrmustard_jax", "mrmustard.math.change_backend is unavailable")
-
-    math_module.change_backend("jax")
+    from mrmustard.lab import Vacuum, Dgate, Sgate, BSgate, Rgate
+    import mrmustard.math as math_mod
+    math_mod.change_backend("jax")
 
     def run_once() -> dict[str, float]:
-        state = build_mrmustard_state(spec, Vacuum, Dgate, Sgate, BSgate, Rgate)
+        state = Vacuum(spec.num_modes)
+        if spec.workload == "cv_qaoa" or spec.workload == "qaoa_circuit":
+            params = make_qaoa_angles(spec.layers)
+            for mode in range(spec.num_modes):
+                state = state >> Sgate(modes=[mode], r=spec.squeezing_r)
+            for layer in range(spec.layers):
+                for mode in range(spec.num_modes):
+                    state = state >> Dgate(modes=[mode], x=spec.displacement_scale * params[layer])
+                for mode in range(spec.num_modes):
+                    state = state >> Sgate(modes=[mode], r=params[spec.layers + layer])
+        elif spec.workload == "jch_photonic_chain" or spec.workload == "jch_simulation_circuit":
+            for _ in range(spec.timesteps):
+                for mode in range(spec.num_modes):
+                    state = state >> Rgate(modes=[mode], angle=spec.omega_r * spec.tau)
+                for mode in range(spec.num_modes - 1):
+                    state = state >> BSgate(modes=[mode, mode + 1], theta=spec.j_coupling * spec.tau)
+        
         compute_start = time.perf_counter()
-        ket = materialize_mrmustard_ket(state, [spec.cutoff] * spec.num_modes)
+        ket = state.ket(cutoffs=[spec.cutoff] * spec.num_modes)
         ket = jax.block_until_ready(ket)
         compute_end = time.perf_counter()
         host = np.asarray(jax.device_get(ket))
@@ -380,76 +273,20 @@ def run_mrmustard_backend(spec: WorkloadSpec) -> dict[str, Any]:
             "output_norm": flatten_norm(host),
         }
 
-    payload = benchmark_callable(
-        case_name=build_case_name(spec),
-        category="baseline_scaling",
-        backend_note=build_metric_note("MrMustard jax backend", spec.workload),
-        spec=spec,
-        run_once=run_once,
-    )
     return {
         "schema_version": "2.0",
         "generated_at_utc": iso_now(),
         "backend": "mrmustard_jax",
-        "single_gpu_focus": True,
         "status": "ok",
-        "backend_runtime": {
-            "mrmustard_version": getattr(mm, "__version__", "unknown"),
-            "jax_version": getattr(jax, "__version__", "unknown"),
-            "visible_gpu_devices": gpu_devices,
-            "default_backend": jax.default_backend(),
-        },
-        "results": [payload],
+        "results": [benchmark_callable(build_case_name(spec), "baseline", build_metric_note("MM", spec.workload), spec, run_once)],
     }
 
 
-def run_bosonic_gpu_backend(spec: WorkloadSpec) -> dict[str, Any]:
-    if spec.workload != "cv_qaoa":
-        return unsupported_backend_payload(
-            "bosonic_gpu",
-            "local bosonic baseline only supports legacy gate microbenchmarks",
-        )
-
-    try:
-        import sys
-
-        sys.path.insert(0, str(REPO_ROOT / "baselines" / "bosonic"))
-        import operators_gpu as bosonic_ops  # type: ignore
-    except Exception as exc:
-        return unsupported_backend_payload("bosonic_gpu", f"failed to import bosonic baseline: {exc}")
-
-    cv_ops = bosonic_ops.CVOperatorsGPU()
-    cutoff = spec.cutoff
-
-    def run_once() -> dict[str, float]:
-        compute_start = time.perf_counter()
-        for _ in range(spec.layers):
-            cv_ops.s(spec.squeezing_r + 0.0j, cutoff)
-            cv_ops.d(spec.displacement_scale * 0.2 + 0.0j, cutoff)
-        compute_end = time.perf_counter()
-        total_end = compute_end
-        return {
-            "total_ms": (total_end - compute_start) * 1000.0,
-            "compute_ms": (compute_end - compute_start) * 1000.0,
-            "communication_ms": 0.0,
-            "output_norm": 1.0,
-        }
-
-    payload = benchmark_callable(
-        case_name=f"bosonic_proxy_layers_{spec.layers}_cutoff_{spec.cutoff}",
-        category="baseline_scaling",
-        backend_note="bosonic_gpu proxy uses repeated operator construction only",
-        spec=spec,
-        run_once=run_once,
-    )
-    return {
-        "schema_version": "2.0",
-        "generated_at_utc": iso_now(),
-        "backend": "bosonic_gpu",
-        "single_gpu_focus": True,
-        "status": "ok",
-        "results": [payload],
-    }
+def configure_tensorflow_gpu(tf):
+    gpu_devices = tf.config.list_physical_devices("GPU")
+    for device in gpu_devices:
+        tf.config.experimental.set_memory_growth(device, True)
+    return [d.name for d in gpu_devices]
 
 
 def unsupported_backend_payload(backend: str, reason: str) -> dict[str, Any]:
@@ -465,25 +302,12 @@ def unsupported_backend_payload(backend: str, reason: str) -> dict[str, Any]:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run one GPU baseline backend for a selected workload.")
-    parser.add_argument(
-        "--backend",
-        required=True,
-        choices=[
-            "bosonic_gpu",
-            "strawberryfields",
-            "strawberryfields_tf",
-            "mrmustard",
-            "mrmustard_jax",
-        ],
-    )
-    parser.add_argument(
-        "--workload",
-        choices=["cv_qaoa", "jch_photonic_chain"],
-        default="cv_qaoa",
-    )
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--backend", required=True)
+    parser.add_argument("--workload", default="vqe_circuit")
     parser.add_argument("--cutoff", type=int, default=16)
     parser.add_argument("--num-modes", type=int, default=1)
+    parser.add_argument("--num-qubits", type=int, default=0)
     parser.add_argument("--layers", type=int, default=2)
     parser.add_argument("--timesteps", type=int, default=5)
     parser.add_argument("--warmup-runs", type=int, default=2)
@@ -492,6 +316,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--displacement-scale", type=float, default=1.0)
     parser.add_argument("--j-coupling", type=float, default=1.0)
     parser.add_argument("--omega-r", type=float, default=1.0)
+    parser.add_argument("--omega-q", type=float, default=1.0)
+    parser.add_argument("--g-coupling", type=float, default=0.5)
     parser.add_argument("--tau", type=float, default=0.1)
     parser.add_argument("--output", required=True)
     return parser.parse_args()
@@ -503,40 +329,34 @@ def main() -> int:
         workload=args.workload,
         cutoff=args.cutoff,
         num_modes=args.num_modes,
+        num_qubits=args.num_qubits,
         layers=args.layers,
         timesteps=args.timesteps,
         squeezing_r=args.squeezing_r,
         displacement_scale=args.displacement_scale,
         j_coupling=args.j_coupling,
         omega_r=args.omega_r,
+        omega_q=args.omega_q,
+        g_coupling=args.g_coupling,
         tau=args.tau,
         warmup_runs=args.warmup_runs,
         measured_runs=args.measured_runs,
     )
 
-    normalized_backend = {
-        "strawberryfields": "strawberryfields_tf",
-        "mrmustard": "mrmustard_jax",
-    }.get(args.backend, args.backend)
-
     runners = {
-        "bosonic_gpu": run_bosonic_gpu_backend,
         "strawberryfields_tf": run_strawberryfields_backend,
         "mrmustard_jax": run_mrmustard_backend,
     }
 
+    backend = {
+        "strawberryfields": "strawberryfields_tf",
+        "mrmustard": "mrmustard_jax",
+    }.get(args.backend, args.backend)
+
     try:
-        payload = runners[normalized_backend](spec)
-    except Exception as exc:  # pragma: no cover
-        payload = {
-            "schema_version": "2.0",
-            "generated_at_utc": iso_now(),
-            "backend": normalized_backend,
-            "single_gpu_focus": True,
-            "status": "error",
-            "reason": str(exc),
-            "results": [],
-        }
+        payload = runners[backend](spec)
+    except Exception as exc:
+        payload = unsupported_backend_payload(backend, str(exc))
 
     write_json(pathlib.Path(args.output), payload)
     return 0

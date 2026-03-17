@@ -15,6 +15,9 @@
 #include <map>
 #include <optional>
 #include <unordered_set>
+#if defined(HYBRIDCVDV_HAS_NVTX) && HYBRIDCVDV_HAS_NVTX
+#include <nvtx3/nvToolsExt.h>
+#endif
 
 // CUDA错误检查宏
 #define CHECK_CUDA(call) \
@@ -28,21 +31,34 @@
 // 包含GPU内核头文件
 // Level 0
 void apply_phase_rotation_on_mode(CVStatePool* pool, const int* targets, int batch_size, double theta,
-                                  int target_qumode, int num_qumodes);
+                                  int target_qumode, int num_qumodes,
+                                  cudaStream_t stream = nullptr, bool synchronize = true);
 void apply_kerr_gate_on_mode(CVStatePool* pool, const int* targets, int batch_size, double chi,
-                             int target_qumode, int num_qumodes);
+                             int target_qumode, int num_qumodes,
+                             cudaStream_t stream = nullptr, bool synchronize = true);
 void apply_conditional_parity_on_mode(CVStatePool* pool, const int* targets, int batch_size, double parity,
-                                      int target_qumode, int num_qumodes);
+                                      int target_qumode, int num_qumodes,
+                                      cudaStream_t stream = nullptr, bool synchronize = true);
 void apply_snap_on_mode(CVStatePool* pool, const int* targets, int batch_size, double theta,
                         int target_fock_state, int target_qumode, int num_qumodes);
 void apply_multisnap_on_mode(CVStatePool* pool, const int* targets, int batch_size,
                              const std::vector<double>& phase_map,
                              int target_qumode, int num_qumodes);
+struct FusedDiagonalOp {
+    int right_stride;
+    double theta;
+    double chi;
+    double parity;
+};
+void apply_fused_diagonal_gates(CVStatePool* state_pool, const int* target_indices,
+                                int batch_size, const std::vector<FusedDiagonalOp>& ops_host,
+                                int num_qumodes);
+
 void zero_state_device(CVStatePool* pool, int state_id);
 void initialize_vacuum_state_device(CVStatePool* pool, int state_id, int state_dim);
 void copy_state_device(CVStatePool* pool, int src_state_id, int dst_state_id);
 void axpy_state_device(CVStatePool* pool, int src_state_id, int dst_state_id, cuDoubleComplex weight);
-void classify_vacuum_ray_device(const CVStatePool* pool, int state_id, double tolerance,
+void classify_vacuum_ray_device(CVStatePool* pool, int state_id, double tolerance,
                                 int* is_zero, int* is_scaled_vacuum, cuDoubleComplex* scale);
 
 // Level 1
@@ -113,6 +129,23 @@ void add_states(CVStatePool* state_pool,
                 int batch_size);
 
 namespace {
+
+class ScopedNvtxRange {
+public:
+    explicit ScopedNvtxRange(const char* name) {
+#if defined(HYBRIDCVDV_HAS_NVTX) && HYBRIDCVDV_HAS_NVTX
+        nvtxRangePushA(name);
+#else
+        (void)name;
+#endif
+    }
+
+    ~ScopedNvtxRange() {
+#if defined(HYBRIDCVDV_HAS_NVTX) && HYBRIDCVDV_HAS_NVTX
+        nvtxRangePop();
+#endif
+    }
+};
 
 constexpr double kVacuumTolerance = 1e-12;
 constexpr double kSymbolicBranchPruneTolerance = 1e-14;
@@ -213,7 +246,7 @@ VacuumRayInfo classify_vacuum_ray(const std::vector<cuDoubleComplex>& state) {
     return info;
 }
 
-VacuumRayInfo classify_vacuum_ray_on_device(const CVStatePool& state_pool, int state_id) {
+VacuumRayInfo classify_vacuum_ray_on_device(CVStatePool& state_pool, int state_id) {
     int is_zero = 0;
     int is_scaled_vacuum = 0;
     cuDoubleComplex scale = make_cuDoubleComplex(0.0, 0.0);
@@ -293,6 +326,15 @@ bool is_supported_controlled_gaussian_gate(const GateParams& gate) {
             return gate.target_qubits.size() == 1 &&
                    gate.target_qumodes.size() == 2 &&
                    gate.params.size() >= 1;
+        case GateType::CONDITIONAL_TWO_MODE_SQUEEZING:
+            return gate.target_qubits.size() == 1 &&
+                   gate.target_qumodes.size() == 2 &&
+                   gate.params.size() >= 1;
+        case GateType::CONDITIONAL_SUM:
+            return gate.target_qubits.size() == 1 &&
+                   gate.target_qumodes.size() == 2 &&
+                   gate.params.size() >= 1 &&
+                   (gate.params.size() < 2 || std::abs(gate.params[1]) < 1e-14);
         default:
             return false;
     }
@@ -301,6 +343,29 @@ bool is_supported_controlled_gaussian_gate(const GateParams& gate) {
 bool is_gaussian_track_gate(const GateParams& gate) {
     return is_unconditional_gaussian_gate(gate) ||
            is_supported_controlled_gaussian_gate(gate);
+}
+
+bool is_pure_qubit_gate(const GateParams& gate) {
+    if (!gate.target_qumodes.empty()) {
+        return false;
+    }
+
+    switch (gate.type) {
+        case GateType::HADAMARD:
+        case GateType::PAULI_X:
+        case GateType::PAULI_Y:
+        case GateType::PAULI_Z:
+        case GateType::ROTATION_X:
+        case GateType::ROTATION_Y:
+        case GateType::ROTATION_Z:
+        case GateType::PHASE_GATE_S:
+        case GateType::PHASE_GATE_T:
+        case GateType::CNOT:
+        case GateType::CZ:
+            return !gate.target_qubits.empty();
+        default:
+            return false;
+    }
 }
 
 bool validate_gaussian_track_gate(const GateParams& gate,
@@ -364,6 +429,16 @@ bool validate_gaussian_track_gate(const GateParams& gate,
             return validate_single_qumode_gate("ConditionalSqueezing", true, false);
         case GateType::CONDITIONAL_BEAM_SPLITTER:
             return validate_single_qumode_gate("ConditionalBeamSplitter", true, true);
+        case GateType::CONDITIONAL_TWO_MODE_SQUEEZING:
+            return validate_single_qumode_gate("ConditionalTwoModeSqueezing", true, true);
+        case GateType::CONDITIONAL_SUM:
+            if (!validate_single_qumode_gate("ConditionalSUM", true, true)) {
+                return false;
+            }
+            if (gate.params.size() >= 2 && std::abs(gate.params[1]) > 1e-14) {
+                return fail("ConditionalSUM 当前仅支持 phi = 0 进入Gaussian track");
+            }
+            return true;
         default:
             return fail("该门当前不能进入Gaussian track");
     }
@@ -440,6 +515,32 @@ std::optional<GateParams> resolve_gaussian_gate_for_assignment(
             const double phi = gate.params.size() >= 2 ? gate.params[1].real() : 0.0;
             return GateParams(
                 GateType::BEAM_SPLITTER,
+                {},
+                {gate.target_qumodes[0], gate.target_qumodes[1]},
+                {
+                    std::complex<double>(theta, 0.0),
+                    std::complex<double>(phi, 0.0)
+                });
+        }
+        case GateType::CONDITIONAL_TWO_MODE_SQUEEZING: {
+            const int control_qubit = gate.target_qubits[0];
+            const std::complex<double> xi =
+                qubit_assignment[control_qubit] == 0 ? gate.params[0] : -gate.params[0];
+            return GateParams(
+                GateType::CONDITIONAL_TWO_MODE_SQUEEZING,
+                {},
+                {gate.target_qumodes[0], gate.target_qumodes[1]},
+                {xi});
+        }
+        case GateType::CONDITIONAL_SUM: {
+            const int control_qubit = gate.target_qubits[0];
+            const double theta =
+                qubit_assignment[control_qubit] == 0 ?
+                gate.params[0].real() :
+                -gate.params[0].real();
+            const double phi = gate.params.size() >= 2 ? gate.params[1].real() : 0.0;
+            return GateParams(
+                GateType::CONDITIONAL_SUM,
                 {},
                 {gate.target_qumodes[0], gate.target_qumodes[1]},
                 {
@@ -984,6 +1085,21 @@ SymplecticGate gate_to_symplectic(const GateParams& gate, int total_qumodes) {
                 gate.target_qumodes[0],
                 gate.target_qumodes[1]);
         }
+        case GateType::CONDITIONAL_TWO_MODE_SQUEEZING:
+            return SymplecticFactory::TwoModeSqueezing(
+                gate.params[0],
+                total_qumodes,
+                gate.target_qumodes[0],
+                gate.target_qumodes[1]);
+        case GateType::CONDITIONAL_SUM: {
+            const double phi = gate.params.size() >= 2 ? gate.params[1].real() : 0.0;
+            return SymplecticFactory::SUM(
+                gate.params[0].real(),
+                phi,
+                total_qumodes,
+                gate.target_qumodes[0],
+                gate.target_qumodes[1]);
+        }
         default:
             throw std::invalid_argument("gate cannot be represented as a symplectic update");
     }
@@ -1098,6 +1214,9 @@ HDDNode* QuantumCircuit::scale_hdd_node(HDDNode* node, std::complex<double> weig
     }
 
     if (std::abs(weight) < 1e-14) {
+        if (shared_zero_state_id_ >= 0) {
+            return node_manager_.create_terminal_node(shared_zero_state_id_);
+        }
         const int zero_id = state_pool_.allocate_state();
         if (zero_id < 0) {
             throw std::runtime_error("HDD缩放失败：无法分配零状态");
@@ -1122,6 +1241,26 @@ HDDNode* QuantumCircuit::scale_hdd_node(HDDNode* node, std::complex<double> weig
     }
 
     if (node->is_terminal()) {
+        if (is_symbolic_terminal_id(node->tensor_id)) {
+            const SymbolicTerminalState& symbolic_state =
+                symbolic_terminal_states_.at(node->tensor_id);
+            std::vector<SymbolicGaussianBranch> scaled_branches;
+            scaled_branches.reserve(symbolic_state.branches.size());
+            for (const SymbolicGaussianBranch& existing_branch : symbolic_state.branches) {
+                SymbolicGaussianBranch scaled_branch = existing_branch;
+                scaled_branch.gaussian_state_id =
+                    duplicate_gaussian_state(existing_branch.gaussian_state_id);
+                scaled_branch.weight *= weight;
+                scaled_branches.push_back(std::move(scaled_branch));
+            }
+
+            const int scaled_terminal_id = allocate_symbolic_terminal_id();
+            symbolic_terminal_states_.emplace(
+                scaled_terminal_id,
+                SymbolicTerminalState{std::move(scaled_branches)});
+            return node_manager_.create_terminal_node(scaled_terminal_id);
+        }
+
         const int scaled_state_id = state_pool_.duplicate_state(node->tensor_id);
         if (scaled_state_id < 0) {
             throw std::runtime_error("HDD缩放失败：无法复制终端状态");
@@ -1206,6 +1345,55 @@ HDDNode* QuantumCircuit::hdd_add(HDDNode* n1, std::complex<double> w1, HDDNode* 
     if (n1->is_terminal() && n2->is_terminal()) {
         int id1 = n1->tensor_id;
         int id2 = n2->tensor_id;
+        if (id1 == id2) {
+            return scale_hdd_node(n1, w1 + w2);
+        }
+
+        const bool symbolic1 = is_symbolic_terminal_id(id1);
+        const bool symbolic2 = is_symbolic_terminal_id(id2);
+        const bool zero1 = id1 == shared_zero_state_id_;
+        const bool zero2 = id2 == shared_zero_state_id_;
+
+        if ((symbolic1 || zero1) && (symbolic2 || zero2)) {
+            std::vector<SymbolicGaussianBranch> combined_branches;
+
+            auto append_scaled_branches =
+                [&](int terminal_id, std::complex<double> scale) {
+                    if (std::abs(scale) < 1e-14 || !is_symbolic_terminal_id(terminal_id)) {
+                        return;
+                    }
+                    const SymbolicTerminalState& symbolic_state =
+                        symbolic_terminal_states_.at(terminal_id);
+                    for (const SymbolicGaussianBranch& existing_branch : symbolic_state.branches) {
+                        SymbolicGaussianBranch new_branch = existing_branch;
+                        new_branch.gaussian_state_id =
+                            duplicate_gaussian_state(existing_branch.gaussian_state_id);
+                        new_branch.weight *= scale;
+                        combined_branches.push_back(std::move(new_branch));
+                    }
+                };
+
+            append_scaled_branches(id1, w1);
+            append_scaled_branches(id2, w2);
+
+            if (combined_branches.empty()) {
+                return node_manager_.create_terminal_node(shared_zero_state_id_);
+            }
+
+            const int symbolic_terminal_id = allocate_symbolic_terminal_id();
+            symbolic_terminal_states_.emplace(
+                symbolic_terminal_id,
+                SymbolicTerminalState{std::move(combined_branches)});
+            return node_manager_.create_terminal_node(symbolic_terminal_id);
+        }
+
+        if (symbolic1) {
+            id1 = project_symbolic_terminal_to_fock_state(id1);
+        }
+        if (symbolic2) {
+            id2 = project_symbolic_terminal_to_fock_state(id2);
+        }
+
         int new_id = state_pool_.allocate_state();
         
         // 统计传输时延
@@ -1585,7 +1773,9 @@ std::vector<QuantumCircuit::ExecutionBlock> QuantumCircuit::partition_execution_
     size_t gate_index = 0;
     while (gate_index < execution_sequence.size()) {
         ExecutionBlockKind kind = ExecutionBlockKind::Other;
-        if (is_gaussian_track_gate(execution_sequence[gate_index])) {
+        if (is_pure_qubit_gate(execution_sequence[gate_index])) {
+            kind = ExecutionBlockKind::QubitOnly;
+        } else if (is_gaussian_track_gate(execution_sequence[gate_index])) {
             kind = ExecutionBlockKind::Gaussian;
         } else if (is_pure_cv_diagonal_non_gaussian_gate(execution_sequence[gate_index])) {
             kind = ExecutionBlockKind::DiagonalNonGaussian;
@@ -1594,7 +1784,9 @@ std::vector<QuantumCircuit::ExecutionBlock> QuantumCircuit::partition_execution_
         size_t block_end = gate_index + 1;
         while (block_end < execution_sequence.size()) {
             ExecutionBlockKind next_kind = ExecutionBlockKind::Other;
-            if (is_gaussian_track_gate(execution_sequence[block_end])) {
+            if (is_pure_qubit_gate(execution_sequence[block_end])) {
+                next_kind = ExecutionBlockKind::QubitOnly;
+            } else if (is_gaussian_track_gate(execution_sequence[block_end])) {
                 next_kind = ExecutionBlockKind::Gaussian;
             } else if (is_pure_cv_diagonal_non_gaussian_gate(execution_sequence[block_end])) {
                 next_kind = ExecutionBlockKind::DiagonalNonGaussian;
@@ -1635,7 +1827,9 @@ QuantumCircuit::CompiledExecutionBlock QuantumCircuit::compile_execution_block(
     for (size_t next_block_index = block_index + 1;
          next_block_index < execution_blocks.size();
          ++next_block_index) {
-        if (execution_blocks[next_block_index].kind != ExecutionBlockKind::Gaussian) {
+        const ExecutionBlockKind next_kind = execution_blocks[next_block_index].kind;
+        if (next_kind != ExecutionBlockKind::Gaussian &&
+            next_kind != ExecutionBlockKind::QubitOnly) {
             compiled_block.downstream_non_gaussianity = 1.0;
             break;
         }
@@ -1702,6 +1896,7 @@ QuantumCircuit::CompiledExecutionBlock QuantumCircuit::compile_execution_block(
 
 bool QuantumCircuit::try_execute_gaussian_block_with_ede(
     const CompiledExecutionBlock& compiled_block) {
+    ScopedNvtxRange nvtx_range("qc::gaussian_block_ede");
     if (compiled_block.kind != ExecutionBlockKind::Gaussian ||
         compiled_block.gates.empty() ||
         !root_node_) {
@@ -1983,6 +2178,24 @@ void QuantumCircuit::apply_replayable_gaussian_gate_to_state(int state_id, const
                 gate.target_qumodes[1]);
             break;
         }
+        case GateType::CONDITIONAL_TWO_MODE_SQUEEZING:
+            apply_two_mode_squeezing_to_state(
+                state_id,
+                gate.target_qumodes[0],
+                gate.target_qumodes[1],
+                gate.params[0]);
+            break;
+        case GateType::CONDITIONAL_SUM: {
+            const double theta = gate.params[0].real();
+            const double phi = gate.params.size() >= 2 ? gate.params[1].real() : 0.0;
+            apply_sum_to_state(
+                state_id,
+                gate.target_qumodes[0],
+                gate.target_qumodes[1],
+                theta,
+                phi);
+            break;
+        }
         default:
             throw std::runtime_error("symbolic->Fock replay encountered unsupported Gaussian gate");
     }
@@ -2041,6 +2254,7 @@ int QuantumCircuit::project_symbolic_terminal_to_fock_state(int terminal_id) {
 }
 
 bool QuantumCircuit::materialize_symbolic_terminals_to_fock() {
+    ScopedNvtxRange nvtx_range("qc::symbolic_to_fock");
     if (!has_symbolic_terminals()) {
         return true;
     }
@@ -2082,6 +2296,7 @@ bool QuantumCircuit::materialize_symbolic_terminals_to_fock() {
 
 bool QuantumCircuit::try_execute_diagonal_non_gaussian_block_with_mixture(
     const CompiledExecutionBlock& compiled_block) {
+    ScopedNvtxRange nvtx_range("qc::diagonal_mixture");
     if (compiled_block.kind != ExecutionBlockKind::DiagonalNonGaussian ||
         compiled_block.gates.empty()) {
         return false;
@@ -2099,6 +2314,9 @@ bool QuantumCircuit::try_execute_diagonal_non_gaussian_block_with_mixture(
     ensure_gaussian_state_pool();
     std::unordered_map<int, VacuumRayInfo> terminal_state_cache;
     std::unordered_map<int, HDDNode*> transformed_terminal_cache;
+    std::vector<int> created_symbolic_terminal_ids;
+    std::vector<HDDNode*> created_nodes;
+    const int saved_next_symbolic_terminal_id = next_symbolic_terminal_id_;
 
     auto free_branch_states = [&](std::vector<SymbolicGaussianBranch>* branches) {
         if (!gaussian_state_pool_) {
@@ -2112,137 +2330,163 @@ bool QuantumCircuit::try_execute_diagonal_non_gaussian_block_with_mixture(
         branches->clear();
     };
 
-    std::function<HDDNode*(HDDNode*)> transform_recursive =
-        [&](HDDNode* node) -> HDDNode* {
-            if (!node) {
-                return nullptr;
-            }
-            if (node->is_terminal()) {
-                if (node->tensor_id == shared_zero_state_id_) {
-                    return node_manager_.create_terminal_node(shared_zero_state_id_);
+    auto make_terminal_node = [&](int tensor_id) -> HDDNode* {
+        HDDNode* node = node_manager_.create_terminal_node(tensor_id);
+        created_nodes.push_back(node);
+        return node;
+    };
+
+    auto make_internal_node = [&](int16_t level,
+                                  HDDNode* low,
+                                  HDDNode* high,
+                                  std::complex<double> w_low,
+                                  std::complex<double> w_high) -> HDDNode* {
+        HDDNode* node = node_manager_.get_or_create_node(level, low, high, w_low, w_high);
+        created_nodes.push_back(node);
+        return node;
+    };
+
+    try {
+        std::function<HDDNode*(HDDNode*)> transform_recursive =
+            [&](HDDNode* node) -> HDDNode* {
+                if (!node) {
+                    return nullptr;
                 }
-
-                const auto transformed_it = transformed_terminal_cache.find(node->tensor_id);
-                if (transformed_it != transformed_terminal_cache.end()) {
-                    return transformed_it->second;
-                }
-
-                std::vector<SymbolicGaussianBranch> current_branches;
-
-                if (is_symbolic_terminal_id(node->tensor_id)) {
-                    const SymbolicTerminalState& symbolic_state =
-                        symbolic_terminal_states_.at(node->tensor_id);
-                    current_branches.reserve(symbolic_state.branches.size());
-                    for (const SymbolicGaussianBranch& existing_branch : symbolic_state.branches) {
-                        SymbolicGaussianBranch duplicated_branch = existing_branch;
-                        duplicated_branch.gaussian_state_id =
-                            duplicate_gaussian_state(existing_branch.gaussian_state_id);
-                        current_branches.push_back(std::move(duplicated_branch));
+                if (node->is_terminal()) {
+                    if (node->tensor_id == shared_zero_state_id_) {
+                        return make_terminal_node(shared_zero_state_id_);
                     }
-                } else {
-                    auto cache_it = terminal_state_cache.find(node->tensor_id);
-                    if (cache_it == terminal_state_cache.end()) {
-                        cache_it = terminal_state_cache.emplace(
-                            node->tensor_id,
-                            classify_vacuum_ray_on_device(state_pool_, node->tensor_id)).first;
+
+                    const auto transformed_it = transformed_terminal_cache.find(node->tensor_id);
+                    if (transformed_it != transformed_terminal_cache.end()) {
+                        return transformed_it->second;
                     }
-                    const VacuumRayInfo& info = cache_it->second;
-                    if (info.is_zero) {
-                        HDDNode* zero_terminal =
-                            node_manager_.create_terminal_node(shared_zero_state_id_);
+
+                    std::vector<SymbolicGaussianBranch> current_branches;
+
+                    if (is_symbolic_terminal_id(node->tensor_id)) {
+                        const SymbolicTerminalState& symbolic_state =
+                            symbolic_terminal_states_.at(node->tensor_id);
+                        current_branches.reserve(symbolic_state.branches.size());
+                        for (const SymbolicGaussianBranch& existing_branch : symbolic_state.branches) {
+                            SymbolicGaussianBranch duplicated_branch = existing_branch;
+                            duplicated_branch.gaussian_state_id =
+                                duplicate_gaussian_state(existing_branch.gaussian_state_id);
+                            current_branches.push_back(std::move(duplicated_branch));
+                        }
+                    } else {
+                        auto cache_it = terminal_state_cache.find(node->tensor_id);
+                        if (cache_it == terminal_state_cache.end()) {
+                            cache_it = terminal_state_cache.emplace(
+                                node->tensor_id,
+                                classify_vacuum_ray_on_device(state_pool_, node->tensor_id)).first;
+                        }
+                        const VacuumRayInfo& info = cache_it->second;
+                        if (info.is_zero) {
+                            HDDNode* zero_terminal = make_terminal_node(shared_zero_state_id_);
+                            transformed_terminal_cache.emplace(node->tensor_id, zero_terminal);
+                            return zero_terminal;
+                        }
+                        if (!info.is_scaled_vacuum) {
+                            throw std::runtime_error(
+                                "当前DiagonalNonGaussian symbolic路径仅支持vacuum或已有Gaussian/GaussianMixture terminal，state_id=" +
+                                std::to_string(node->tensor_id));
+                        }
+
+                        const int gaussian_state_id = gaussian_state_pool_->allocate_state();
+                        if (gaussian_state_id < 0) {
+                            throw std::runtime_error("Gaussian状态池已满，无法创建mixture base branch");
+                        }
+                        initialize_gaussian_vacuum_state(gaussian_state_id);
+                        current_branches.push_back({gaussian_state_id, info.scale, {}});
+                    }
+
+                    try {
+                        auto compute_start = std::chrono::high_resolution_clock::now();
+                        for (const GaussianMixtureApproximation& approximation :
+                             compiled_block.diagonal_mixture_updates) {
+                            std::vector<SymbolicGaussianBranch> expanded_branches;
+                            for (const SymbolicGaussianBranch& base_branch : current_branches) {
+                                for (const GaussianMixtureBranch& mixture_branch : approximation.branches) {
+                                    const std::complex<double> new_weight =
+                                        base_branch.weight * mixture_branch.weight;
+                                    if (std::abs(new_weight) < kSymbolicBranchPruneTolerance) {
+                                        continue;
+                                    }
+
+                                    SymbolicGaussianBranch expanded_branch = base_branch;
+                                    expanded_branch.weight = new_weight;
+                                    expanded_branch.gaussian_state_id =
+                                        duplicate_gaussian_state(base_branch.gaussian_state_id);
+
+                                    for (size_t idx = 0; idx < mixture_branch.target_qumodes.size(); ++idx) {
+                                        const double theta = mixture_branch.phase_rotation_thetas[idx];
+                                        if (std::abs(theta) < kDiagonalCanonicalizationTolerance) {
+                                            continue;
+                                        }
+                                        GateParams phase_gate(
+                                            GateType::PHASE_ROTATION,
+                                            {},
+                                            {mixture_branch.target_qumodes[idx]},
+                                            {std::complex<double>(theta, 0.0)});
+                                        apply_symplectic_update_to_gaussian_states(
+                                            {expanded_branch.gaussian_state_id},
+                                            gate_to_symplectic(phase_gate, num_qumodes_));
+                                        expanded_branch.replay_gates.push_back(phase_gate);
+                                    }
+                                    expanded_branches.push_back(std::move(expanded_branch));
+                                }
+                            }
+
+                            free_branch_states(&current_branches);
+                            current_branches = std::move(expanded_branches);
+                            if (current_branches.size() > kMaxSymbolicBranchesPerTerminal) {
+                                free_branch_states(&current_branches);
+                                throw std::runtime_error("symbolic mixture branch count exceeded limit");
+                            }
+                        }
+                        auto compute_end = std::chrono::high_resolution_clock::now();
+                        computation_time_ +=
+                            std::chrono::duration<double, std::milli>(compute_end - compute_start).count();
+                    } catch (...) {
+                        free_branch_states(&current_branches);
+                        throw;
+                    }
+
+                    if (current_branches.empty()) {
+                        HDDNode* zero_terminal = make_terminal_node(shared_zero_state_id_);
                         transformed_terminal_cache.emplace(node->tensor_id, zero_terminal);
                         return zero_terminal;
                     }
-                    if (!info.is_scaled_vacuum) {
-                        throw std::runtime_error(
-                            "当前DiagonalNonGaussian symbolic路径仅支持vacuum或已有Gaussian/GaussianMixture terminal，state_id=" +
-                            std::to_string(node->tensor_id));
-                    }
 
-                    const int gaussian_state_id = gaussian_state_pool_->allocate_state();
-                    if (gaussian_state_id < 0) {
-                        throw std::runtime_error("Gaussian状态池已满，无法创建mixture base branch");
-                    }
-                    initialize_gaussian_vacuum_state(gaussian_state_id);
-                    current_branches.push_back({gaussian_state_id, info.scale, {}});
+                    int symbolic_terminal_id = allocate_symbolic_terminal_id();
+                    created_symbolic_terminal_ids.push_back(symbolic_terminal_id);
+                    symbolic_terminal_states_.emplace(
+                        symbolic_terminal_id,
+                        SymbolicTerminalState{std::move(current_branches)});
+                    HDDNode* transformed_terminal = make_terminal_node(symbolic_terminal_id);
+                    transformed_terminal_cache.emplace(node->tensor_id, transformed_terminal);
+                    return transformed_terminal;
                 }
 
-                try {
-                    auto compute_start = std::chrono::high_resolution_clock::now();
-                    for (const GaussianMixtureApproximation& approximation :
-                         compiled_block.diagonal_mixture_updates) {
-                        std::vector<SymbolicGaussianBranch> expanded_branches;
-                        for (const SymbolicGaussianBranch& base_branch : current_branches) {
-                            for (const GaussianMixtureBranch& mixture_branch : approximation.branches) {
-                                const std::complex<double> new_weight =
-                                    base_branch.weight * mixture_branch.weight;
-                                if (std::abs(new_weight) < kSymbolicBranchPruneTolerance) {
-                                    continue;
-                                }
+                HDDNode* new_low = transform_recursive(node->low);
+                HDDNode* new_high = transform_recursive(node->high);
+                return make_internal_node(
+                    node->qubit_level, new_low, new_high, node->w_low, node->w_high);
+            };
 
-                                SymbolicGaussianBranch expanded_branch = base_branch;
-                                expanded_branch.weight = new_weight;
-                                expanded_branch.gaussian_state_id =
-                                    duplicate_gaussian_state(base_branch.gaussian_state_id);
-
-                                for (size_t idx = 0; idx < mixture_branch.target_qumodes.size(); ++idx) {
-                                    const double theta = mixture_branch.phase_rotation_thetas[idx];
-                                    if (std::abs(theta) < kDiagonalCanonicalizationTolerance) {
-                                        continue;
-                                    }
-                                    GateParams phase_gate(
-                                        GateType::PHASE_ROTATION,
-                                        {},
-                                        {mixture_branch.target_qumodes[idx]},
-                                        {std::complex<double>(theta, 0.0)});
-                                    apply_symplectic_update_to_gaussian_states(
-                                        {expanded_branch.gaussian_state_id},
-                                        gate_to_symplectic(phase_gate, num_qumodes_));
-                                    expanded_branch.replay_gates.push_back(phase_gate);
-                                }
-                                expanded_branches.push_back(std::move(expanded_branch));
-                            }
-                        }
-
-                        free_branch_states(&current_branches);
-                        current_branches = std::move(expanded_branches);
-                        if (current_branches.size() > kMaxSymbolicBranchesPerTerminal) {
-                            free_branch_states(&current_branches);
-                            throw std::runtime_error("symbolic mixture branch count exceeded limit");
-                        }
-                    }
-                    auto compute_end = std::chrono::high_resolution_clock::now();
-                    computation_time_ +=
-                        std::chrono::duration<double, std::milli>(compute_end - compute_start).count();
-                } catch (...) {
-                    free_branch_states(&current_branches);
-                    throw;
-                }
-
-                if (current_branches.empty()) {
-                    HDDNode* zero_terminal =
-                        node_manager_.create_terminal_node(shared_zero_state_id_);
-                    transformed_terminal_cache.emplace(node->tensor_id, zero_terminal);
-                    return zero_terminal;
-                }
-
-                int symbolic_terminal_id = allocate_symbolic_terminal_id();
-                symbolic_terminal_states_.emplace(
-                    symbolic_terminal_id,
-                    SymbolicTerminalState{std::move(current_branches)});
-                HDDNode* transformed_terminal =
-                    node_manager_.create_terminal_node(symbolic_terminal_id);
-                transformed_terminal_cache.emplace(node->tensor_id, transformed_terminal);
-                return transformed_terminal;
-            }
-
-            HDDNode* new_low = transform_recursive(node->low);
-            HDDNode* new_high = transform_recursive(node->high);
-            return node_manager_.get_or_create_node(
-                node->qubit_level, new_low, new_high, node->w_low, node->w_high);
-        };
-
-    replace_root_node(transform_recursive(root_node_));
+        replace_root_node(transform_recursive(root_node_));
+    } catch (const std::exception& e) {
+        for (auto it = created_nodes.rbegin(); it != created_nodes.rend(); ++it) {
+            node_manager_.release_node(*it);
+        }
+        for (int terminal_id : created_symbolic_terminal_ids) {
+            release_symbolic_terminal(terminal_id);
+        }
+        next_symbolic_terminal_id_ = saved_next_symbolic_terminal_id;
+        std::cout << "对角非高斯块Gaussian Mixture回退到精确Fock执行: " << e.what() << std::endl;
+        return false;
+    }
 
     std::cout << "对角非高斯块Gaussian Mixture已启用，块门数="
               << compiled_block.gates.size()
@@ -2257,6 +2501,7 @@ bool QuantumCircuit::try_execute_diagonal_non_gaussian_block_with_mixture(
  * 执行量子线路
  */
 void QuantumCircuit::execute() {
+    ScopedNvtxRange nvtx_range("qc::execute");
     if (!is_built_) {
         throw std::runtime_error("必须先构建量子线路");
     }
@@ -2278,9 +2523,13 @@ void QuantumCircuit::execute() {
     auto start_total = std::chrono::high_resolution_clock::now();
 
     auto planning_start = std::chrono::high_resolution_clock::now();
-    const std::vector<GateParams> execution_sequence = canonicalize_gate_sequence_for_execution();
-    const std::vector<ExecutionBlock> execution_blocks =
-        partition_execution_blocks(execution_sequence);
+    std::vector<GateParams> execution_sequence;
+    std::vector<ExecutionBlock> execution_blocks;
+    {
+        ScopedNvtxRange planning_range("qc::planning");
+        execution_sequence = canonicalize_gate_sequence_for_execution();
+        execution_blocks = partition_execution_blocks(execution_sequence);
+    }
     auto planning_end = std::chrono::high_resolution_clock::now();
     planning_time_ +=
         std::chrono::duration<double, std::milli>(planning_end - planning_start).count();
@@ -2328,9 +2577,101 @@ void QuantumCircuit::execute() {
             continue;
         }
 
-        if (has_symbolic_terminals()) {
+        if (current_block.kind != ExecutionBlockKind::QubitOnly &&
+            has_symbolic_terminals()) {
             materialize_symbolic_terminals_to_fock();
         }
+
+        // ── Cross-mode fused diagonal optimization ──────────────────
+        // Fuse multiple diagonal gates (PhaseRotation/Kerr/ConditionalParity)
+        // into a single kernel pass. This also catches Gaussian blocks that
+        // fell back from EDE (their kind is still Gaussian but they contain
+        // fusable diagonal gates like PhaseRotation).
+        if (current_block.kind != ExecutionBlockKind::QubitOnly) {
+            // Partition gates: fusable simple diagonals vs. everything else
+            std::vector<GateParams> fusable_gates;
+            std::vector<GateParams> other_gates;
+            for (const GateParams& gate : current_block.gates) {
+                if (gate.target_qubits.empty() && !gate.target_qumodes.empty() &&
+                    (gate.type == GateType::PHASE_ROTATION ||
+                     gate.type == GateType::KERR_GATE ||
+                     gate.type == GateType::CONDITIONAL_PARITY)) {
+                    fusable_gates.push_back(gate);
+                } else {
+                    other_gates.push_back(gate);
+                }
+            }
+
+            if (fusable_gates.size() >= 2) {
+                // Build per-mode descriptor: accumulate params by target mode
+                std::map<int, FusedDiagonalOp> mode_ops;
+                for (const GateParams& gate : fusable_gates) {
+                    int mode = gate.target_qumodes[0];
+                    auto& op = mode_ops[mode];
+                    if (op.right_stride == 0) {
+                        // Compute right stride for this mode
+                        int rs = 1;
+                        for (int m = mode + 1; m < num_qumodes_; ++m) {
+                            rs *= cv_truncation_;
+                        }
+                        op.right_stride = rs;
+                    }
+                    double param = gate.params[0].real();
+                    switch (gate.type) {
+                        case GateType::PHASE_ROTATION:   op.theta   += param; break;
+                        case GateType::KERR_GATE:        op.chi     += param; break;
+                        case GateType::CONDITIONAL_PARITY: op.parity += param; break;
+                        default: break;
+                    }
+                }
+
+                std::vector<FusedDiagonalOp> ops_vec;
+                ops_vec.reserve(mode_ops.size());
+                for (auto& [mode, op] : mode_ops) {
+                    if (std::abs(op.theta) > 1e-14 ||
+                        std::abs(op.chi)   > 1e-14 ||
+                        std::abs(op.parity)> 1e-14) {
+                        ops_vec.push_back(op);
+                    }
+                }
+
+                if (!ops_vec.empty()) {
+                    auto target_states = collect_target_states(fusable_gates[0]);
+                    if (!target_states.empty()) {
+                        auto transfer_start = std::chrono::high_resolution_clock::now();
+                        const size_t ids_bytes = target_states.size() * sizeof(int);
+                        int* d_target_ids = static_cast<int*>(
+                            state_pool_.scratch_target_ids.ensure(ids_bytes));
+                        CHECK_CUDA(cudaMemcpy(d_target_ids, target_states.data(),
+                                   ids_bytes, cudaMemcpyHostToDevice));
+                        auto transfer_end = std::chrono::high_resolution_clock::now();
+                        transfer_time_ += std::chrono::duration<double, std::milli>(
+                            transfer_end - transfer_start).count();
+
+                        auto compute_start = std::chrono::high_resolution_clock::now();
+                        apply_fused_diagonal_gates(&state_pool_, d_target_ids,
+                                                   static_cast<int>(target_states.size()),
+                                                   ops_vec, num_qumodes_);
+                        auto compute_end = std::chrono::high_resolution_clock::now();
+                        computation_time_ += std::chrono::duration<double, std::milli>(
+                            compute_end - compute_start).count();
+                    }
+                }
+
+                // Execute remaining non-fusable gates normally
+                for (const GateParams& gate : other_gates) {
+                    execute_gate(gate);
+                }
+
+                if (block_index + 1 < execution_blocks.size()) {
+                    current_block = next_block_future.get();
+                    planning_time_ += current_block.compile_time_ms;
+                    next_block_future = std::future<CompiledExecutionBlock>();
+                }
+                continue;
+            }
+        }
+        // ── End fused diagonal ──────────────────────────────────────
 
         for (const GateParams& gate : current_block.gates) {
             execute_gate(gate);
@@ -2540,6 +2881,7 @@ void QuantumCircuit::execute_gate(const GateParams& gate) {
  * 执行Level 0门 (对角门)
  */
 void QuantumCircuit::execute_level0_gate(const GateParams& gate) {
+    ScopedNvtxRange nvtx_range("qc::execute_level0_gate");
     auto target_states = collect_target_states(gate);
 
     if (target_states.empty()) return;
@@ -2547,12 +2889,12 @@ void QuantumCircuit::execute_level0_gate(const GateParams& gate) {
     // 统计传输时延
     auto transfer_start = std::chrono::high_resolution_clock::now();
     
-    // 上传状态ID到GPU
-    int* d_target_ids = nullptr;
-    CHECK_CUDA(cudaMalloc(&d_target_ids, target_states.size() * sizeof(int)));
+    // 上传状态ID到GPU (scratch buffer — no per-gate cudaMalloc)
+    const size_t ids_bytes = target_states.size() * sizeof(int);
+    int* d_target_ids = static_cast<int*>(state_pool_.scratch_target_ids.ensure(ids_bytes));
     CHECK_CUDA(cudaMemcpy(d_target_ids, target_states.data(),
-               target_states.size() * sizeof(int), cudaMemcpyHostToDevice));
-               
+               ids_bytes, cudaMemcpyHostToDevice));
+
     auto transfer_end = std::chrono::high_resolution_clock::now();
     transfer_time_ += std::chrono::duration<double, std::milli>(transfer_end - transfer_start).count();
 
@@ -2561,7 +2903,7 @@ void QuantumCircuit::execute_level0_gate(const GateParams& gate) {
 
     // 统计计算时延
     auto compute_start = std::chrono::high_resolution_clock::now();
-    
+
     switch (gate.type) {
         case GateType::PHASE_ROTATION:
             apply_phase_rotation_on_mode(&state_pool_, d_target_ids, target_states.size(), param,
@@ -2577,7 +2919,6 @@ void QuantumCircuit::execute_level0_gate(const GateParams& gate) {
             break;
         case GateType::SNAP_GATE: {
             if (gate.params.size() < 2) {
-                CHECK_CUDA(cudaFree(d_target_ids));
                 throw std::runtime_error("SNAP门缺少目标Fock态参数");
             }
             const int target_fock_state = static_cast<int>(std::llround(gate.params[1].real()));
@@ -2597,7 +2938,6 @@ void QuantumCircuit::execute_level0_gate(const GateParams& gate) {
         }
         case GateType::CROSS_KERR_GATE: {
             if (gate.target_qumodes.size() < 2) {
-                CHECK_CUDA(cudaFree(d_target_ids));
                 throw std::runtime_error("Cross-Kerr门缺少两个目标qumode");
             }
             apply_ckgate_on_modes(&state_pool_, d_target_ids, target_states.size(), param,
@@ -2605,24 +2945,22 @@ void QuantumCircuit::execute_level0_gate(const GateParams& gate) {
             break;
         }
         default:
-            CHECK_CUDA(cudaFree(d_target_ids));
             throw std::runtime_error("未实现的Level0门类型");
     }
 
     // 检查GPU内核执行错误
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
-    
+
     auto compute_end = std::chrono::high_resolution_clock::now();
     computation_time_ += std::chrono::duration<double, std::milli>(compute_end - compute_start).count();
-
-    CHECK_CUDA(cudaFree(d_target_ids));
 }
 
 /**
  * 执行Level 1门 (梯算符门)
  */
 void QuantumCircuit::execute_level1_gate(const GateParams& gate) {
+    ScopedNvtxRange nvtx_range("qc::execute_level1_gate");
     auto target_states = collect_target_states(gate);
 
     if (target_states.empty()) return;
@@ -2630,18 +2968,18 @@ void QuantumCircuit::execute_level1_gate(const GateParams& gate) {
     // 统计传输时延
     auto transfer_start = std::chrono::high_resolution_clock::now();
     
-    int* d_target_ids = nullptr;
-    CHECK_CUDA(cudaMalloc(&d_target_ids, target_states.size() * sizeof(int)));
+    const size_t ids_bytes = target_states.size() * sizeof(int);
+    int* d_target_ids = static_cast<int*>(state_pool_.scratch_target_ids.ensure(ids_bytes));
     CHECK_CUDA(cudaMemcpy(d_target_ids, target_states.data(),
-               target_states.size() * sizeof(int), cudaMemcpyHostToDevice));
-               
+               ids_bytes, cudaMemcpyHostToDevice));
+
     auto transfer_end = std::chrono::high_resolution_clock::now();
     transfer_time_ += std::chrono::duration<double, std::milli>(transfer_end - transfer_start).count();
 
     // 统计计算时延
     auto compute_start = std::chrono::high_resolution_clock::now();
     const int target_qumode = gate.target_qumodes.empty() ? 0 : gate.target_qumodes[0];
-    
+
     switch (gate.type) {
         case GateType::CREATION_OPERATOR:
             apply_creation_operator_on_mode(&state_pool_, d_target_ids, target_states.size(),
@@ -2658,17 +2996,16 @@ void QuantumCircuit::execute_level1_gate(const GateParams& gate) {
     // 检查GPU内核执行错误
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
-    
+
     auto compute_end = std::chrono::high_resolution_clock::now();
     computation_time_ += std::chrono::duration<double, std::milli>(compute_end - compute_start).count();
-
-    CHECK_CUDA(cudaFree(d_target_ids));
 }
 
 /**
  * 执行Level 2门 (单模门)
  */
 void QuantumCircuit::execute_level2_gate(const GateParams& gate) {
+    ScopedNvtxRange nvtx_range("qc::execute_level2_gate");
     auto target_states = collect_target_states(gate);
 
     if (target_states.empty()) return;
@@ -2676,11 +3013,11 @@ void QuantumCircuit::execute_level2_gate(const GateParams& gate) {
     // 统计传输时延
     auto transfer_start = std::chrono::high_resolution_clock::now();
     
-    int* d_target_ids = nullptr;
-    CHECK_CUDA(cudaMalloc(&d_target_ids, target_states.size() * sizeof(int)));
+    const size_t ids_bytes = target_states.size() * sizeof(int);
+    int* d_target_ids = static_cast<int*>(state_pool_.scratch_target_ids.ensure(ids_bytes));
     CHECK_CUDA(cudaMemcpy(d_target_ids, target_states.data(),
-               target_states.size() * sizeof(int), cudaMemcpyHostToDevice));
-               
+               ids_bytes, cudaMemcpyHostToDevice));
+
     auto transfer_end = std::chrono::high_resolution_clock::now();
     transfer_time_ += std::chrono::duration<double, std::milli>(transfer_end - transfer_start).count();
 
@@ -2740,7 +3077,6 @@ void QuantumCircuit::execute_level2_gate(const GateParams& gate) {
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
                 delete ell_op;
-                CHECK_CUDA(cudaFree(d_target_ids));
                 throw std::runtime_error("GPU单模门执行失败: " + std::string(cudaGetErrorString(err)));
             }
             
@@ -2757,14 +3093,13 @@ void QuantumCircuit::execute_level2_gate(const GateParams& gate) {
             if (ell_op) delete ell_op;
         }
     }
-
-    CHECK_CUDA(cudaFree(d_target_ids));
 }
 
 /**
  * 执行Level 3门 (双模门)
  */
 void QuantumCircuit::execute_level3_gate(const GateParams& gate) {
+    ScopedNvtxRange nvtx_range("qc::execute_level3_gate");
     auto target_states = collect_target_states(gate);
 
     if (target_states.empty()) return;
@@ -2772,11 +3107,11 @@ void QuantumCircuit::execute_level3_gate(const GateParams& gate) {
     // 统计传输时延
     auto transfer_start = std::chrono::high_resolution_clock::now();
     
-    int* d_target_ids = nullptr;
-    CHECK_CUDA(cudaMalloc(&d_target_ids, target_states.size() * sizeof(int)));
+    const size_t ids_bytes = target_states.size() * sizeof(int);
+    int* d_target_ids = static_cast<int*>(state_pool_.scratch_target_ids.ensure(ids_bytes));
     CHECK_CUDA(cudaMemcpy(d_target_ids, target_states.data(),
-               target_states.size() * sizeof(int), cudaMemcpyHostToDevice));
-               
+               ids_bytes, cudaMemcpyHostToDevice));
+
     auto transfer_end = std::chrono::high_resolution_clock::now();
     transfer_time_ += std::chrono::duration<double, std::milli>(transfer_end - transfer_start).count();
 
@@ -2788,20 +3123,17 @@ void QuantumCircuit::execute_level3_gate(const GateParams& gate) {
 
         // 统计计算时延
         auto compute_start = std::chrono::high_resolution_clock::now();
-        
+
         apply_beam_splitter_recursive(&state_pool_, d_target_ids, static_cast<int>(target_states.size()),
                                       theta, phi, target_qumode1, target_qumode2, num_qumodes_);
 
         // 检查GPU内核执行错误
         CHECK_CUDA(cudaGetLastError());
         CHECK_CUDA(cudaDeviceSynchronize());
-        
+
         auto compute_end = std::chrono::high_resolution_clock::now();
         computation_time_ += std::chrono::duration<double, std::milli>(compute_end - compute_start).count();
-
     }
-
-    CHECK_CUDA(cudaFree(d_target_ids));
 }
 
 /**
@@ -2835,6 +3167,7 @@ void QuantumCircuit::execute_level4_gate(const GateParams& gate) {
  * 执行Qubit门操作
  */
 void QuantumCircuit::execute_qubit_gate(const GateParams& gate) {
+    ScopedNvtxRange nvtx_range("qc::execute_qubit_gate");
     if (gate.target_qubits.empty()) {
         throw std::runtime_error("Qubit门需要指定目标Qubit");
     }
@@ -2960,6 +3293,7 @@ void QuantumCircuit::execute_qubit_gate(const GateParams& gate) {
  * 执行混合门操作 (CPU+GPU)
  */
 void QuantumCircuit::execute_hybrid_gate(const GateParams& gate) {
+    ScopedNvtxRange nvtx_range("qc::execute_hybrid_gate");
     // 混合门需要同时操作Qubit和Qumode
     // 根据gatemath.md，这些门分为分离型和混合型
 
@@ -3790,6 +4124,7 @@ void QuantumCircuit::apply_selective_qubit_rotation_to_state(
  * 收集需要更新的状态ID
  */
 std::vector<int> QuantumCircuit::collect_target_states(const GateParams& gate) {
+    ScopedNvtxRange nvtx_range("qc::collect_target_states");
     (void)gate;
     std::vector<int> state_ids = collect_terminal_state_ids(root_node_);
     state_ids.erase(

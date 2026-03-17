@@ -230,6 +230,7 @@ private:
     enum class ExecutionBlockKind {
         Gaussian,
         DiagonalNonGaussian,
+        QubitOnly,
         Other
     };
 

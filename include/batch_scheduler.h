@@ -4,6 +4,7 @@
 #include <queue>
 #include <memory>
 #include <functional>
+#include <string>
 #include "quantum_circuit.h"
 
 /**
@@ -41,6 +42,11 @@ struct BatchTask {
  */
 class BatchScheduler {
 private:
+    struct CapturedGraphTask {
+        BatchTask task;
+        int* d_target_ids = nullptr;
+    };
+
     std::priority_queue<BatchTask> task_queue_;  // 任务队列
     std::vector<BatchTask> pending_batch_;       // 当前批次待处理任务
     size_t max_batch_size_;                      // 最大批次大小
@@ -52,6 +58,7 @@ private:
     size_t total_tasks_processed_;
     size_t total_batches_executed_;
     double total_execution_time_;
+    std::vector<CapturedGraphTask> captured_graph_tasks_;
 
 public:
     /**
@@ -60,6 +67,11 @@ public:
      * @param max_batch_size 最大批次大小
      */
     BatchScheduler(CVStatePool* state_pool, size_t max_batch_size = 64);
+
+    /**
+     * 析构函数
+     */
+    ~BatchScheduler();
 
     /**
      * 添加任务到调度器
@@ -147,6 +159,21 @@ private:
      * 执行Level 2门批次
      */
     void execute_level2_batch(const std::vector<BatchTask>& batch);
+
+    /**
+     * 检查当前批次是否支持CUDA Graph捕获
+     */
+    bool can_capture_pending_batch_with_cuda_graph(std::string* reason = nullptr) const;
+
+    /**
+     * 释放已准备的CUDA Graph任务缓冲区
+     */
+    void release_captured_graph_tasks();
+
+    /**
+     * 在给定stream上执行已经准备好的Level 0批次
+     */
+    void execute_prepared_level0_batch(const std::vector<CapturedGraphTask>& batch, cudaStream_t stream);
 
     /**
      * 合并相同类型的任务

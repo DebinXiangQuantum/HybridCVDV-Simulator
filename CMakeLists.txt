@@ -166,6 +166,14 @@ endif()
 # 链接CUDA运行时
 if(CUDA_FOUND)
     target_link_libraries(${PROJECT_NAME} ${CUDA_LIBRARIES} CUDA::cublas)
+    if(TARGET CUDA::nvToolsExt)
+        target_link_libraries(${PROJECT_NAME} CUDA::nvToolsExt)
+        target_compile_definitions(${PROJECT_NAME} PRIVATE HYBRIDCVDV_HAS_NVTX=1)
+    else()
+        target_compile_definitions(${PROJECT_NAME} PRIVATE HYBRIDCVDV_HAS_NVTX=0)
+    endif()
+else()
+    target_compile_definitions(${PROJECT_NAME} PRIVATE HYBRIDCVDV_HAS_NVTX=0)
 endif()
 
 # 主可执行文件
@@ -216,6 +224,18 @@ add_executable(${PROJECT_NAME}_random_circuit_benchmark tests/analyze/random_cir
 target_link_libraries(${PROJECT_NAME}_random_circuit_benchmark ${PROJECT_NAME})
 if(CUDA_FOUND)
     target_link_libraries(${PROJECT_NAME}_random_circuit_benchmark ${CUDA_LIBRARIES} CUDA::cublas)
+endif()
+
+add_executable(${PROJECT_NAME}_two_mode_tensor_benchmark tests/analyze/two_mode_tensor_benchmark.cpp)
+target_link_libraries(${PROJECT_NAME}_two_mode_tensor_benchmark ${PROJECT_NAME})
+if(CUDA_FOUND)
+    target_link_libraries(${PROJECT_NAME}_two_mode_tensor_benchmark ${CUDA_LIBRARIES} CUDA::cublas)
+endif()
+
+add_executable(${PROJECT_NAME}_cuda_graph_benchmark tests/analyze/cuda_graph_benchmark.cpp)
+target_link_libraries(${PROJECT_NAME}_cuda_graph_benchmark ${PROJECT_NAME})
+if(CUDA_FOUND)
+    target_link_libraries(${PROJECT_NAME}_cuda_graph_benchmark ${CUDA_LIBRARIES} CUDA::cublas)
 endif()
 
 if(CUDA_FOUND)

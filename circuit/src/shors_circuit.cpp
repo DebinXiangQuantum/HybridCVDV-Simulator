@@ -104,7 +104,7 @@ int main() {
     try {
         // 创建Shor's算法电路
         int num_qubits = 1;
-        int num_qumodes = 2;  // 从3减少到2
+        int num_qumodes = 3;
         int cutoff = 8;       // 从16减少到8
         int N = 15; // 要分解的数
         int m = 4; // 模指数参数

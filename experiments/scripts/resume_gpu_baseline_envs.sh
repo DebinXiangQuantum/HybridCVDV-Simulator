@@ -24,4 +24,4 @@ print(
 PY
 fi
 
-exec "${ROOT_DIR}/experiments/scripts/setup_gpu_baseline_envs.sh"
+exec bash "${ROOT_DIR}/experiments/scripts/setup_gpu_baseline_envs.sh"

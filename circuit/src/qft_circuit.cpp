@@ -40,7 +40,7 @@ void apply_basis_preparation_reverse(QuantumCircuit& circuit, const std::vector<
  */
 void run_qft_circuit(int num_qubits, int num_qumodes, int cutoff, double delta, int n, int a, int append) {
     int total = n + a + append;
-    QuantumCircuit circuit(num_qubits, num_qumodes, cutoff, 32);
+    QuantumCircuit circuit(num_qubits, num_qumodes, cutoff, 1024);
     
     // 初始化辅助量子比特
     for (int i = 0; i < a; ++i) {

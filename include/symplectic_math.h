@@ -32,4 +32,10 @@ namespace SymplecticFactory {
     
     // Two-mode Beam Splitter
     SymplecticGate BeamSplitter(double theta, double phi, int M, int mode1, int mode2);
+
+    // Two-mode Squeezing
+    SymplecticGate TwoModeSqueezing(std::complex<double> xi, int M, int mode1, int mode2);
+
+    // SUM gate
+    SymplecticGate SUM(double theta, double phi, int M, int mode1, int mode2);
 }

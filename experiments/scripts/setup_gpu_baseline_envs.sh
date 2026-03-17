@@ -7,7 +7,7 @@ SF_ENV="${SF_ENV:-${ROOT_DIR}/.venv-sf-gpu}"
 MM_ENV="${MM_ENV:-${ROOT_DIR}/.venv-mm-gpu}"
 SF_PACKAGE="${SF_PACKAGE:-strawberryfields}"
 TF_PACKAGE="${TF_PACKAGE:-tensorflow[and-cuda]}"
-MM_PACKAGE="${MM_PACKAGE:-mrmustard}"
+MM_PACKAGE="${MM_PACKAGE:-mrmustard==1.0.0a1}"
 JAX_PACKAGE="${JAX_PACKAGE:-jax[cuda12]}"
 
 checkpoint_query() {
@@ -96,6 +96,51 @@ install_sf_stack() {
   python3 -m uv pip install --python "${SF_ENV}/bin/python" "${SF_PACKAGE}" "${TF_PACKAGE}"
 }
 
+ensure_sf_pkg_resources() {
+  if "${SF_ENV}/bin/python" - <<'PY'
+import importlib.util
+raise SystemExit(0 if importlib.util.find_spec("pkg_resources") else 1)
+PY
+  then
+    "${SF_ENV}/bin/python" - <<'PY'
+import setuptools
+print(f"pkg_resources available with setuptools {getattr(setuptools, '__version__', 'unknown')}")
+PY
+    return 0
+  fi
+
+  python3 -m uv pip install --python "${SF_ENV}/bin/python" "setuptools<81"
+  "${SF_ENV}/bin/python" - <<'PY'
+import importlib.util
+import setuptools
+
+if importlib.util.find_spec("pkg_resources") is None:
+    raise SystemExit("pkg_resources is still missing after setuptools downgrade")
+print(f"restored pkg_resources with setuptools {getattr(setuptools, '__version__', 'unknown')}")
+PY
+}
+
+ensure_sf_scipy_compat() {
+  if "${SF_ENV}/bin/python" - <<'PY'
+from scipy.integrate import simps  # noqa: F401
+PY
+  then
+    "${SF_ENV}/bin/python" - <<'PY'
+import scipy
+print(f"scipy simps available in scipy {getattr(scipy, '__version__', 'unknown')}")
+PY
+    return 0
+  fi
+
+  python3 -m uv pip install --python "${SF_ENV}/bin/python" "scipy<1.14"
+  "${SF_ENV}/bin/python" - <<'PY'
+import scipy
+from scipy.integrate import simps  # noqa: F401
+
+print(f"restored scipy.integrate.simps with scipy {getattr(scipy, '__version__', 'unknown')}")
+PY
+}
+
 verify_sf_stack() {
   "${SF_ENV}/bin/python" - <<'PY'
 import json
@@ -117,6 +162,55 @@ PY
 install_mm_stack() {
   python3 -m uv pip install --python "${MM_ENV}/bin/python" --upgrade pip setuptools wheel
   python3 -m uv pip install --python "${MM_ENV}/bin/python" "${MM_PACKAGE}" "${JAX_PACKAGE}"
+}
+
+ensure_mm_jax_backend() {
+  if "${MM_ENV}/bin/python" - <<'PY'
+from mrmustard import math as mmath
+
+backend = getattr(mmath, "backend_name", None)
+if hasattr(mmath, "change_backend"):
+    try:
+        mmath.change_backend("jax")
+    except Exception:
+        raise SystemExit(1)
+    raise SystemExit(0)
+raise SystemExit(1)
+PY
+  then
+    "${MM_ENV}/bin/python" - <<'PY'
+import mrmustard
+from mrmustard import math as mmath
+
+print(
+    f"MrMustard {getattr(mrmustard, '__version__', 'unknown')} "
+    f"supports backend {getattr(mmath, 'backend_name', 'unknown')}"
+)
+PY
+    return 0
+  fi
+
+  python3 -m uv pip install --python "${MM_ENV}/bin/python" \
+    ipython \
+    ipywidgets \
+    nbformat \
+    plotly \
+    optax \
+    equinox \
+    platformdirs \
+    semantic-version \
+    importlib-resources
+  python3 -m uv pip install --python "${MM_ENV}/bin/python" --no-deps "${MM_PACKAGE}"
+  "${MM_ENV}/bin/python" - <<'PY'
+import mrmustard
+from mrmustard import math as mmath
+
+mmath.change_backend("jax")
+print(
+    f"upgraded MrMustard to {getattr(mrmustard, '__version__', 'unknown')} "
+    f"with backend {getattr(mmath, 'backend_name', 'unknown')}"
+)
+PY
 }
 
 verify_mm_stack() {
@@ -146,9 +240,12 @@ cd "${ROOT_DIR}"
 run_step "ensure_uv" ensure_uv
 run_step "create_sf_env" create_env "${SF_ENV}"
 run_step "install_sf_stack" install_sf_stack
+run_step "ensure_sf_pkg_resources" ensure_sf_pkg_resources
+run_step "ensure_sf_scipy_compat" ensure_sf_scipy_compat
 run_step "verify_sf_stack" verify_sf_stack
 run_step "create_mm_env" create_env "${MM_ENV}"
 run_step "install_mm_stack" install_mm_stack
+run_step "ensure_mm_jax_backend" ensure_mm_jax_backend
 run_step "verify_mm_stack" verify_mm_stack
 
 checkpoint_update "completed" "ok"
