@@ -4,6 +4,7 @@
 #include <memory>
 #include <atomic>
 #include <unordered_map>
+#include <vector>
 
 /**
  * 混合决策图节点 (HDD Node)

@@ -17,13 +17,30 @@ To maintain high performance across both Gaussian and Non-Gaussian regimes, the 
 
 ## 2. CPU Layer: DD Graph Updates and Pure Qubit Gates
 
-All pure Qubit operations and routing for hybrid gates are resolved on the CPU by rewriting paths (Rewiring) and updating edge weights (Reweighing) within the HDD. The fundamental object is an HDD Node containing left ($|0\rangle$) and right ($|1\rangle$) branches, along with corresponding complex weights ($w_{low}$, $w_{high}$).
+All pure Qubit operations and routing for hybrid gates are resolved on the CPU by rewriting paths (Rewiring) and updating edge weights (Reweighing) within the HDD. The fundamental object is an HDD Node containing:
+*   **left ($|0\rangle$) branch:** points to the successor node or leaf when the qubit is in the $|0\rangle$ state.
+*   **right ($|1\rangle$) branch:** points to the successor node or leaf when the qubit is in the $|1\rangle$ state.
+*   **weights ($w_{low}$, $w_{high}$):** complex edge weights representing the amplitudes (or relative phases/magnitudes) associated with the $|0\rangle$ and $|1\rangle$ transitions, respectively.
 
-### 2.1 The DD Addition Primitive
-For gates that mix branches, the CPU employs a fundamental DD Addition primitive to merge branches and prevent duplicate subgraph creation via a Unique Table:
+### 2.1 The Decision Diagram (DD) and Addition Primitive
+A **Decision Diagram (DD)** in HTDD is a directed acyclic graph (DAG) where each non-leaf node represents a qubit, and its two outgoing edges (branches) correspond to the $|0\rangle$ and $|1\rangle$ basis states. The edges carry complex weights. To ensure maximum memory efficiency, the HDD is constructed with a **Unique Table** that guarantees subgraphs representing identical quantum states are shared rather than duplicated.
+
+The core operation for manipulating the HDD, especially when quantum gates create superposition (mixing the $|0\rangle$ and $|1\rangle$ branches), is the **DD Addition primitive (`DD_Add`)**.
+
+`DD_Add` computes the linear combination of two DD nodes:
 $$ \text{Result\_Node} = \text{DD\_Add}(\text{Node}_A, \alpha, \text{Node}_B, \beta) $$
+This mathematically corresponds to evaluating $\alpha |\psi_A\rangle + \beta |\psi_B\rangle$. 
+The operation works recursively:
+1.  **Terminal Case:** If both nodes are leaves (representing the CV state or a scalar), it returns a leaf with the appropriately combined value.
+2.  **Matching Qubits:** If `Node_A` and `Node_B` represent the same qubit, `DD_Add` recursively calls itself on their respective $|0\rangle$ branches and $|1\rangle$ branches:
+    *   $L_{\text{new}} = \text{DD\_Add}(A.left, \alpha \cdot A.w_{low}, B.left, \beta \cdot B.w_{low})$
+    *   $R_{\text{new}} = \text{DD\_Add}(A.right, \alpha \cdot A.w_{high}, B.right, \beta \cdot B.w_{high})$
+3.  **Different Qubits:** If they point to different qubits, the node corresponding to the "higher" qubit in the ordering is expanded, while the other node is passed down untouched.
+4.  **Normalization & Memoization:** After recursion, the weights of the new branches $L_{\text{new}}$ and $R_{\text{new}}$ are normalized (e.g., by extracting a common phase/magnitude). The resulting node structure is then looked up in the Unique Table. If an identical node exists, its pointer is returned (enforcing deduplication); otherwise, a new node is created.
 
 ### 2.2 Pure Qubit Gate Updates
+
+Because the HDD employs a Unique Table, nodes are **immutable**. Pure qubit gates do not modify existing nodes in-place. Instead, they compute new branch pointers and weights, and query the Unique Table to return a shared pointer to the resulting state (creating a new node only if it doesn't already exist).
 
 #### 2.2.1 Permutation and Phase Gates
 Gates that do not increase topological complexity modify weights or swap pointers.
@@ -149,5 +166,9 @@ The parent HDD node is logically split into $K$ new branches, maintaining the SE
 ### 5.2 Analytical Ejection (SET to TET)
 When a Gaussian state must be materialized into a Fock tensor (due to strong non-Gaussianity or measurement), an **Analytical Ejection** occurs directly on the GPU. The state $|d, \mathbf{\Sigma}\rangle$ is projected to $c_n = \langle n | \psi \rangle$:
 $$ c_n = \frac{1}{\sqrt{n!}} \exp(A) \cdot B^n \cdot H_n(C) $$
-Computed using a stabilized parallel recurrence relation:
+Computed using a stabilized parallel recurrence relation derived from the properties of Hermite polynomials:
 $$ \sqrt{n+1} \cdot c_{n+1} = f_1(A, B, C) \cdot c_n + f_2(A, B, C) \cdot c_{n-1} $$
+Where:
+*   **$A, B, C$** are analytical constants derived from the displacement vector $d$ and covariance matrix $\mathbf{\Sigma}$ (representing the state's phase-space geometry).
+*   **$f_1(A, B, C)$** is a first-order transition function that accounts for the displacement shift and squeezing-induced rotation in the recurrence.
+*   **$f_2(A, B, C)$** is a second-order term that handles the normalization and curvature of the Fock-space distribution, ensuring the recurrence remains numerically stable for large $n$.
