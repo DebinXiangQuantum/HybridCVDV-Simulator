@@ -2796,12 +2796,9 @@ void QuantumCircuit::initialize_hdd() {
     }
 
     const int total_dim = state_pool_.get_max_total_dim();
-    std::vector<cuDoubleComplex> vacuum_product_state(total_dim, make_cuDoubleComplex(0.0, 0.0));
-    vacuum_product_state[0] = make_cuDoubleComplex(1.0, 0.0);
-    state_pool_.upload_state(vacuum_state_id, vacuum_product_state);
-
-    std::vector<cuDoubleComplex> zero_state(total_dim, make_cuDoubleComplex(0.0, 0.0));
-    state_pool_.upload_state(zero_state_id, zero_state);
+    initialize_vacuum_state_device(&state_pool_, vacuum_state_id, total_dim);
+    state_pool_.reserve_state_storage(zero_state_id, total_dim);
+    zero_state_device(&state_pool_, zero_state_id);
     shared_zero_state_id_ = zero_state_id;
 
     // 共享零态仅用于HDD零分支占位，不计入面向用户的活跃态统计。

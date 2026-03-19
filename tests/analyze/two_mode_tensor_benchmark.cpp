@@ -9,6 +9,8 @@
 
 #include "cv_state_pool.h"
 
+void initialize_vacuum_state_device(CVStatePool* pool, int state_id, int state_dim);
+
 void apply_creation_operator_on_mode(CVStatePool* pool,
                                      const int* targets,
                                      int batch_size,
@@ -44,14 +46,6 @@ double peak_rss_mb() {
 #else
     return static_cast<double>(usage.ru_maxrss) / 1024.0;
 #endif
-}
-
-size_t integer_power(size_t base, int exponent) {
-    size_t result = 1;
-    for (int i = 0; i < exponent; ++i) {
-        result *= base;
-    }
-    return result;
 }
 
 Options parse_args(int argc, char** argv) {
@@ -107,12 +101,7 @@ int main(int argc, char** argv) {
         if (state_id < 0) {
             throw std::runtime_error("failed to allocate state");
         }
-
-        std::vector<cuDoubleComplex> vacuum(
-            integer_power(static_cast<size_t>(options.cutoff), options.num_qumodes),
-            make_cuDoubleComplex(0.0, 0.0));
-        vacuum[0] = make_cuDoubleComplex(1.0, 0.0);
-        pool.upload_state(state_id, vacuum);
+        initialize_vacuum_state_device(&pool, state_id, pool.get_max_total_dim());
 
         int* d_target_ids = nullptr;
         cudaError_t err = cudaMalloc(&d_target_ids, sizeof(int));

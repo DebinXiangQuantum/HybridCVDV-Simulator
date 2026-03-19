@@ -10,6 +10,8 @@
 #include "batch_scheduler.h"
 #include "cv_state_pool.h"
 
+void initialize_vacuum_state_device(CVStatePool* pool, int state_id, int state_dim);
+
 namespace {
 
 struct Options {
@@ -31,14 +33,6 @@ double peak_rss_mb() {
 #else
     return static_cast<double>(usage.ru_maxrss) / 1024.0;
 #endif
-}
-
-size_t integer_power(size_t base, int exponent) {
-    size_t result = 1;
-    for (int i = 0; i < exponent; ++i) {
-        result *= base;
-    }
-    return result;
 }
 
 Options parse_args(int argc, char** argv) {
@@ -92,11 +86,7 @@ int main(int argc, char** argv) {
     try {
         const Options options = parse_args(argc, argv);
         CVStatePool pool(options.cutoff, options.num_states + 8, options.num_qumodes);
-
-        std::vector<cuDoubleComplex> vacuum(
-            integer_power(static_cast<size_t>(options.cutoff), options.num_qumodes),
-            make_cuDoubleComplex(0.0, 0.0));
-        vacuum[0] = make_cuDoubleComplex(1.0, 0.0);
+        const int state_dim = pool.get_max_total_dim();
 
         std::vector<int> state_ids;
         state_ids.reserve(options.num_states);
@@ -105,7 +95,7 @@ int main(int argc, char** argv) {
             if (state_id < 0) {
                 throw std::runtime_error("failed to allocate benchmark state");
             }
-            pool.upload_state(state_id, vacuum);
+            initialize_vacuum_state_device(&pool, state_id, state_dim);
             state_ids.push_back(state_id);
         }
 
