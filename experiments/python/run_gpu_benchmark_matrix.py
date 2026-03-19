@@ -232,10 +232,11 @@ def build_internal_command(
     case: dict[str, Any],
     output_path: pathlib.Path,
     gaussian_symbolic_mode_limit: int,
+    use_interaction_picture: bool = False,
 ) -> list[str]:
     binary_name = case.get("internal_binary", "hybridcvdv_single_gpu_experiments")
     binary_path = build_dir / binary_name
-    return [
+    cmd = [
         str(binary_path),
         "--suite",
         case.get("internal_suite", "scaling"),
@@ -246,6 +247,9 @@ def build_internal_command(
         "--output",
         str(output_path),
     ]
+    if use_interaction_picture:
+        cmd.append("--use-interaction-picture")
+    return cmd
 
 
 def build_baseline_command(
@@ -300,13 +304,14 @@ def run_case_backend(
     gpu_index: int,
     sample_interval_s: float,
     gaussian_symbolic_mode_limit: int,
+    use_interaction_picture: bool = False,
 ) -> dict[str, Any]:
     output_name = f"{case['name']}__{backend}.json"
     output_path = run_dir / output_name
     telemetry_samples_path = run_dir / "telemetry" / f"{case['name']}__{backend}.json"
 
     if backend == "hybridcvdv":
-        cmd = build_internal_command(build_dir, case, output_path, gaussian_symbolic_mode_limit)
+        cmd = build_internal_command(build_dir, case, output_path, gaussian_symbolic_mode_limit, use_interaction_picture)
         if not pathlib.Path(cmd[0]).exists():
             return {
                 "case_name": case["name"],
@@ -386,6 +391,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--backend", default=None)
     parser.add_argument("--gpu-index", type=int, default=0)
     parser.add_argument("--telemetry-interval-ms", type=int, default=None)
+    parser.add_argument("--use-interaction-picture", action="store_true")
     return parser.parse_args()
 
 
@@ -404,6 +410,7 @@ def main() -> int:
     baseline_python = args.baseline_python
     backend_python_map = config.get("backend_python_map")
     gaussian_symbolic_mode_limit = config.get("gaussian_symbolic_mode_limit", 16)
+    use_interaction_picture = args.use_interaction_picture
 
     manifest = {
         "schema_version": "2.0",
@@ -413,6 +420,7 @@ def main() -> int:
         "gpu_index": gpu_index,
         "telemetry_interval_ms": telemetry_interval_ms,
         "gaussian_symbolic_mode_limit": gaussian_symbolic_mode_limit,
+        "use_interaction_picture": use_interaction_picture,
         "device": query_gpu_metadata(gpu_index),
         "artifacts": [],
     }
@@ -433,6 +441,7 @@ def main() -> int:
                 gpu_index=gpu_index,
                 sample_interval_s=sample_interval_s,
                 gaussian_symbolic_mode_limit=gaussian_symbolic_mode_limit,
+                use_interaction_picture=use_interaction_picture,
             )
             manifest["artifacts"].append(artifact)
 

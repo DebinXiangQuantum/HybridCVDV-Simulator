@@ -2,6 +2,7 @@
 #include "gaussian_circuit.h"
 #include "gaussian_kernels.h"
 #include "gaussian_state.h"
+#include "reference_gates.h"
 #include "squeezing_gate_gpu.h"
 #include "two_mode_gates.h"
 #include <iostream>
@@ -118,6 +119,11 @@ void apply_anti_jaynes_cummings_on_mode(CVStatePool* state_pool,
                                         double phi,
                                         int target_qumode,
                                         int num_qumodes);
+void apply_sqr(CVStatePool* state_pool,
+               const std::vector<int>& qubit0_states,
+               const std::vector<int>& qubit1_states,
+               const std::vector<double>& thetas,
+               const std::vector<double>& phis);
 
 // 状态加法函数
 void add_states(CVStatePool* state_pool,
@@ -146,6 +152,35 @@ public:
 #endif
     }
 };
+
+int compute_qumode_right_stride(int trunc_dim, int target_qumode, int num_qumodes) {
+    int right_stride = 1;
+    for (int mode = target_qumode + 1; mode < num_qumodes; ++mode) {
+        right_stride *= trunc_dim;
+    }
+    return right_stride;
+}
+
+std::vector<double> expand_selective_rotation_profile(
+    const std::vector<double>& per_photon_values,
+    int trunc_dim,
+    int control_qumode,
+    int num_qumodes,
+    int max_total_dim) {
+    std::vector<double> expanded(static_cast<size_t>(max_total_dim), 0.0);
+    if (trunc_dim <= 0 || max_total_dim <= 0 || control_qumode < 0 || control_qumode >= num_qumodes) {
+        return expanded;
+    }
+
+    const int right_stride = compute_qumode_right_stride(trunc_dim, control_qumode, num_qumodes);
+    for (int flat_index = 0; flat_index < max_total_dim; ++flat_index) {
+        const int photon_number = (flat_index / right_stride) % trunc_dim;
+        if (photon_number < static_cast<int>(per_photon_values.size())) {
+            expanded[static_cast<size_t>(flat_index)] = per_photon_values[static_cast<size_t>(photon_number)];
+        }
+    }
+    return expanded;
+}
 
 constexpr double kVacuumTolerance = 1e-12;
 constexpr double kSymbolicBranchPruneTolerance = 1e-14;
@@ -258,6 +293,18 @@ VacuumRayInfo classify_vacuum_ray_on_device(CVStatePool& state_pool, int state_i
     info.is_scaled_vacuum = is_scaled_vacuum != 0;
     info.scale = std::complex<double>(cuCreal(scale), cuCimag(scale));
     return info;
+}
+
+void clear_cuda_runtime_error_state() {
+    cudaError_t err = cudaDeviceSynchronize();
+    if (err != cudaSuccess && err != cudaErrorNotReady) {
+        cudaGetLastError();
+    }
+
+    err = cudaGetLastError();
+    if (err != cudaSuccess && err != cudaErrorNotReady) {
+        cudaGetLastError();
+    }
 }
 
 std::vector<cuDoubleComplex> to_cuda_state(
@@ -2059,6 +2106,7 @@ bool QuantumCircuit::try_execute_gaussian_block_with_ede(
         std::cout << "Gaussian EDE块级加速已启用，块门数=" << compiled_block.gates.size() << std::endl;
         return true;
     } catch (const std::exception& e) {
+        clear_cuda_runtime_error_state();
         std::cout << "Gaussian EDE块回退到全量Fock执行: " << e.what() << std::endl;
         return false;
     }
@@ -3140,27 +3188,7 @@ void QuantumCircuit::execute_level3_gate(const GateParams& gate) {
  * 执行Level 4门 (混合控制门)
  */
 void QuantumCircuit::execute_level4_gate(const GateParams& gate) {
-    std::string gate_type;
-    cuDoubleComplex param = make_cuDoubleComplex(0.0, 0.0);
-
-    if (gate.type == GateType::CONDITIONAL_DISPLACEMENT) {
-        gate_type = "controlled_displacement";
-        if (!gate.params.empty()) {
-            param = make_cuDoubleComplex(gate.params[0].real(), gate.params[0].imag());
-        }
-    } else if (gate.type == GateType::CONDITIONAL_SQUEEZING) {
-        gate_type = "controlled_squeezing";
-        if (!gate.params.empty()) {
-            param = make_cuDoubleComplex(gate.params[0].real(), gate.params[0].imag());
-        }
-    }
-
-    // 对于混合控制门，目前实现是占位符
-    // 调用混合控制门执行函数
-    apply_hybrid_control_gate(root_node_, &state_pool_, node_manager_, gate_type, param);
-    // 检查GPU错误
-    CHECK_CUDA(cudaGetLastError());
-    CHECK_CUDA(cudaDeviceSynchronize());
+    execute_hybrid_gate(gate);
 }
 
 /**
@@ -3373,7 +3401,7 @@ void QuantumCircuit::execute_hybrid_gate(const GateParams& gate) {
 
 /**
  * 执行受控位移门 CD(α)
- * 控制qubit为|1⟩时应用 D(α)，为|0⟩时保持不变
+ * 按 σ_z 语义分支：|0⟩ 分支应用 D(+α)，|1⟩ 分支应用 D(-α)
  */
 void QuantumCircuit::execute_conditional_displacement(const GateParams& gate) {
     int control_qubit = gate.target_qubits[0];
@@ -3403,9 +3431,10 @@ HDDNode* QuantumCircuit::apply_conditional_displacement_recursive(
     }
 
     if (node->qubit_level == control_qubit) {
-        HDDNode* low_branch = node->low;
+        HDDNode* low_branch = apply_conditional_displacement_recursive(
+            node->low, control_qubit, target_qumode, alpha);
         HDDNode* high_branch = apply_conditional_displacement_recursive(
-            node->high, control_qubit, target_qumode, alpha);
+            node->high, control_qubit, target_qumode, -alpha);
 
         return node_manager_.get_or_create_node(node->qubit_level, low_branch, high_branch,
                                                  node->w_low, node->w_high);
@@ -4073,6 +4102,10 @@ void QuantumCircuit::execute_selective_qubit_rotation(const GateParams& gate) {
         phi_vec.push_back(gate.params[2 * i + 1].real());
     }
 
+    if (theta_vec.empty() || theta_vec.size() != phi_vec.size()) {
+        throw std::runtime_error("SQR需要成对提供每个Fock层级的(theta, phi)参数");
+    }
+
     replace_root_node(apply_selective_qubit_rotation_recursive(root_node_, target_qubit, control_qumode, theta_vec, phi_vec));
 }
 
@@ -4082,22 +4115,21 @@ void QuantumCircuit::execute_selective_qubit_rotation(const GateParams& gate) {
 HDDNode* QuantumCircuit::apply_selective_qubit_rotation_recursive(
     HDDNode* node, int target_qubit, int control_qumode,
     const std::vector<double>& theta_vec, const std::vector<double>& phi_vec) {
-
     if (node->is_terminal()) {
-        int state_id = node->tensor_id;
-        apply_selective_qubit_rotation_to_state(state_id, theta_vec, phi_vec);
         return node;
     }
 
     if (node->qubit_level == target_qubit) {
-        // SQR根据qumode的光子数选择性旋转qubit
-        // 需要从qumode状态推断光子数，这里简化为应用到所有分支
-        HDDNode* low_branch = apply_selective_qubit_rotation_recursive(
-            node->low, target_qubit, control_qumode, theta_vec, phi_vec);
-        HDDNode* high_branch = apply_selective_qubit_rotation_recursive(
-            node->high, target_qubit, control_qumode, theta_vec, phi_vec);
-        return node_manager_.get_or_create_node(node->qubit_level, low_branch, high_branch,
-                                                 node->w_low, node->w_high);
+        const auto rotated_branches = apply_selective_qubit_rotation_pair_recursive(
+            node->low,
+            node->w_low,
+            node->high,
+            node->w_high,
+            control_qumode,
+            theta_vec,
+            phi_vec);
+        return node_manager_.get_or_create_node(
+            node->qubit_level, rotated_branches.first, rotated_branches.second, 1.0, 1.0);
     } else if (node->qubit_level > target_qubit) {
         HDDNode* new_low = apply_selective_qubit_rotation_recursive(
             node->low, target_qubit, control_qumode, theta_vec, phi_vec);
@@ -4110,14 +4142,79 @@ HDDNode* QuantumCircuit::apply_selective_qubit_rotation_recursive(
     }
 }
 
-/**
- * 对单个状态应用选择性Qubit旋转
- */
-void QuantumCircuit::apply_selective_qubit_rotation_to_state(
-    int state_id, const std::vector<double>& theta_vec, const std::vector<double>& phi_vec) {
-    // SQR需要根据光子数选择旋转角度
-    // 这里需要访问qumode状态来确定光子数
-    std::cout << "SQR应用到状态 " << state_id << std::endl;
+std::pair<HDDNode*, HDDNode*> QuantumCircuit::apply_selective_qubit_rotation_pair_recursive(
+    HDDNode* low_node,
+    std::complex<double> low_weight,
+    HDDNode* high_node,
+    std::complex<double> high_weight,
+    int control_qumode,
+    const std::vector<double>& theta_vec,
+    const std::vector<double>& phi_vec) {
+    if (!low_node || !high_node) {
+        throw std::runtime_error("SQR分支配对失败：存在空的HDD分支");
+    }
+
+    if (low_node->is_terminal() && high_node->is_terminal()) {
+        HDDNode* low_copy = duplicate_scaled_terminal_node(low_node, low_weight);
+        HDDNode* high_copy = duplicate_scaled_terminal_node(high_node, high_weight);
+
+        const std::vector<double> expanded_thetas =
+            expand_selective_rotation_profile(
+                theta_vec,
+                state_pool_.d_trunc,
+                control_qumode,
+                num_qumodes_,
+                state_pool_.max_total_dim);
+        const std::vector<double> expanded_phis =
+            expand_selective_rotation_profile(
+                phi_vec,
+                state_pool_.d_trunc,
+                control_qumode,
+                num_qumodes_,
+                state_pool_.max_total_dim);
+
+        apply_sqr(
+            &state_pool_,
+            std::vector<int>{low_copy->tensor_id},
+            std::vector<int>{high_copy->tensor_id},
+            expanded_thetas,
+            expanded_phis);
+        CHECK_CUDA(cudaGetLastError());
+        CHECK_CUDA(cudaDeviceSynchronize());
+        return {low_copy, high_copy};
+    }
+
+    if (low_node->is_terminal() || high_node->is_terminal()) {
+        throw std::runtime_error("SQR分支配对失败：低/高分支HDD结构不一致");
+    }
+
+    if (low_node->qubit_level != high_node->qubit_level) {
+        throw std::runtime_error("SQR分支配对失败：低/高分支层级不一致");
+    }
+
+    const auto low_pair = apply_selective_qubit_rotation_pair_recursive(
+        low_node->low,
+        low_weight * low_node->w_low,
+        high_node->low,
+        high_weight * high_node->w_low,
+        control_qumode,
+        theta_vec,
+        phi_vec);
+
+    const auto high_pair = apply_selective_qubit_rotation_pair_recursive(
+        low_node->high,
+        low_weight * low_node->w_high,
+        high_node->high,
+        high_weight * high_node->w_high,
+        control_qumode,
+        theta_vec,
+        phi_vec);
+
+    HDDNode* new_low = node_manager_.get_or_create_node(
+        low_node->qubit_level, low_pair.first, high_pair.first, 1.0, 1.0);
+    HDDNode* new_high = node_manager_.get_or_create_node(
+        high_node->qubit_level, low_pair.second, high_pair.second, 1.0, 1.0);
+    return {new_low, new_high};
 }
 
 /**
@@ -4137,14 +4234,40 @@ std::vector<int> QuantumCircuit::collect_target_states(const GateParams& gate) {
  * 准备ELL算符
  */
 FockELLOperator* QuantumCircuit::prepare_ell_operator(const GateParams& gate) {
-    // 简化的实现：创建基本的ELL算符
-    // 在实际实现中，需要根据具体的门参数构建正确的矩阵
+    if (gate.params.empty()) {
+        throw std::runtime_error("ELL算符构建失败：门参数为空");
+    }
 
-    FockELLOperator* ell_op = new FockELLOperator(cv_truncation_, 10);  // 假设带宽为10
+    Reference::Matrix dense_matrix;
+    switch (gate.type) {
+        case GateType::DISPLACEMENT:
+            dense_matrix = Reference::create_displacement_matrix(cv_truncation_, gate.params[0]);
+            break;
+        case GateType::SQUEEZING:
+            dense_matrix = Reference::create_squeezing_matrix(cv_truncation_, gate.params[0]);
+            break;
+        default:
+            throw std::runtime_error("当前ELL路径仅支持位移门和挤压门");
+    }
 
-    // 这里应该根据门类型填充ELL格式数据
-    // 暂时返回空算符
+    int max_bandwidth = 0;
+    std::vector<cuDoubleComplex> dense_flat;
+    dense_flat.reserve(static_cast<size_t>(cv_truncation_) * cv_truncation_);
+    for (int row = 0; row < cv_truncation_; ++row) {
+        int row_nnz = 0;
+        for (int col = 0; col < cv_truncation_; ++col) {
+            const std::complex<double>& value = dense_matrix[row][col];
+            if (std::abs(value) > 1e-12) {
+                ++row_nnz;
+            }
+            dense_flat.push_back(make_cuDoubleComplex(value.real(), value.imag()));
+        }
+        max_bandwidth = std::max(max_bandwidth, row_nnz);
+    }
 
+    max_bandwidth = std::max(1, max_bandwidth);
+    FockELLOperator* ell_op = new FockELLOperator(cv_truncation_, max_bandwidth);
+    ell_op->build_from_dense(dense_flat);
     return ell_op;
 }
 
@@ -4152,10 +4275,12 @@ FockELLOperator* QuantumCircuit::prepare_ell_operator(const GateParams& gate) {
  * 准备挤压门的ELL算符
  */
 FockELLOperator* QuantumCircuit::prepare_squeezing_ell_operator(std::complex<double> xi) {
-    // 简化的实现：返回基本的ELL算符
-    // 在实际实现中，需要构建正确的挤压矩阵
-    FockELLOperator* ell_op = new FockELLOperator(cv_truncation_, 10);
-    return ell_op;
+    GateParams squeezing_gate(
+        GateType::SQUEEZING,
+        {},
+        {0},
+        {xi});
+    return prepare_ell_operator(squeezing_gate);
 }
 
 /**
@@ -4234,6 +4359,117 @@ QuantumCircuit::TimeStats QuantumCircuit::get_time_stats() const {
         computation_time_,
         planning_time_
     };
+}
+
+/**
+ * 方案 B：交互绘景执行引擎
+ */
+void QuantumCircuit::execute_with_interaction_picture() {
+    auto start_time = std::chrono::high_resolution_clock::now();
+    
+    // 1. 初始化高斯参考系 (Frame) 和 HDD
+    GaussianFrame current_frame(num_qumodes_);
+    initialize_hdd(); 
+    is_executed_ = true;
+
+    // 2. 核心执行循环
+    for (const auto& gate : gate_sequence_) {
+        execute_gate_ip(gate, current_frame);
+    }
+
+    // 3. 最终物态还原 (将参考系中累积的高斯变换一次性作用到 Fock 终端)
+    std::vector<int> terminal_ids = state_pool_.get_active_state_ids(); 
+    for (int state_id : terminal_ids) {
+        if (state_id != shared_zero_state_id_) {
+            materialize_frame_to_fock(state_id, current_frame);
+        }
+    }
+
+    auto end_time = std::chrono::high_resolution_clock::now();
+    total_time_ = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+}
+
+void QuantumCircuit::execute_gate_ip(const GateParams& gate, GaussianFrame& frame) {
+    switch (gate.type) {
+        // --- 高斯门：仅更新符号参考系 (此处主要实现位移跟踪) ---
+        case GateType::DISPLACEMENT: {
+            int m = gate.target_qumodes[0];
+            frame.alpha[m] += gate.params[0];
+            break;
+        }
+
+        // --- 非高斯门：在参考系下进行参数偏移后应用 ---
+        case GateType::KERR_GATE: {
+            std::vector<int> targets = collect_target_states(gate);
+            for (int sid : targets) {
+                apply_displaced_non_gaussian_gate(sid, gate, frame);
+            }
+            break;
+        }
+
+        // --- 其他高斯门：如果尚未实现其参考系变换，则退化为即时作用并清空该 mode 的位移参考系 ---
+        case GateType::PHASE_ROTATION:
+        case GateType::SQUEEZING:
+        case GateType::BEAM_SPLITTER: {
+            // 在全量 IP 实现前，遇到这些门先将当前位移“落盘”回 Fock 态，再执行该门
+            std::vector<int> targets = collect_target_states(gate);
+            for (int sid : targets) {
+                for (int m : gate.target_qumodes) {
+                    if (std::abs(frame.alpha[m]) > 1e-9) {
+                        apply_displacement_to_state(sid, frame.alpha[m], m);
+                        frame.alpha[m] = 0.0;
+                    }
+                }
+            }
+            execute_gate(gate); 
+            break;
+        }
+
+        // --- Qubit 和 混合门：默认处理 ---
+        default:
+            // 在执行混合门前，确保对应的 Qumode 参考系已同步到 Fock 空间
+            if (!gate.target_qumodes.empty()) {
+                std::vector<int> targets = collect_target_states(gate);
+                for (int sid : targets) {
+                    for (int m : gate.target_qumodes) {
+                        if (std::abs(frame.alpha[m]) > 1e-9) {
+                            apply_displacement_to_state(sid, frame.alpha[m], m);
+                            frame.alpha[m] = 0.0;
+                        }
+                    }
+                }
+            }
+            execute_gate(gate); 
+            break;
+    }
+}
+
+void QuantumCircuit::apply_displaced_non_gaussian_gate(int state_id, const GateParams& gate, const GaussianFrame& frame) {
+    if (gate.type == GateType::KERR_GATE) {
+        int m = gate.target_qumodes[0];
+        std::complex<double> alpha = frame.alpha[m];
+
+        if (std::abs(alpha) < 1e-9) {
+            execute_level0_gate(gate);
+            return;
+        }
+
+        // 交互绘景核心：状态向量保持在原点，通过临时位移应用非高斯算符
+        // 这一步在未来可以优化为直接调用 ShiftedKerrKernel，从而避免两次位移操作
+        apply_displacement_to_state(state_id, alpha, m);
+        execute_level0_gate(gate);
+        apply_displacement_to_state(state_id, -alpha, m);
+    } else {
+        execute_gate(gate);
+    }
+}
+
+void QuantumCircuit::materialize_frame_to_fock(int state_id, const GaussianFrame& frame) {
+    for (int m = 0; m < num_qumodes_; ++m) {
+        if (std::abs(frame.alpha[m]) > 1e-9) {
+            apply_displacement_to_state(state_id, frame.alpha[m], m);
+        }
+    }
 }
 
 // ===== 门操作便捷函数实现 =====

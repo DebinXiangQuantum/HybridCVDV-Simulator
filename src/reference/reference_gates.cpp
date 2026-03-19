@@ -658,11 +658,9 @@ Matrix create_beam_splitter_matrix(int dim1, int dim2, double theta, double phi)
 Vector HybridControlGates::apply_controlled_displacement(int control_state, const Vector& target_state,
                                                        Reference::Complex alpha) {
     if (control_state == 0) {
-        // 控制位为|0⟩，不应用任何操作
-        return target_state;
-    } else if (control_state == 1) {
-        // 控制位为|1⟩，应用位移门
         return SingleModeGates::apply_displacement_gate(target_state, alpha);
+    } else if (control_state == 1) {
+        return SingleModeGates::apply_displacement_gate(target_state, -alpha);
     } else {
         throw std::invalid_argument("控制状态必须是0或1");
     }
@@ -671,11 +669,9 @@ Vector HybridControlGates::apply_controlled_displacement(int control_state, cons
 Vector HybridControlGates::apply_controlled_squeezing(int control_state, const Vector& target_state,
                                                     Reference::Complex xi) {
     if (control_state == 0) {
-        // 控制位为|0⟩，不应用任何操作
-        return target_state;
-    } else if (control_state == 1) {
-        // 控制位为|1⟩，应用挤压门
         return SingleModeGates::apply_squeezing_gate(target_state, xi);
+    } else if (control_state == 1) {
+        return SingleModeGates::apply_squeezing_gate(target_state, -xi);
     } else {
         throw std::invalid_argument("控制状态必须是0或1");
     }

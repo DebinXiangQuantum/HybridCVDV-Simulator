@@ -210,7 +210,9 @@ class HybridControlGates {
 public:
     /**
      * 受控位移门 CD(α)
-     * 当控制qubit为|1⟩时，应用位移门D(α)到目标qumode
+     * 按 σ_z 语义:
+     * control_state = 0 -> D(+α)
+     * control_state = 1 -> D(-α)
      *
      * @param control_state 控制qubit状态 (0或1)
      * @param target_state 目标qumode状态向量
@@ -222,7 +224,9 @@ public:
 
     /**
      * 受控挤压门 CS(ξ)
-     * 当控制qubit为|1⟩时，应用挤压门S(ξ)到目标qumode
+     * 按 σ_z 语义:
+     * control_state = 0 -> S(+ξ)
+     * control_state = 1 -> S(-ξ)
      */
     static Vector apply_controlled_squeezing(int control_state, const Vector& target_state,
                                             Reference::Complex xi);

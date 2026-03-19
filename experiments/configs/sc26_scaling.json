@@ -1,0 +1,1457 @@
+{
+  "schema_version": "2.0",
+  "telemetry_interval_ms": 200,
+  "gaussian_symbolic_mode_limit": 16,
+  "backend_python_map": {
+    "strawberryfields_tf": ".venv-sf-gpu/bin/python",
+    "mrmustard_jax": ".venv-mm-gpu/bin/python"
+  },
+  "cases": [
+    {
+      "name": "sc26_vqe_nq3_nm3_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 3,
+      "num_qubits": 3,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq3_nm3_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq3_nm3_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 3,
+      "num_qubits": 3,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq3_nm3_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq3_nm4_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 4,
+      "num_qubits": 3,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq3_nm4_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq3_nm4_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 4,
+      "num_qubits": 3,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq3_nm4_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq3_nm5_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 5,
+      "num_qubits": 3,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq3_nm5_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq3_nm5_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 5,
+      "num_qubits": 3,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq3_nm5_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq3_nm6_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 6,
+      "num_qubits": 3,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq3_nm6_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq3_nm6_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 6,
+      "num_qubits": 3,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq3_nm6_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq3_nm7_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 7,
+      "num_qubits": 3,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq3_nm7_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq3_nm7_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 7,
+      "num_qubits": 3,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq3_nm7_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq4_nm3_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 3,
+      "num_qubits": 4,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq4_nm3_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq4_nm3_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 3,
+      "num_qubits": 4,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq4_nm3_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq4_nm4_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 4,
+      "num_qubits": 4,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq4_nm4_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq4_nm4_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 4,
+      "num_qubits": 4,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq4_nm4_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq4_nm5_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 5,
+      "num_qubits": 4,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq4_nm5_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq4_nm5_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 5,
+      "num_qubits": 4,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq4_nm5_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq4_nm6_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 6,
+      "num_qubits": 4,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq4_nm6_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq4_nm6_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 6,
+      "num_qubits": 4,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq4_nm6_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq4_nm7_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 7,
+      "num_qubits": 4,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq4_nm7_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq4_nm7_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 7,
+      "num_qubits": 4,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq4_nm7_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq5_nm3_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 3,
+      "num_qubits": 5,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq5_nm3_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq5_nm3_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 3,
+      "num_qubits": 5,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq5_nm3_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq5_nm4_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 4,
+      "num_qubits": 5,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq5_nm4_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq5_nm4_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 4,
+      "num_qubits": 5,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq5_nm4_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq5_nm5_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 5,
+      "num_qubits": 5,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq5_nm5_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq5_nm5_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 5,
+      "num_qubits": 5,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq5_nm5_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq5_nm6_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 6,
+      "num_qubits": 5,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq5_nm6_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq5_nm6_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 6,
+      "num_qubits": 5,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq5_nm6_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq5_nm7_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 7,
+      "num_qubits": 5,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq5_nm7_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq5_nm7_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 7,
+      "num_qubits": 5,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq5_nm7_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq6_nm3_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 3,
+      "num_qubits": 6,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq6_nm3_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq6_nm3_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 3,
+      "num_qubits": 6,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq6_nm3_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq6_nm4_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 4,
+      "num_qubits": 6,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq6_nm4_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq6_nm4_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 4,
+      "num_qubits": 6,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq6_nm4_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq6_nm5_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 5,
+      "num_qubits": 6,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq6_nm5_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq6_nm5_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 5,
+      "num_qubits": 6,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq6_nm5_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq6_nm6_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 6,
+      "num_qubits": 6,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq6_nm6_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq6_nm6_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 6,
+      "num_qubits": 6,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq6_nm6_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq6_nm7_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 7,
+      "num_qubits": 6,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq6_nm7_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq6_nm7_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 7,
+      "num_qubits": 6,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq6_nm7_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq7_nm3_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 3,
+      "num_qubits": 7,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq7_nm3_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq7_nm3_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 3,
+      "num_qubits": 7,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq7_nm3_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq7_nm4_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 4,
+      "num_qubits": 7,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq7_nm4_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq7_nm4_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 4,
+      "num_qubits": 7,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq7_nm4_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq7_nm5_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 5,
+      "num_qubits": 7,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq7_nm5_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq7_nm5_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 5,
+      "num_qubits": 7,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq7_nm5_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq7_nm6_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 6,
+      "num_qubits": 7,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq7_nm6_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq7_nm6_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 6,
+      "num_qubits": 7,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq7_nm6_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq7_nm7_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 7,
+      "num_qubits": 7,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq7_nm7_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq7_nm7_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 7,
+      "num_qubits": 7,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq7_nm7_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq8_nm3_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 3,
+      "num_qubits": 8,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq8_nm3_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq8_nm3_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 3,
+      "num_qubits": 8,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq8_nm3_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq8_nm4_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 4,
+      "num_qubits": 8,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq8_nm4_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq8_nm4_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 4,
+      "num_qubits": 8,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq8_nm4_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq8_nm5_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 5,
+      "num_qubits": 8,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq8_nm5_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq8_nm5_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 5,
+      "num_qubits": 8,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq8_nm5_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq8_nm6_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 6,
+      "num_qubits": 8,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq8_nm6_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq8_nm6_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 6,
+      "num_qubits": 8,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq8_nm6_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq8_nm7_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 7,
+      "num_qubits": 8,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq8_nm7_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq8_nm7_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 7,
+      "num_qubits": 8,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq8_nm7_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq9_nm3_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 3,
+      "num_qubits": 9,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq9_nm3_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq9_nm3_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 3,
+      "num_qubits": 9,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq9_nm3_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq9_nm4_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 4,
+      "num_qubits": 9,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq9_nm4_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq9_nm4_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 4,
+      "num_qubits": 9,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq9_nm4_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq9_nm5_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 5,
+      "num_qubits": 9,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq9_nm5_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq9_nm5_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 5,
+      "num_qubits": 9,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq9_nm5_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq9_nm6_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 6,
+      "num_qubits": 9,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq9_nm6_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq9_nm6_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 6,
+      "num_qubits": 9,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq9_nm6_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq9_nm7_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 7,
+      "num_qubits": 9,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq9_nm7_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq9_nm7_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 7,
+      "num_qubits": 9,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq9_nm7_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq10_nm3_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 3,
+      "num_qubits": 10,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq10_nm3_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq10_nm3_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 3,
+      "num_qubits": 10,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq10_nm3_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq10_nm4_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 4,
+      "num_qubits": 10,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq10_nm4_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq10_nm4_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 4,
+      "num_qubits": 10,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq10_nm4_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq10_nm5_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 5,
+      "num_qubits": 10,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq10_nm5_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq10_nm5_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 5,
+      "num_qubits": 10,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq10_nm5_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq10_nm6_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 6,
+      "num_qubits": 10,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq10_nm6_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq10_nm6_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 6,
+      "num_qubits": 10,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq10_nm6_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_vqe_nq10_nm7_c16",
+      "workload": "vqe_circuit",
+      "cutoff": 16,
+      "num_modes": 7,
+      "num_qubits": 10,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_vqe_nq10_nm7_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_jch_nq10_nm7_c16",
+      "workload": "jch_simulation_circuit",
+      "cutoff": 16,
+      "num_modes": 7,
+      "num_qubits": 10,
+      "timesteps": 5,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_jch_nq10_nm7_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_cat_c16",
+      "workload": "cat_state_circuit",
+      "cutoff": 16,
+      "num_modes": 1,
+      "num_qubits": 1,
+      "alpha": 1.0,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_cat_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_cat_c32",
+      "workload": "cat_state_circuit",
+      "cutoff": 32,
+      "num_modes": 1,
+      "num_qubits": 1,
+      "alpha": 1.0,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_cat_c32",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_gkp_c16",
+      "workload": "gkp_state_circuit",
+      "cutoff": 16,
+      "num_modes": 1,
+      "num_qubits": 1,
+      "rounds": 9,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_gkp_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_gkp_c32",
+      "workload": "gkp_state_circuit",
+      "cutoff": 32,
+      "num_modes": 1,
+      "num_qubits": 1,
+      "rounds": 9,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_gkp_c32",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_qaoa_nm1_c16",
+      "workload": "qaoa_circuit",
+      "cutoff": 16,
+      "num_modes": 1,
+      "num_qubits": 1,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_qaoa_nm1_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_qaoa_nm2_c16",
+      "workload": "qaoa_circuit",
+      "cutoff": 16,
+      "num_modes": 2,
+      "num_qubits": 1,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_qaoa_nm2_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_qaoa_nm4_c16",
+      "workload": "qaoa_circuit",
+      "cutoff": 16,
+      "num_modes": 4,
+      "num_qubits": 1,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_qaoa_nm4_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_qft_nq5_c16",
+      "workload": "qft_circuit",
+      "cutoff": 16,
+      "num_modes": 1,
+      "num_qubits": 5,
+      "n": 2,
+      "a": 1,
+      "append": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_qft_nq5_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_qft_nq5_c32",
+      "workload": "qft_circuit",
+      "cutoff": 32,
+      "num_modes": 1,
+      "num_qubits": 5,
+      "n": 2,
+      "a": 1,
+      "append": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_qft_nq5_c32",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_shors_c8",
+      "workload": "shors_circuit",
+      "cutoff": 8,
+      "num_modes": 3,
+      "num_qubits": 1,
+      "N": 15,
+      "a": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_shors_c8",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_shors_c16",
+      "workload": "shors_circuit",
+      "cutoff": 16,
+      "num_modes": 3,
+      "num_qubits": 1,
+      "N": 15,
+      "a": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_shors_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_transfer_CVtoDV_nq2_c16",
+      "workload": "state_transfer_CVtoDV_circuit",
+      "cutoff": 16,
+      "num_modes": 1,
+      "num_qubits": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_transfer_CVtoDV_nq2_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_transfer_DVtoCV_nq2_c16",
+      "workload": "state_transfer_DVtoCV_circuit",
+      "cutoff": 16,
+      "num_modes": 1,
+      "num_qubits": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_transfer_DVtoCV_nq2_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_transfer_CVtoDV_nq4_c16",
+      "workload": "state_transfer_CVtoDV_circuit",
+      "cutoff": 16,
+      "num_modes": 1,
+      "num_qubits": 4,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_transfer_CVtoDV_nq4_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_transfer_DVtoCV_nq4_c16",
+      "workload": "state_transfer_DVtoCV_circuit",
+      "cutoff": 16,
+      "num_modes": 1,
+      "num_qubits": 4,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_transfer_DVtoCV_nq4_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_transfer_CVtoDV_nq8_c16",
+      "workload": "state_transfer_CVtoDV_circuit",
+      "cutoff": 16,
+      "num_modes": 1,
+      "num_qubits": 8,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_transfer_CVtoDV_nq8_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_transfer_DVtoCV_nq8_c16",
+      "workload": "state_transfer_DVtoCV_circuit",
+      "cutoff": 16,
+      "num_modes": 1,
+      "num_qubits": 8,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_transfer_DVtoCV_nq8_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_qaoa_nm8_c16",
+      "workload": "qaoa_circuit",
+      "cutoff": 16,
+      "num_modes": 8,
+      "num_qubits": 1,
+      "layers": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_qaoa_nm8_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_qft_nq3_c16",
+      "workload": "qft_circuit",
+      "cutoff": 16,
+      "num_modes": 1,
+      "num_qubits": 3,
+      "n": 2,
+      "a": 1,
+      "append": 0,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_qft_nq3_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_qft_nq7_c16",
+      "workload": "qft_circuit",
+      "cutoff": 16,
+      "num_modes": 1,
+      "num_qubits": 7,
+      "n": 4,
+      "a": 1,
+      "append": 2,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_qft_nq7_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_qft_nq9_c16",
+      "workload": "qft_circuit",
+      "cutoff": 16,
+      "num_modes": 1,
+      "num_qubits": 9,
+      "n": 5,
+      "a": 1,
+      "append": 3,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_qft_nq9_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_transfer_CVtoDV_nq16_c16",
+      "workload": "state_transfer_CVtoDV_circuit",
+      "cutoff": 16,
+      "num_modes": 1,
+      "num_qubits": 16,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_transfer_CVtoDV_nq16_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    },
+    {
+      "name": "sc26_transfer_DVtoCV_nq16_c16",
+      "workload": "state_transfer_DVtoCV_circuit",
+      "cutoff": 16,
+      "num_modes": 1,
+      "num_qubits": 16,
+      "warmup_runs": 2,
+      "measured_runs": 5,
+      "internal_name_filter": "sc26_transfer_DVtoCV_nq16_c16",
+      "backends": [
+        "hybridcvdv"
+      ]
+    }
+  ]
+}

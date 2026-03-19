@@ -1,6 +1,8 @@
 #include "hdd_node.h"
+#include <algorithm>
 #include <iostream>
 #include <functional>
+#include <vector>
 
 /**
  * HDDNode 构造函数 - 内部节点
@@ -120,27 +122,44 @@ size_t HDDNode::hash_combine(size_t lhs, size_t rhs) const {
 
 // ===== HDDNodeManager 实现 =====
 
+bool HDDNodeManager::nodes_equivalent(const HDDNode* lhs, const HDDNode* rhs) const {
+    if (lhs == rhs) {
+        return true;
+    }
+    if (!lhs || !rhs) {
+        return false;
+    }
+    if (lhs->qubit_level != rhs->qubit_level) {
+        return false;
+    }
+    if (lhs->is_terminal()) {
+        return lhs->tensor_id == rhs->tensor_id;
+    }
+    return lhs->low == rhs->low &&
+           lhs->high == rhs->high &&
+           lhs->w_low == rhs->w_low &&
+           lhs->w_high == rhs->w_high;
+}
+
 /**
  * 创建或获取内部节点
  */
 HDDNode* HDDNodeManager::get_or_create_node(int16_t level, HDDNode* low, HDDNode* high,
                                            std::complex<double> w_low, std::complex<double> w_high) {
-    // 创建新节点（不增加子节点引用）
     HDDNode* new_node = new HDDNode(level, low, high, w_low, w_high);
     size_t hash_key = new_node->unique_id;
 
-    // 查找是否已存在相同哈希的节点
-    auto it = node_cache_.find(hash_key);
-    if (it != node_cache_.end()) {
-        // 找到现有节点，删除新创建的临时节点，返回现有节点
-        delete new_node;
-        it->second->increment_ref();
-        return it->second;
+    auto& bucket = node_cache_[hash_key];
+    for (HDDNode* cached_node : bucket) {
+        if (nodes_equivalent(cached_node, new_node)) {
+            delete new_node;
+            cached_node->increment_ref();
+            return cached_node;
+        }
     }
 
-    // 没有找到，添加新节点到缓存
-    node_cache_[hash_key] = new_node;
-
+    bucket.push_back(new_node);
+    ++cached_node_count_;
     return new_node;
 }
 
@@ -148,22 +167,20 @@ HDDNode* HDDNodeManager::get_or_create_node(int16_t level, HDDNode* low, HDDNode
  * 创建终端节点
  */
 HDDNode* HDDNodeManager::create_terminal_node(int32_t cv_state_id) {
-    // 创建新终端节点
     HDDNode* new_node = new HDDNode(cv_state_id);
     size_t hash_key = new_node->unique_id;
 
-    // 查找是否已存在相同哈希的节点
-    auto it = node_cache_.find(hash_key);
-    if (it != node_cache_.end()) {
-        // 找到现有节点，删除新创建的临时节点，返回现有节点
-        delete new_node;
-        it->second->increment_ref();
-        return it->second;
+    auto& bucket = node_cache_[hash_key];
+    for (HDDNode* cached_node : bucket) {
+        if (nodes_equivalent(cached_node, new_node)) {
+            delete new_node;
+            cached_node->increment_ref();
+            return cached_node;
+        }
     }
 
-    // 没有找到，添加新节点到缓存
-    node_cache_[hash_key] = new_node;
-
+    bucket.push_back(new_node);
+    ++cached_node_count_;
     return new_node;
 }
 
@@ -175,8 +192,17 @@ void HDDNodeManager::release_node(HDDNode* node) {
 
     int new_count = node->decrement_ref();
     if (new_count <= 0) {
-        // 从缓存中移除
-        node_cache_.erase(node->unique_id);
+        auto bucket_it = node_cache_.find(node->unique_id);
+        if (bucket_it != node_cache_.end()) {
+            auto& bucket = bucket_it->second;
+            bucket.erase(std::remove(bucket.begin(), bucket.end(), node), bucket.end());
+            if (bucket.empty()) {
+                node_cache_.erase(bucket_it);
+            }
+        }
+        if (cached_node_count_ > 0) {
+            --cached_node_count_;
+        }
         delete node;
     }
 }
@@ -185,22 +211,32 @@ void HDDNodeManager::release_node(HDDNode* node) {
  * 清理未使用的节点
  */
 void HDDNodeManager::garbage_collect() {
-    std::vector<size_t> to_remove;
+    size_t removed_count = 0;
+    for (auto it = node_cache_.begin(); it != node_cache_.end(); ) {
+        auto& bucket = it->second;
+        for (auto bucket_it = bucket.begin(); bucket_it != bucket.end(); ) {
+            HDDNode* node = *bucket_it;
+            if (node->get_ref_count() <= 0) {
+                delete node;
+                bucket_it = bucket.erase(bucket_it);
+                ++removed_count;
+                if (cached_node_count_ > 0) {
+                    --cached_node_count_;
+                }
+            } else {
+                ++bucket_it;
+            }
+        }
 
-    for (const auto& pair : node_cache_) {
-        HDDNode* node = pair.second;
-        if (node->get_ref_count() <= 0) {
-            to_remove.push_back(pair.first);
+        if (bucket.empty()) {
+            it = node_cache_.erase(it);
+        } else {
+            ++it;
         }
     }
 
-    for (size_t id : to_remove) {
-        delete node_cache_[id];
-        node_cache_.erase(id);
-    }
-
-    if (!to_remove.empty()) {
-        std::cout << "HDD垃圾回收：清理了 " << to_remove.size() << " 个未使用节点" << std::endl;
+    if (removed_count > 0) {
+        std::cout << "HDD垃圾回收：清理了 " << removed_count << " 个未使用节点" << std::endl;
     }
 }
 
@@ -209,9 +245,12 @@ void HDDNodeManager::garbage_collect() {
  */
 void HDDNodeManager::clear() {
     for (auto& pair : node_cache_) {
-        delete pair.second;
+        for (HDDNode* node : pair.second) {
+            delete node;
+        }
     }
     node_cache_.clear();
+    cached_node_count_ = 0;
     next_unique_id_.store(0);
 
     std::cout << "HDD节点管理器已清空" << std::endl;

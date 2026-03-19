@@ -142,6 +142,12 @@ public:
     void execute();
 
     /**
+     * 方案 B：基于交互绘景（Interaction Picture）的执行引擎
+     * 高斯算符只更新参考系（Frame），非高斯算符在参考系下进行参数漂移后作用于 Fock 态。
+     */
+    void execute_with_interaction_picture();
+
+    /**
      * 重置量子线路状态
      */
     void reset();
@@ -267,6 +273,13 @@ private:
         std::vector<SymbolicGaussianBranch> branches;
     };
 
+    struct GaussianFrame {
+        SymplecticGate symplectic;
+        std::vector<std::complex<double>> alpha; // 每一个mode的位移参数
+
+        GaussianFrame(int M) : symplectic(M), alpha(M, 0.0) {}
+    };
+
     std::unordered_map<int, SymbolicTerminalState> symbolic_terminal_states_;
 
     /**
@@ -278,6 +291,21 @@ private:
      * 执行单个门操作
      */
     void execute_gate(const GateParams& gate);
+
+    /**
+     * 执行单个门操作 (交互绘景版)
+     */
+    void execute_gate_ip(const GateParams& gate, GaussianFrame& frame);
+
+    /**
+     * 将非高斯门在位移参考系下应用到状态
+     */
+    void apply_displaced_non_gaussian_gate(int state_id, const GateParams& gate, const GaussianFrame& frame);
+
+    /**
+     * 将参考系累积的高斯变换一次性作用到 Fock 态
+     */
+    void materialize_frame_to_fock(int state_id, const GaussianFrame& frame);
 
     /**
      * 规范化执行门序列，合并并重排可交换的纯CV对角门窗口
@@ -416,11 +444,6 @@ private:
     void apply_anti_jaynes_cummings_to_state(int state_id, double theta, double phi);
 
     /**
-     * 对单个状态应用选择性Qubit旋转
-     */
-    void apply_selective_qubit_rotation_to_state(int state_id, const std::vector<double>& theta_vec, const std::vector<double>& phi_vec);
-
-    /**
      * 准备挤压门的ELL算符
      */
     FockELLOperator* prepare_squeezing_ell_operator(std::complex<double> xi);
@@ -523,6 +546,18 @@ private:
      * 递归应用选择性Qubit旋转
      */
     HDDNode* apply_selective_qubit_rotation_recursive(HDDNode* node, int target_qubit, int control_qumode, const std::vector<double>& theta_vec, const std::vector<double>& phi_vec);
+
+    /**
+     * 对目标qubit的低/高分支递归施加选择性旋转
+     */
+    std::pair<HDDNode*, HDDNode*> apply_selective_qubit_rotation_pair_recursive(
+        HDDNode* low_node,
+        std::complex<double> low_weight,
+        HDDNode* high_node,
+        std::complex<double> high_weight,
+        int control_qumode,
+        const std::vector<double>& theta_vec,
+        const std::vector<double>& phi_vec);
 
     /**
      * 执行qubit门操作

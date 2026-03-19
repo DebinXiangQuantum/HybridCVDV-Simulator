@@ -9,6 +9,12 @@
 
 namespace {
 
+struct VacuumClassificationScratch {
+    int is_zero;
+    int is_scaled_vacuum;
+    cuDoubleComplex scale;
+};
+
 int compute_mode_right_stride(int trunc_dim, int target_qumode, int num_qumodes) {
     if (trunc_dim <= 0) {
         throw std::invalid_argument("truncation dimension must be positive");
@@ -580,11 +586,11 @@ void classify_vacuum_ray_device(CVStatePool* state_pool,
     int host_is_zero = 1;
     int host_is_scaled_vacuum = 1;
 
-    size_t aux_size = 2 * sizeof(int) + sizeof(cuDoubleComplex);
-    char* aux = static_cast<char*>(state_pool->scratch_aux.ensure(aux_size));
-    int* d_is_zero = reinterpret_cast<int*>(aux);
-    int* d_is_scaled_vacuum = reinterpret_cast<int*>(aux + sizeof(int));
-    cuDoubleComplex* d_scale = reinterpret_cast<cuDoubleComplex*>(aux + 2 * sizeof(int));
+    auto* scratch = static_cast<VacuumClassificationScratch*>(
+        state_pool->scratch_aux.ensure(sizeof(VacuumClassificationScratch)));
+    int* d_is_zero = &scratch->is_zero;
+    int* d_is_scaled_vacuum = &scratch->is_scaled_vacuum;
+    cuDoubleComplex* d_scale = &scratch->scale;
 
     cudaMemcpy(d_is_zero, &host_is_zero, sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(d_is_scaled_vacuum, &host_is_scaled_vacuum, sizeof(int), cudaMemcpyHostToDevice);

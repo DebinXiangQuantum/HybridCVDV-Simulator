@@ -88,10 +88,12 @@ struct CliOptions {
     std::string suite = "all";
     std::string name_filter;
     int gaussian_symbolic_mode_limit = 4;
+    bool use_interaction_picture = false;
     fs::path output_path = fs::path("experiments/results/internal_single_gpu.json");
 };
 
 int g_gaussian_symbolic_mode_limit = 4;
+bool g_use_interaction_picture = false;
 
 std::string now_utc_iso8601() {
     const auto now = std::chrono::system_clock::now();
@@ -539,7 +541,11 @@ CircuitRunResult run_circuit_once(int num_qubits,
             result.error = "failed to inject custom initial state into terminal root";
             return result;
         }
-        circuit.execute();
+        if (g_use_interaction_picture) {
+            circuit.execute_with_interaction_picture();
+        } else {
+            circuit.execute();
+        }
         result.ok = true;
         result.time_stats = circuit.get_time_stats();
         result.circuit_stats = circuit.get_stats();
@@ -1877,13 +1883,15 @@ CliOptions parse_cli(int argc, char** argv) {
             options.name_filter = argv[++i];
         } else if (arg == "--gaussian-symbolic-mode-limit" && i + 1 < argc) {
             options.gaussian_symbolic_mode_limit = std::stoi(argv[++i]);
+        } else if (arg == "--use-interaction-picture") {
+            options.use_interaction_picture = true;
         } else if (arg == "--output" && i + 1 < argc) {
             options.output_path = fs::path(argv[++i]);
         } else if (arg == "--help" || arg == "-h") {
             std::cout << "Usage: hybridcvdv_single_gpu_experiments "
                          "[--suite all|correctness|microbench|runtime_ablation|scaling] "
                          "[--name-filter substring] "
-                         "[--gaussian-symbolic-mode-limit N] [--output path]\n";
+                         "[--gaussian-symbolic-mode-limit N] [--use-interaction-picture] [--output path]\n";
             std::exit(0);
         } else {
             throw std::invalid_argument("unknown argument: " + arg);
@@ -1898,6 +1906,7 @@ CliOptions parse_cli(int argc, char** argv) {
 void write_report(const fs::path& output_path,
                   const std::string& requested_suite,
                   int gaussian_symbolic_mode_limit,
+                  bool use_interaction_picture,
                   const DeviceMetadata& device,
                   const std::vector<ExperimentResult>& results) {
     if (!output_path.parent_path().empty()) {
@@ -1916,6 +1925,7 @@ void write_report(const fs::path& output_path,
     out << "  \"single_gpu_only\": true,\n";
     out << "  \"requested_suite\": \"" << json_escape(requested_suite) << "\",\n";
     out << "  \"gaussian_symbolic_mode_limit\": " << gaussian_symbolic_mode_limit << ",\n";
+    out << "  \"use_interaction_picture\": " << (use_interaction_picture ? "true" : "false") << ",\n";
     out << "  \"device\": {\n";
     out << "    \"available\": " << (device.available ? "true" : "false") << ",\n";
     out << "    \"device_index\": " << device.device_index << ",\n";
@@ -1959,6 +1969,7 @@ int main(int argc, char** argv) {
     try {
         const CliOptions options = parse_cli(argc, argv);
         g_gaussian_symbolic_mode_limit = options.gaussian_symbolic_mode_limit;
+        g_use_interaction_picture = options.use_interaction_picture;
         const DeviceMetadata device = query_device();
         if (!device.available) {
             throw std::runtime_error("no CUDA device available for single-GPU experiments");
@@ -1985,6 +1996,7 @@ int main(int argc, char** argv) {
         write_report(options.output_path,
                      options.suite,
                      options.gaussian_symbolic_mode_limit,
+                     options.use_interaction_picture,
                      device,
                      results);
 

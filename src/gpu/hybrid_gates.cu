@@ -869,5 +869,11 @@ void apply_hybrid_control_gate(HDDNode* root_node,
                              HDDNodeManager& node_manager,
                              const std::string& gate_type,
                              cuDoubleComplex param) {
-    // Placeholder
+    (void)root_node;
+    (void)state_pool;
+    (void)node_manager;
+    (void)param;
+    throw std::runtime_error(
+        "apply_hybrid_control_gate is deprecated; dispatch hybrid gates through QuantumCircuit::execute_hybrid_gate for gate type " +
+        gate_type);
 }

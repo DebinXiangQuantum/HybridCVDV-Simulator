@@ -128,8 +128,11 @@ struct HDDNodeEqual {
  */
 class HDDNodeManager {
 private:
-    std::unordered_map<size_t, HDDNode*> node_cache_;
+    std::unordered_map<size_t, std::vector<HDDNode*>> node_cache_;
     std::atomic<size_t> next_unique_id_{0};
+    size_t cached_node_count_ = 0;
+
+    bool nodes_equivalent(const HDDNode* lhs, const HDDNode* rhs) const;
 
 public:
     /**
@@ -158,7 +161,7 @@ public:
     /**
      * 获取缓存中的节点数量
      */
-    size_t get_cache_size() const { return node_cache_.size(); }
+    size_t get_cache_size() const { return cached_node_count_; }
 
     /**
      * 清空所有节点
