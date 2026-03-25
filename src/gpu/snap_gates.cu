@@ -51,7 +51,7 @@ int compute_mode_right_stride(int trunc_dim, int target_qumode, int num_qumodes)
 __global__ void apply_snap_kernel(
     cuDoubleComplex* state_data,
     const size_t* state_offsets,
-    const int* state_dims,
+    const int64_t* state_dims,
     const int* target_indices,
     int batch_size,
     double theta,
@@ -65,7 +65,7 @@ __global__ void apply_snap_kernel(
     int state_idx = target_indices[batch_id];
     size_t flat_index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
 
-    int current_dim = state_dims[state_idx];
+    int64_t current_dim = state_dims[state_idx];
     if (flat_index >= static_cast<size_t>(current_dim)) return;
 
     size_t offset = state_offsets[state_idx];
@@ -96,7 +96,7 @@ __global__ void apply_snap_kernel(
 __global__ void apply_multisnap_kernel(
     cuDoubleComplex* state_data,
     const size_t* state_offsets,
-    const int* state_dims,
+    const int64_t* state_dims,
     const int* target_indices,
     int batch_size,
     const double* phase_map,
@@ -110,7 +110,7 @@ __global__ void apply_multisnap_kernel(
     int state_idx = target_indices[batch_id];
     size_t flat_index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
 
-    int current_dim = state_dims[state_idx];
+    int64_t current_dim = state_dims[state_idx];
     if (flat_index >= static_cast<size_t>(current_dim)) return;
 
     size_t offset = state_offsets[state_idx];
@@ -147,7 +147,7 @@ __global__ void apply_multisnap_kernel(
 __global__ void apply_csnap_kernel(
     cuDoubleComplex* state_data,
     const size_t* state_offsets,
-    const int* state_dims,
+    const int64_t* state_dims,
     const int* target_indices,
     int batch_size,
     double theta,
@@ -158,7 +158,7 @@ __global__ void apply_csnap_kernel(
     if (batch_id >= batch_size) return;
 
     int state_idx = target_indices[batch_id];
-    int n = blockIdx.x * blockDim.x + threadIdx.x;
+    int64_t n = (int64_t)blockIdx.x * blockDim.x + threadIdx.x;
 
     if (n >= cutoff) return;
 
@@ -186,7 +186,7 @@ __global__ void apply_csnap_kernel(
 __global__ void apply_cmultisnap_kernel(
     cuDoubleComplex* state_data,
     const size_t* state_offsets,
-    const int* state_dims,
+    const int64_t* state_dims,
     const int* target_indices,
     int batch_size,
     const double* phase_map,
@@ -197,7 +197,7 @@ __global__ void apply_cmultisnap_kernel(
     if (batch_id >= batch_size) return;
 
     int state_idx = target_indices[batch_id];
-    int n = blockIdx.x * blockDim.x + threadIdx.x;
+    int64_t n = (int64_t)blockIdx.x * blockDim.x + threadIdx.x;
 
     if (n >= cutoff) return;
 

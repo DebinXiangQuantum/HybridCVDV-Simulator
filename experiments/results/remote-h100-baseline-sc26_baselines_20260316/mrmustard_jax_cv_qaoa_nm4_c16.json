@@ -1,0 +1,49 @@
+{
+  "schema_version": "2.0",
+  "generated_at_utc": "2026-03-17T05:12:35Z",
+  "backend": "mrmustard_jax",
+  "single_gpu_focus": true,
+  "status": "ok",
+  "backend_runtime": {
+    "mrmustard_version": "1.0.0a1",
+    "jax_version": "0.6.2",
+    "visible_gpu_devices": [
+      "cuda:0"
+    ],
+    "default_backend": "gpu"
+  },
+  "results": [
+    {
+      "name": "cv_qaoa_modes_4_layers_2_cutoff_16",
+      "category": "baseline_scaling",
+      "status": "ok",
+      "note": "MrMustard jax backend; communication time is measured as final state materialization from device to host",
+      "params": {
+        "workload": "cv_qaoa",
+        "cutoff": "16",
+        "num_modes": "4",
+        "layers": "2",
+        "timesteps": "5",
+        "warmup_runs": "2",
+        "measured_runs": "5",
+        "squeezing_r": "0.5",
+        "displacement_scale": "1.0",
+        "j_coupling": "1.0",
+        "omega_r": "1.0",
+        "tau": "0.1"
+      },
+      "metrics": {
+        "median_total_ms": 2.880662097595632,
+        "median_compute_ms": 2.6409809943288565,
+        "median_communication_ms": 0.23658608552068472,
+        "min_total_ms": 2.8450279496610165,
+        "max_total_ms": 2.911339048296213,
+        "p25_total_ms": 2.854233025573194,
+        "p75_total_ms": 2.8810129733756185,
+        "throughput_ops_per_sec": 347.1424159170415,
+        "median_output_norm": 4.0891073464608306e-09,
+        "state_vector_bytes_estimate": 1048576.0
+      }
+    }
+  ]
+}

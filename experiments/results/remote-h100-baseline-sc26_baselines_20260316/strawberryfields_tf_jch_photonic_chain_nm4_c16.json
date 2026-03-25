@@ -1,0 +1,48 @@
+{
+  "schema_version": "2.0",
+  "generated_at_utc": "2026-03-17T05:12:41Z",
+  "backend": "strawberryfields_tf",
+  "single_gpu_focus": true,
+  "status": "ok",
+  "backend_runtime": {
+    "strawberryfields_version": "0.23.0",
+    "tensorflow_version": "2.21.0",
+    "visible_gpu_devices": [
+      "/physical_device:GPU:0"
+    ]
+  },
+  "results": [
+    {
+      "name": "jch_photonic_chain_modes_4_timesteps_5_cutoff_16",
+      "category": "baseline_scaling",
+      "status": "ok",
+      "note": "Strawberry Fields tf backend; derived from circuit/src/jch_simulation_circuit.cpp by keeping only bosonic R and BS terms",
+      "params": {
+        "workload": "jch_photonic_chain",
+        "cutoff": "16",
+        "num_modes": "4",
+        "layers": "2",
+        "timesteps": "5",
+        "warmup_runs": "2",
+        "measured_runs": "5",
+        "squeezing_r": "0.5",
+        "displacement_scale": "1.0",
+        "j_coupling": "1.0",
+        "omega_r": "1.0",
+        "tau": "0.1"
+      },
+      "metrics": {
+        "median_total_ms": 103.50333095993847,
+        "median_compute_ms": 103.3576619811356,
+        "median_communication_ms": 0.1415129518136382,
+        "min_total_ms": 103.01477496977895,
+        "max_total_ms": 104.80158997233957,
+        "p25_total_ms": 103.08024403639138,
+        "p75_total_ms": 103.62759907729924,
+        "throughput_ops_per_sec": 9.661524810124764,
+        "median_output_norm": 1.0,
+        "state_vector_bytes_estimate": 1048576.0
+      }
+    }
+  ]
+}

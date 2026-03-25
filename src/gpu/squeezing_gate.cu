@@ -89,7 +89,7 @@ __device__ cuDoubleComplex compute_squeezing_element(
 __global__ void apply_squeezing_direct_kernel(
     cuDoubleComplex* state_data,
     const size_t* state_offsets,
-    const int* state_dims,
+    const int64_t* state_dims,
     const int* target_indices,
     int batch_size,
     double r,
@@ -101,12 +101,12 @@ __global__ void apply_squeezing_direct_kernel(
     if (batch_id >= batch_size) return;
 
     int state_idx = target_indices[batch_id];
-    int row = blockIdx.x * blockDim.x + threadIdx.x;
+    int64_t row = (int64_t)blockIdx.x * blockDim.x + threadIdx.x;
 
     if (row >= cutoff) return;
     
     size_t offset = state_offsets[state_idx];
-    int state_dim = state_dims[state_idx];
+    int64_t state_dim = state_dims[state_idx];
     
     if (state_dim < cutoff) return;
 
@@ -210,7 +210,7 @@ static SqueezingCache g_cache = {nullptr, nullptr, 0, 0, 0.0, 0.0, false};
 __global__ void apply_squeezing_ell_cached_kernel(
     cuDoubleComplex* state_data,
     const size_t* state_offsets,
-    const int* state_dims,
+    const int64_t* state_dims,
     const cuDoubleComplex* ell_val,
     const int* ell_col,
     int cutoff,
@@ -228,7 +228,7 @@ __global__ void apply_squeezing_ell_cached_kernel(
     size_t flat_index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
 
     size_t offset = state_offsets[state_idx];
-    int state_dim = state_dims[state_idx];
+    int64_t state_dim = state_dims[state_idx];
     if (flat_index >= static_cast<size_t>(state_dim)) return;
 
     cuDoubleComplex* psi_in = &state_data[offset];
@@ -258,7 +258,7 @@ __global__ void apply_squeezing_ell_cached_kernel(
 __global__ void copy_result_kernel(
     cuDoubleComplex* state_data,
     const size_t* state_offsets,
-    const int* state_dims,
+    const int64_t* state_dims,
     const cuDoubleComplex* temp_buffer,
     const int* target_indices,
     int batch_size,
@@ -271,7 +271,7 @@ __global__ void copy_result_kernel(
     size_t idx = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
     
     size_t offset = state_offsets[state_idx];
-    int state_dim = state_dims[state_idx];
+    int64_t state_dim = state_dims[state_idx];
     
     if (idx >= static_cast<size_t>(state_dim)) return;
 
@@ -386,7 +386,9 @@ void apply_squeezing_gate_gpu(
     double r,
     double theta,
     int target_qumode,
-    int num_qumodes
+    int num_qumodes,
+    cudaStream_t stream,
+    bool synchronize
 ) {
     int cutoff = pool->d_trunc;
     const int target_mode_right_stride =
@@ -404,7 +406,7 @@ void apply_squeezing_gate_gpu(
     dim3 block_dim(256);
     dim3 grid_dim((pool->max_total_dim + block_dim.x - 1) / block_dim.x, batch_size);
     
-    apply_squeezing_ell_cached_kernel<<<grid_dim, block_dim>>>(
+    apply_squeezing_ell_cached_kernel<<<grid_dim, block_dim, 0, stream>>>(
         pool->data,
         pool->state_offsets,
         pool->state_dims,
@@ -418,11 +420,9 @@ void apply_squeezing_gate_gpu(
         buffer_stride,
         target_mode_right_stride
     );
-    
-    cudaDeviceSynchronize();
-    
+
     // 复制结果回原位置
-    copy_result_kernel<<<grid_dim, block_dim>>>(
+    copy_result_kernel<<<grid_dim, block_dim, 0, stream>>>(
         pool->data,
         pool->state_offsets,
         pool->state_dims,
@@ -431,8 +431,15 @@ void apply_squeezing_gate_gpu(
         batch_size,
         buffer_stride
     );
-    
-    cudaDeviceSynchronize();
+
+    if (synchronize) {
+        const cudaError_t err =
+            stream != nullptr ? cudaStreamSynchronize(stream) : cudaDeviceSynchronize();
+        if (err != cudaSuccess) {
+            throw std::runtime_error("Squeezing gate synchronization failed: " +
+                                     std::string(cudaGetErrorString(err)));
+        }
+    }
 }
 
 /**

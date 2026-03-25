@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <cuda_runtime.h>
 
 // 包含GPU内核头文件
@@ -17,13 +18,17 @@ void apply_conditional_parity_on_mode(CVStatePool* pool, const int* targets, int
                                       int target_qumode, int num_qumodes,
                                       cudaStream_t stream = nullptr, bool synchronize = true);
 void apply_creation_operator_on_mode(CVStatePool* pool, const int* targets, int batch_size,
-                                     int target_qumode, int num_qumodes);
+                                     int target_qumode, int num_qumodes,
+                                     cudaStream_t stream = nullptr, bool synchronize = true);
 void apply_annihilation_operator_on_mode(CVStatePool* pool, const int* targets, int batch_size,
-                                         int target_qumode, int num_qumodes);
+                                         int target_qumode, int num_qumodes,
+                                         cudaStream_t stream = nullptr, bool synchronize = true);
 void apply_displacement_gate(CVStatePool* pool, const int* targets, int batch_size,
-                            cuDoubleComplex alpha);
+                            cuDoubleComplex alpha,
+                            cudaStream_t stream = nullptr, bool synchronize = true);
 void apply_single_mode_gate(CVStatePool* pool, FockELLOperator* ell_op,
-                           const int* targets, int batch_size);
+                           const int* targets, int batch_size,
+                           cudaStream_t stream = nullptr, bool synchronize = true);
 void apply_controlled_displacement_on_mode(CVStatePool* state_pool,
                                            const std::vector<int>& controlled_states,
                                            cuDoubleComplex alpha,
@@ -38,7 +43,7 @@ int infer_num_qumodes_from_pool(const CVStatePool* state_pool) {
     }
 
     int num_qumodes = 0;
-    int dim = 1;
+    int64_t dim = 1;
     while (dim < state_pool->max_total_dim) {
         if (dim > state_pool->max_total_dim / state_pool->d_trunc) {
             return 1;
@@ -195,19 +200,34 @@ void BatchScheduler::execute_with_cuda_graph() {
         captured_graph_tasks_.clear();
         captured_graph_tasks_.reserve(merged_batch.size());
 
+        size_t total_target_ids = 0;
+        for (const auto& task : merged_batch) {
+            total_target_ids += task.target_state_ids.size();
+        }
+        int* captured_target_base = nullptr;
+        if (total_target_ids > 0) {
+            captured_target_base = static_cast<int*>(
+                captured_graph_target_storage_.ensure(total_target_ids * sizeof(int)));
+        }
+
+        size_t target_offset = 0;
         for (const auto& task : merged_batch) {
             CapturedGraphTask prepared{task, nullptr};
             if (!task.target_state_ids.empty()) {
+                prepared.d_target_ids = captured_target_base + target_offset;
+                int* staged_ids = static_cast<int*>(
+                    state_pool_->host_transfer_staging.ensure(
+                        task.target_state_ids.size() * sizeof(int)));
+                std::memcpy(staged_ids,
+                            task.target_state_ids.data(),
+                            task.target_state_ids.size() * sizeof(int));
                 check_cuda_status(
-                    cudaMalloc(&prepared.d_target_ids, task.target_state_ids.size() * sizeof(int)),
-                    "Failed to allocate CUDA Graph target buffer: ");
-                check_cuda_status(
-                    cudaMemcpy(
-                        prepared.d_target_ids,
-                        task.target_state_ids.data(),
-                        task.target_state_ids.size() * sizeof(int),
-                        cudaMemcpyHostToDevice),
+                    cudaMemcpy(prepared.d_target_ids,
+                               staged_ids,
+                               task.target_state_ids.size() * sizeof(int),
+                               cudaMemcpyHostToDevice),
                     "Failed to upload CUDA Graph target buffer: ");
+                target_offset += task.target_state_ids.size();
             }
             captured_graph_tasks_.push_back(prepared);
         }
@@ -301,13 +321,8 @@ bool BatchScheduler::can_capture_pending_batch_with_cuda_graph(std::string* reas
 }
 
 void BatchScheduler::release_captured_graph_tasks() {
-    for (auto& task : captured_graph_tasks_) {
-        if (task.d_target_ids) {
-            cudaFree(task.d_target_ids);
-            task.d_target_ids = nullptr;
-        }
-    }
     captured_graph_tasks_.clear();
+    captured_graph_target_storage_.release();
 }
 
 void BatchScheduler::execute_prepared_level0_batch(const std::vector<CapturedGraphTask>& batch,
@@ -469,17 +484,20 @@ std::vector<BatchTask> BatchScheduler::merge_similar_tasks(const std::vector<Bat
  */
 void BatchScheduler::execute_level0_batch(const std::vector<BatchTask>& batch) {
     const int num_qumodes = infer_num_qumodes_from_pool(state_pool_);
+    size_t max_ids_bytes = 0;
+    for (const auto& task : batch) {
+        max_ids_bytes = std::max(max_ids_bytes, task.target_state_ids.size() * sizeof(int));
+    }
+    if (max_ids_bytes > 0) {
+        state_pool_->scratch_target_ids.ensure(max_ids_bytes);
+    }
 
     for (const auto& task : batch) {
         if (task.target_state_ids.empty()) continue;
 
         // 上传状态ID到GPU (scratch buffer)
-        const size_t ids_bytes = task.target_state_ids.size() * sizeof(int);
-        int* d_target_ids = static_cast<int*>(state_pool_->scratch_target_ids.ensure(ids_bytes));
-        check_cuda_status(
-            cudaMemcpy(d_target_ids, task.target_state_ids.data(),
-                       ids_bytes, cudaMemcpyHostToDevice),
-            "execute_level0_batch: cudaMemcpy target_ids failed: ");
+        int* d_target_ids = state_pool_->upload_vector_to_buffer(
+            task.target_state_ids, state_pool_->scratch_target_ids);
 
         double param = task.params.empty() ? 0.0 : task.params[0].real();
         const int target_qumode = get_primary_target_qumode(task);
@@ -487,20 +505,22 @@ void BatchScheduler::execute_level0_batch(const std::vector<BatchTask>& batch) {
         switch (task.gate_type) {
             case GateType::PHASE_ROTATION:
                 apply_phase_rotation_on_mode(state_pool_, d_target_ids, task.target_state_ids.size(), param,
-                                             target_qumode, num_qumodes);
+                                             target_qumode, num_qumodes, nullptr, false);
                 break;
             case GateType::KERR_GATE:
                 apply_kerr_gate_on_mode(state_pool_, d_target_ids, task.target_state_ids.size(), param,
-                                        target_qumode, num_qumodes);
+                                        target_qumode, num_qumodes, nullptr, false);
                 break;
             case GateType::CONDITIONAL_PARITY:
                 apply_conditional_parity_on_mode(state_pool_, d_target_ids, task.target_state_ids.size(), param,
-                                                 target_qumode, num_qumodes);
+                                                 target_qumode, num_qumodes, nullptr, false);
                 break;
             default:
                 break;
         }
     }
+
+    check_cuda_status(cudaDeviceSynchronize(), "execute_level0_batch: kernel synchronization failed: ");
 }
 
 /**
@@ -512,12 +532,8 @@ void BatchScheduler::execute_level1_batch(const std::vector<BatchTask>& batch) {
     for (const auto& task : batch) {
         if (task.target_state_ids.empty()) continue;
 
-        const size_t ids_bytes = task.target_state_ids.size() * sizeof(int);
-        int* d_target_ids = static_cast<int*>(state_pool_->scratch_target_ids.ensure(ids_bytes));
-        check_cuda_status(
-            cudaMemcpy(d_target_ids, task.target_state_ids.data(),
-                       ids_bytes, cudaMemcpyHostToDevice),
-            "execute_level1_batch: cudaMemcpy target_ids failed: ");
+        int* d_target_ids = state_pool_->upload_vector_to_buffer(
+            task.target_state_ids, state_pool_->scratch_target_ids);
 
         const int target_qumode = get_primary_target_qumode(task);
 
@@ -545,12 +561,8 @@ void BatchScheduler::execute_level2_batch(const std::vector<BatchTask>& batch) {
     for (const auto& task : batch) {
         if (task.target_state_ids.empty()) continue;
 
-        const size_t ids_bytes = task.target_state_ids.size() * sizeof(int);
-        int* d_target_ids = static_cast<int*>(state_pool_->scratch_target_ids.ensure(ids_bytes));
-        check_cuda_status(
-            cudaMemcpy(d_target_ids, task.target_state_ids.data(),
-                       ids_bytes, cudaMemcpyHostToDevice),
-            "execute_level2_batch: cudaMemcpy target_ids failed: ");
+        int* d_target_ids = state_pool_->upload_vector_to_buffer(
+            task.target_state_ids, state_pool_->scratch_target_ids);
 
         const int target_qumode = get_primary_target_qumode(task);
 

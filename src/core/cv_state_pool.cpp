@@ -50,7 +50,7 @@ CVStatePool::CVStatePool(int trunc_dim, int max_states, int num_qumodes, size_t 
     cudaGetLastError();
 
     for (int i = 0; i < num_qumodes; ++i) {
-        if (max_total_dim > std::numeric_limits<int>::max() / d_trunc) {
+        if (max_total_dim > std::numeric_limits<int64_t>::max() / d_trunc) {
             throw std::overflow_error("状态空间维度溢出");
         }
         max_total_dim *= d_trunc;
@@ -82,7 +82,7 @@ CVStatePool::CVStatePool(int trunc_dim, int max_states, int num_qumodes, size_t 
         throw std::runtime_error("无法分配GPU内存用于空闲列表: " + std::string(cudaGetErrorString(err)));
     }
 
-    err = cudaMalloc(&state_dims, capacity * sizeof(int));
+    err = cudaMalloc(&state_dims, capacity * sizeof(int64_t));
     if (err != cudaSuccess) {
         cleanup();
         throw std::runtime_error("无法分配GPU内存用于状态维度: " + std::string(cudaGetErrorString(err)));
@@ -109,7 +109,7 @@ CVStatePool::CVStatePool(int trunc_dim, int max_states, int num_qumodes, size_t 
         throw std::runtime_error("无法初始化空闲列表: " + std::string(cudaGetErrorString(err)));
     }
 
-    err = cudaMemset(state_dims, 0, capacity * sizeof(int));
+    err = cudaMemset(state_dims, 0, capacity * sizeof(int64_t));
     if (err != cudaSuccess) {
         cleanup();
         throw std::runtime_error("无法初始化状态维度: " + std::string(cudaGetErrorString(err)));
@@ -177,10 +177,31 @@ void CVStatePool::refresh_total_memory_size() {
     total_memory_size = metadata_memory_size_ + bytes_for_elements(data_capacity_elements_);
 }
 
+void CVStatePool::release_device_scratch_buffers() {
+    scratch_target_ids.release();
+    scratch_temp.release();
+    scratch_aux.release();
+}
+
+size_t CVStatePool::active_storage_elements() const {
+    size_t live_elements = 0;
+    for (int state_id = 0; state_id < capacity; ++state_id) {
+        if (!active_flags[state_id]) {
+            continue;
+        }
+        live_elements += host_state_capacities[state_id];
+    }
+    return live_elements;
+}
+
+size_t CVStatePool::get_active_storage_elements() const {
+    return active_storage_elements();
+}
+
 void CVStatePool::sync_state_metadata_to_device(int state_id) {
     cudaError_t err = cudaMemcpy(state_dims + state_id,
                                  &host_state_dims[state_id],
-                                 sizeof(int),
+                                 sizeof(int64_t),
                                  cudaMemcpyHostToDevice);
     if (err != cudaSuccess) {
         throw std::runtime_error("无法同步状态维度: " + std::string(cudaGetErrorString(err)));
@@ -200,10 +221,139 @@ void CVStatePool::ensure_data_capacity(size_t required_elements) {
         return;
     }
 
-    size_t new_capacity = std::max(required_elements, data_capacity_elements_ == 0 ? required_elements
-                                                                                  : data_capacity_elements_ * 2);
-    if (new_capacity == 0) {
-        new_capacity = required_elements;
+    auto try_repack_live_storage = [&](size_t target_capacity, cuDoubleComplex** out_data) -> bool {
+        const size_t live_elements = active_storage_elements();
+        if (!data || live_elements == 0 || live_elements >= data_capacity_elements_) {
+            return false;
+        }
+
+        std::vector<int> active_state_ids = get_active_state_ids();
+        std::vector<size_t> compact_offsets(static_cast<size_t>(capacity), 0);
+        size_t compact_cursor = 0;
+
+        cuDoubleComplex* compact_data = nullptr;
+        cudaError_t compact_alloc_err = cudaMalloc(&compact_data, bytes_for_elements(live_elements));
+        if (compact_alloc_err != cudaSuccess) {
+            cudaGetLastError();
+            return false;
+        }
+
+        auto cleanup_compact = [&]() {
+            if (compact_data) {
+                cudaFree(compact_data);
+                compact_data = nullptr;
+            }
+        };
+
+        try {
+            for (int state_id : active_state_ids) {
+                const size_t reserved = host_state_capacities[state_id];
+                if (reserved == 0) {
+                    continue;
+                }
+
+                compact_offsets[static_cast<size_t>(state_id)] = compact_cursor;
+                const cudaError_t copy_err = cudaMemcpy(
+                    compact_data + compact_cursor,
+                    data + host_state_offsets[state_id],
+                    bytes_for_elements(reserved),
+                    cudaMemcpyDeviceToDevice);
+                if (copy_err != cudaSuccess) {
+                    throw std::runtime_error(
+                        "无法压缩迁移活跃状态: " + std::string(cudaGetErrorString(copy_err)));
+                }
+                compact_cursor += reserved;
+            }
+        } catch (...) {
+            cleanup_compact();
+            cudaGetLastError();
+            return false;
+        }
+
+        cudaError_t free_err = cudaFree(data);
+        if (free_err != cudaSuccess) {
+            cleanup_compact();
+            cudaGetLastError();
+            return false;
+        }
+        data = nullptr;
+        data_capacity_elements_ = 0;
+
+        cuDoubleComplex* rebuilt_data = nullptr;
+        cudaError_t rebuilt_alloc_err = cudaMalloc(&rebuilt_data, bytes_for_elements(target_capacity));
+        if (rebuilt_alloc_err != cudaSuccess) {
+            cleanup_compact();
+            cudaGetLastError();
+            return false;
+        }
+
+        try {
+            for (int state_id : active_state_ids) {
+                const size_t reserved = host_state_capacities[state_id];
+                if (reserved == 0) {
+                    continue;
+                }
+
+                const size_t compact_offset = compact_offsets[static_cast<size_t>(state_id)];
+                const cudaError_t copy_err = cudaMemcpy(
+                    rebuilt_data + compact_offset,
+                    compact_data + compact_offset,
+                    bytes_for_elements(reserved),
+                    cudaMemcpyDeviceToDevice);
+                if (copy_err != cudaSuccess) {
+                    throw std::runtime_error(
+                        "无法恢复压缩后的活跃状态: " + std::string(cudaGetErrorString(copy_err)));
+                }
+
+                host_state_offsets[state_id] = compact_offset;
+                sync_state_metadata_to_device(state_id);
+            }
+        } catch (...) {
+            cleanup_compact();
+            cudaFree(rebuilt_data);
+            cudaGetLastError();
+            return false;
+        }
+
+        cleanup_compact();
+        allocated_elements_ = live_elements;
+        free_blocks_.clear();
+        *out_data = rebuilt_data;
+        return true;
+    };
+
+    size_t new_capacity = required_elements;
+    if (data_capacity_elements_ != 0) {
+        size_t growth = required_elements - data_capacity_elements_;
+        growth = std::max(growth, data_capacity_elements_ / 4);
+        growth = std::max<size_t>(growth, 1);
+        growth = std::min(growth, static_cast<size_t>(std::max(INT64_C(1), max_total_dim)));
+        new_capacity += growth;
+
+        const size_t state_dim = static_cast<size_t>(std::max(INT64_C(1), max_total_dim));
+        if (required_elements - data_capacity_elements_ <= state_dim) {
+            size_t free_bytes = 0;
+            size_t total_bytes = 0;
+            if (cudaMemGetInfo(&free_bytes, &total_bytes) == cudaSuccess) {
+                constexpr size_t kSafetyBytes = 256ULL * 1024ULL * 1024ULL;
+                if (free_bytes > kSafetyBytes) {
+                    const size_t allocatable_now =
+                        (free_bytes - kSafetyBytes) / sizeof(cuDoubleComplex);
+                    if (allocatable_now > required_elements) {
+                        const size_t max_extra_states =
+                            (allocatable_now - required_elements) / state_dim;
+                        const size_t extra_states = std::min<size_t>(4, max_extra_states);
+                        if (extra_states > 0 &&
+                            extra_states <= (std::numeric_limits<size_t>::max() - required_elements) /
+                                                state_dim) {
+                            const size_t proactive_capacity =
+                                required_elements + extra_states * state_dim;
+                            new_capacity = std::max(new_capacity, proactive_capacity);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     if (max_memory_size > 0) {
@@ -219,33 +369,67 @@ void CVStatePool::ensure_data_capacity(size_t required_elements) {
     }
 
     cuDoubleComplex* new_data = nullptr;
-    const cudaError_t alloc_err = cudaMalloc(&new_data, bytes_for_elements(new_capacity));
+    bool repacked_live_storage = false;
+    cudaError_t alloc_err = cudaMalloc(&new_data, bytes_for_elements(new_capacity));
     if (alloc_err != cudaSuccess) {
-        throw std::runtime_error("无法扩展GPU状态池: " + std::string(cudaGetErrorString(alloc_err)));
-    }
+        const size_t live_elements = active_storage_elements();
+        const size_t previous_capacity = data_capacity_elements_;
+        const size_t scratch_target_bytes = scratch_target_ids.capacity_bytes;
+        const size_t scratch_temp_bytes = scratch_temp.capacity_bytes;
+        const size_t scratch_aux_bytes = scratch_aux.capacity_bytes;
 
-    const size_t copy_elements = std::min(allocated_elements_, data_capacity_elements_);
-    if (data && copy_elements > 0) {
-        const cudaError_t copy_err = cudaMemcpy(new_data,
-                                                data,
-                                                bytes_for_elements(copy_elements),
-                                                cudaMemcpyDeviceToDevice);
-        if (copy_err != cudaSuccess) {
-            cudaFree(new_data);
-            throw std::runtime_error("无法迁移状态池数据: " + std::string(cudaGetErrorString(copy_err)));
+        release_device_scratch_buffers();
+        cudaGetLastError();
+
+        new_capacity = required_elements;
+        alloc_err = cudaMalloc(&new_data, bytes_for_elements(new_capacity));
+        if (alloc_err != cudaSuccess) {
+            repacked_live_storage = try_repack_live_storage(new_capacity, &new_data);
+            if (repacked_live_storage) {
+                cudaGetLastError();
+                alloc_err = cudaSuccess;
+            }
+        }
+        if (alloc_err != cudaSuccess && !repacked_live_storage) {
+            throw std::runtime_error(
+                "无法扩展GPU状态池: " + std::string(cudaGetErrorString(alloc_err)) +
+                " (required_elements=" + std::to_string(required_elements) +
+                ", previous_capacity=" + std::to_string(previous_capacity) +
+                ", live_elements=" + std::to_string(live_elements) +
+                ", scratch_target_bytes=" + std::to_string(scratch_target_bytes) +
+                ", scratch_temp_bytes=" + std::to_string(scratch_temp_bytes) +
+                ", scratch_aux_bytes=" + std::to_string(scratch_aux_bytes) + ")");
         }
     }
 
-    if (data) {
-        cudaError_t free_err = cudaFree(data);
-        if (free_err != cudaSuccess) {
-            std::cerr << "警告：释放旧状态池数据失败: " << cudaGetErrorString(free_err) << std::endl;
+    if (!repacked_live_storage) {
+        const size_t copy_elements = std::min(allocated_elements_, data_capacity_elements_);
+        if (data && copy_elements > 0) {
+            const cudaError_t copy_err = cudaMemcpy(new_data,
+                                                    data,
+                                                    bytes_for_elements(copy_elements),
+                                                    cudaMemcpyDeviceToDevice);
+            if (copy_err != cudaSuccess) {
+                cudaFree(new_data);
+                throw std::runtime_error("无法迁移状态池数据: " + std::string(cudaGetErrorString(copy_err)));
+            }
+        }
+
+        if (data) {
+            cudaError_t free_err = cudaFree(data);
+            if (free_err != cudaSuccess) {
+                std::cerr << "警告：释放旧状态池数据失败: " << cudaGetErrorString(free_err) << std::endl;
+            }
         }
     }
 
     data = new_data;
     data_capacity_elements_ = new_capacity;
     refresh_total_memory_size();
+}
+
+void CVStatePool::reserve_total_storage_elements(size_t required_elements) {
+    ensure_data_capacity(required_elements);
 }
 
 size_t CVStatePool::acquire_storage_block(size_t required_elements) {
@@ -333,17 +517,13 @@ void CVStatePool::release_storage_block(int state_id) {
 }
 
 void CVStatePool::assign_state_storage(int state_id, size_t required_elements) {
-    if (required_elements > static_cast<size_t>(std::numeric_limits<int>::max())) {
-        throw std::overflow_error("状态维度超出int范围");
-    }
-
     if (required_elements == 0) {
         release_storage_block(state_id);
         return;
     }
 
     if (host_state_capacities[state_id] >= required_elements && host_state_capacities[state_id] != 0) {
-        host_state_dims[state_id] = static_cast<int>(required_elements);
+        host_state_dims[state_id] = static_cast<int64_t>(required_elements);
         sync_state_metadata_to_device(state_id);
         return;
     }
@@ -354,7 +534,7 @@ void CVStatePool::assign_state_storage(int state_id, size_t required_elements) {
 
     host_state_offsets[state_id] = acquire_storage_block(required_elements);
     host_state_capacities[state_id] = required_elements;
-    host_state_dims[state_id] = static_cast<int>(required_elements);
+    host_state_dims[state_id] = static_cast<int64_t>(required_elements);
     sync_state_metadata_to_device(state_id);
 }
 
@@ -397,7 +577,7 @@ void CVStatePool::free_state(int state_id) {
     --active_count;
 }
 
-void CVStatePool::reserve_state_storage(int state_id, int state_dim) {
+void CVStatePool::reserve_state_storage(int state_id, int64_t state_dim) {
     if (!is_valid_state(state_id)) {
         throw std::invalid_argument("无效的状态ID: " + std::to_string(state_id));
     }
@@ -405,6 +585,46 @@ void CVStatePool::reserve_state_storage(int state_id, int state_dim) {
         throw std::invalid_argument("状态维度不能为负数");
     }
     assign_state_storage(state_id, static_cast<size_t>(state_dim));
+}
+
+size_t CVStatePool::allocate_detached_storage(size_t required_elements) {
+    return acquire_storage_block(required_elements);
+}
+
+void CVStatePool::release_detached_storage(size_t offset, size_t reserved_elements) {
+    if (reserved_elements == 0) {
+        return;
+    }
+    free_blocks_.push_back({offset, reserved_elements});
+    merge_free_blocks();
+}
+
+void CVStatePool::replace_state_storage(int state_id,
+                                        size_t new_offset,
+                                        size_t new_capacity,
+                                        int state_dim) {
+    if (!is_valid_state(state_id)) {
+        throw std::invalid_argument("无效的状态ID: " + std::to_string(state_id));
+    }
+    if (state_dim < 0) {
+        throw std::invalid_argument("状态维度不能为负数");
+    }
+    if (new_capacity < static_cast<size_t>(state_dim)) {
+        throw std::invalid_argument("新存储块容量小于状态维度");
+    }
+
+    const size_t old_offset = host_state_offsets[state_id];
+    const size_t old_capacity = host_state_capacities[state_id];
+
+    host_state_offsets[state_id] = new_offset;
+    host_state_capacities[state_id] = new_capacity;
+    host_state_dims[state_id] = state_dim;
+    sync_state_metadata_to_device(state_id);
+
+    if (old_capacity != 0) {
+        free_blocks_.push_back({old_offset, old_capacity});
+        merge_free_blocks();
+    }
 }
 
 void CVStatePool::upload_state(int state_id, const std::vector<cuDoubleComplex>& host_state) {
@@ -432,7 +652,7 @@ void CVStatePool::download_state(int state_id, std::vector<cuDoubleComplex>& hos
         throw std::invalid_argument("无效的状态ID: " + std::to_string(state_id));
     }
 
-    const int state_dim = get_state_dim(state_id);
+    const int64_t state_dim = get_state_dim(state_id);
     host_state.resize(static_cast<size_t>(state_dim));
     if (state_dim == 0) {
         return;
@@ -520,7 +740,7 @@ void CVStatePool::reset() {
     }
 
     if (state_dims) {
-        cudaError_t err = cudaMemset(state_dims, 0, capacity * sizeof(int));
+        cudaError_t err = cudaMemset(state_dims, 0, capacity * sizeof(int64_t));
         if (err != cudaSuccess) {
             std::cerr << "重置状态维度失败: " << cudaGetErrorString(err) << std::endl;
         }
@@ -540,6 +760,10 @@ void CVStatePool::reset() {
         data = nullptr;
     }
     data_capacity_elements_ = 0;
+    scratch_target_ids.release();
+    scratch_temp.release();
+    scratch_aux.release();
+    host_transfer_staging.release();
     refresh_total_memory_size();
 
     std::cout << "CVStatePool 已重置" << std::endl;
@@ -557,7 +781,7 @@ int CVStatePool::duplicate_state(int state_id) {
         return -1;
     }
 
-    const int state_dim = get_state_dim(state_id);
+    const int64_t state_dim = get_state_dim(state_id);
     try {
         reserve_state_storage(new_state_id, state_dim);
         if (state_dim > 0) {
@@ -578,7 +802,7 @@ int CVStatePool::duplicate_state(int state_id) {
     return new_state_id;
 }
 
-int CVStatePool::get_state_dim(int state_id) const {
+int64_t CVStatePool::get_state_dim(int state_id) const {
     if (!is_valid_state(state_id)) {
         return 0;
     }
@@ -591,14 +815,14 @@ int CVStatePool::tensor_product(int state1_id, int state2_id) {
         return -1;
     }
 
-    const int dim1 = get_state_dim(state1_id);
-    const int dim2 = get_state_dim(state2_id);
+    const int64_t dim1 = get_state_dim(state1_id);
+    const int64_t dim2 = get_state_dim(state2_id);
     const size_t new_dim_size_t = static_cast<size_t>(dim1) * static_cast<size_t>(dim2);
-    if (new_dim_size_t > static_cast<size_t>(std::numeric_limits<int>::max())) {
+    if (new_dim_size_t > static_cast<size_t>(std::numeric_limits<int64_t>::max())) {
         std::cerr << "张量积维度过大" << std::endl;
         return -1;
     }
-    const int new_dim = static_cast<int>(new_dim_size_t);
+    const int64_t new_dim = static_cast<int64_t>(new_dim_size_t);
 
     const int new_state_id = allocate_state();
     if (new_state_id == -1) {

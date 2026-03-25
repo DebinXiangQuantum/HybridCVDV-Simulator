@@ -9,13 +9,19 @@
 
 #include "cv_state_pool.h"
 
-void initialize_vacuum_state_device(CVStatePool* pool, int state_id, int state_dim);
+void initialize_vacuum_state_device(CVStatePool* pool,
+                                    int state_id,
+                                    int state_dim,
+                                    cudaStream_t stream = nullptr,
+                                    bool synchronize = true);
 
 void apply_creation_operator_on_mode(CVStatePool* pool,
                                      const int* targets,
                                      int batch_size,
                                      int target_qumode,
-                                     int num_qumodes);
+                                     int num_qumodes,
+                                     cudaStream_t stream = nullptr,
+                                     bool synchronize = true);
 void apply_beam_splitter_recursive(CVStatePool* pool,
                                    const int* targets,
                                    int batch_size,
@@ -23,7 +29,9 @@ void apply_beam_splitter_recursive(CVStatePool* pool,
                                    double phi,
                                    int target_qumode1,
                                    int target_qumode2,
-                                   int num_qumodes);
+                                   int num_qumodes,
+                                   cudaStream_t stream = nullptr,
+                                   bool synchronize = true);
 
 namespace {
 

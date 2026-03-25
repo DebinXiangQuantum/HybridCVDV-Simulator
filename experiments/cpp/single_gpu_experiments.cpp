@@ -15,6 +15,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <numeric>
 #include <sstream>
@@ -89,11 +90,15 @@ struct CliOptions {
     std::string name_filter;
     int gaussian_symbolic_mode_limit = 4;
     bool use_interaction_picture = false;
+    int max_states_override = 0; // 0 = use default per-circuit values
     fs::path output_path = fs::path("experiments/results/internal_single_gpu.json");
 };
 
 int g_gaussian_symbolic_mode_limit = 4;
 bool g_use_interaction_picture = false;
+int g_max_states_override = 0;
+int g_scaling_warmup_runs_override = -1;
+int g_scaling_measured_runs_override = -1;
 
 std::string now_utc_iso8601() {
     const auto now = std::chrono::system_clock::now();
@@ -143,6 +148,22 @@ std::string format_double(double value) {
     std::ostringstream oss;
     oss << std::setprecision(15) << value;
     return oss.str();
+}
+
+int parse_nonnegative_env_override(const char* name, int minimum_value = 0) {
+    const char* raw = std::getenv(name);
+    if (!raw || !*raw) {
+        return -1;
+    }
+
+    const long parsed = std::strtol(raw, nullptr, 10);
+    if (parsed < minimum_value) {
+        throw std::invalid_argument(std::string(name) + " must be >= " + std::to_string(minimum_value));
+    }
+    if (parsed > std::numeric_limits<int>::max()) {
+        throw std::overflow_error(std::string(name) + " exceeds int range");
+    }
+    return static_cast<int>(parsed);
 }
 
 DeviceMetadata query_device() {
@@ -1430,14 +1451,19 @@ ExperimentResult run_scaling_case(const std::string& name,
     result.params["num_qubits"] = std::to_string(num_qubits);
     result.params["num_qumodes"] = std::to_string(num_qumodes);
 
+    const int warmup_runs = g_scaling_warmup_runs_override >= 0 ? g_scaling_warmup_runs_override : 2;
+    const int measured_runs = g_scaling_measured_runs_override >= 0 ? g_scaling_measured_runs_override : 10;
+    result.params["warmup_runs"] = std::to_string(warmup_runs);
+    result.params["measured_runs"] = std::to_string(measured_runs);
+
     const BenchmarkSummary summary = benchmark_circuit_case(
         num_qubits,
         num_qumodes,
         cutoff,
         max_states,
         initial_state,
-        2,
-        10,
+        warmup_runs,
+        measured_runs,
         std::forward<SetupFn>(setup_fn));
 
     if (!summary.ok) {
@@ -1557,10 +1583,10 @@ void add_shors_circuit_gates(QuantumCircuit& circuit, int num_qubits, int num_qu
 }
 std::vector<ExperimentResult> run_scaling_suite(const std::string& name_filter) {
     std::vector<ExperimentResult> results;
-    const int cat_max_states = 64;
-    const int qaoa_max_states = 128;
-    const int gkp_max_states = 128;
-    const int jch_max_states = 64;
+    const int cat_max_states = g_max_states_override > 0 ? g_max_states_override : 64;
+    const int qaoa_max_states = g_max_states_override > 0 ? g_max_states_override : 128;
+    const int gkp_max_states = g_max_states_override > 0 ? g_max_states_override : 128;
+    const int jch_max_states = g_max_states_override > 0 ? g_max_states_override : 64;
     const int gkp_rounds = 9;
 
     for (int cutoff : {16, 32, 64}) {
@@ -1803,7 +1829,50 @@ std::vector<ExperimentResult> run_scaling_suite(const std::string& name_filter) 
         }
     }
 
-    
+    // Pure CV benchmarks (0 qubits) — JCH lattice and CV-QAOA
+    // nm=8 requires int64_t for max_total_dim (16^8 = 4.3B), needs ~68.7GB per state
+    for (int nm : {5, 6, 7, 8}) {
+        const int cutoff = 16;
+        // Memory per state: cutoff^nm * 16 bytes (complex double)
+        // nm=5: 16.8MB, nm=6: 268MB, nm=7: 4.29GB, nm=8: 68.7GB
+        int cv_max = (nm <= 6) ? 64 : (nm == 7) ? 8 : 1;
+        if (g_max_states_override > 0) cv_max = g_max_states_override;
+
+        // Deeper circuits for larger nm to get meaningful compute timing
+        const int jch_trotter = (nm >= 8) ? 20 : (nm >= 7) ? 10 : 5;
+        const int qaoa_layers = (nm >= 8) ? 10 : (nm >= 7) ? 5 : 2;
+
+        const std::string cv_jch_name = "sc26_cv_jch_nm" + std::to_string(nm) + "_c" + std::to_string(cutoff);
+        append_filtered_scaling_case(results, name_filter, cv_jch_name, [nm, cutoff, cv_jch_name, cv_max, jch_trotter]() {
+            ExperimentResult result = run_scaling_case(
+                cv_jch_name,
+                "cv_jch_lattice",
+                0, nm, cutoff, jch_trotter, cv_max,
+                nullptr,
+                [nm, jch_trotter](QuantumCircuit& circuit) {
+                    add_jch_simulation_circuit_gates(circuit, nm, 0, 1.0, 1.0, 1.0, 0.5, 0.1, jch_trotter);
+                });
+            result.params["source_circuit"] = "circuit/src/jch_simulation_circuit.cpp";
+            result.params["pure_cv"] = "true";
+            return result;
+        });
+
+        const std::string cv_qaoa_name = "sc26_cv_qaoa_nm" + std::to_string(nm) + "_c" + std::to_string(cutoff);
+        append_filtered_scaling_case(results, name_filter, cv_qaoa_name, [nm, cutoff, cv_qaoa_name, cv_max, qaoa_layers]() {
+            const std::vector<double> params = make_qaoa_angles(qaoa_layers);
+            ExperimentResult result = run_scaling_case(
+                cv_qaoa_name,
+                "cv_qaoa_circuit",
+                0, nm, cutoff, qaoa_layers, cv_max,
+                nullptr,
+                [nm, params, qaoa_layers](QuantumCircuit& circuit) {
+                    add_cv_qaoa_circuit_gates(circuit, nm, params, 0.5, 1.0, qaoa_layers);
+                });
+            result.params["pure_cv"] = "true";
+            return result;
+        });
+    }
+
     // Additional SC26 cases
     for (int cutoff : {16, 32}) {
         const std::string name = "sc26_cat_c" + std::to_string(cutoff);
@@ -1887,11 +1956,14 @@ CliOptions parse_cli(int argc, char** argv) {
             options.use_interaction_picture = true;
         } else if (arg == "--output" && i + 1 < argc) {
             options.output_path = fs::path(argv[++i]);
+        } else if (arg == "--max-states" && i + 1 < argc) {
+            options.max_states_override = std::stoi(argv[++i]);
         } else if (arg == "--help" || arg == "-h") {
             std::cout << "Usage: hybridcvdv_single_gpu_experiments "
                          "[--suite all|correctness|microbench|runtime_ablation|scaling] "
                          "[--name-filter substring] "
-                         "[--gaussian-symbolic-mode-limit N] [--use-interaction-picture] [--output path]\n";
+                         "[--gaussian-symbolic-mode-limit N] [--use-interaction-picture] "
+                         "[--max-states N] [--output path]\n";
             std::exit(0);
         } else {
             throw std::invalid_argument("unknown argument: " + arg);
@@ -1970,6 +2042,11 @@ int main(int argc, char** argv) {
         const CliOptions options = parse_cli(argc, argv);
         g_gaussian_symbolic_mode_limit = options.gaussian_symbolic_mode_limit;
         g_use_interaction_picture = options.use_interaction_picture;
+        g_max_states_override = options.max_states_override;
+        g_scaling_warmup_runs_override =
+            parse_nonnegative_env_override("HYBRIDCVDV_SCALING_WARMUP_RUNS", 0);
+        g_scaling_measured_runs_override =
+            parse_nonnegative_env_override("HYBRIDCVDV_SCALING_MEASURED_RUNS", 1);
         const DeviceMetadata device = query_device();
         if (!device.available) {
             throw std::runtime_error("no CUDA device available for single-GPU experiments");

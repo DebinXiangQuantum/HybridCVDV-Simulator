@@ -4,6 +4,42 @@
 #include <functional>
 #include <vector>
 
+namespace {
+
+size_t hash_combine_value(size_t lhs, size_t rhs) {
+    lhs ^= rhs + 0x9e3779b9 + (lhs << 6) + (lhs >> 2);
+    return lhs;
+}
+
+size_t compute_terminal_hash(int32_t tensor_id) {
+    size_t hash = 0;
+    hash = hash_combine_value(hash, static_cast<size_t>(-1));
+    hash = hash_combine_value(hash, static_cast<size_t>(tensor_id));
+    return hash;
+}
+
+size_t compute_internal_hash(int16_t level,
+                             HDDNode* low,
+                             HDDNode* high,
+                             std::complex<double> w_low,
+                             std::complex<double> w_high) {
+    size_t hash = 0;
+    hash = hash_combine_value(hash, static_cast<size_t>(level));
+    if (low) {
+        hash = hash_combine_value(hash, low->unique_id);
+        hash = hash_combine_value(hash, std::hash<double>()(w_low.real()));
+        hash = hash_combine_value(hash, std::hash<double>()(w_low.imag()));
+    }
+    if (high) {
+        hash = hash_combine_value(hash, high->unique_id);
+        hash = hash_combine_value(hash, std::hash<double>()(w_high.real()));
+        hash = hash_combine_value(hash, std::hash<double>()(w_high.imag()));
+    }
+    return hash;
+}
+
+}  // namespace
+
 /**
  * HDDNode 构造函数 - 内部节点
  */
@@ -146,18 +182,31 @@ bool HDDNodeManager::nodes_equivalent(const HDDNode* lhs, const HDDNode* rhs) co
  */
 HDDNode* HDDNodeManager::get_or_create_node(int16_t level, HDDNode* low, HDDNode* high,
                                            std::complex<double> w_low, std::complex<double> w_high) {
-    HDDNode* new_node = new HDDNode(level, low, high, w_low, w_high);
-    size_t hash_key = new_node->unique_id;
+    const size_t hash_key = compute_internal_hash(level, low, high, w_low, w_high);
 
     auto& bucket = node_cache_[hash_key];
-    for (HDDNode* cached_node : bucket) {
-        if (nodes_equivalent(cached_node, new_node)) {
-            delete new_node;
+    for (auto it = bucket.begin(); it != bucket.end();) {
+        HDDNode* cached_node = *it;
+        if (cached_node->get_ref_count() <= 0) {
+            delete cached_node;
+            it = bucket.erase(it);
+            if (cached_node_count_ > 0) {
+                --cached_node_count_;
+            }
+            continue;
+        }
+        if (cached_node->qubit_level == level &&
+            cached_node->low == low &&
+            cached_node->high == high &&
+            cached_node->w_low == w_low &&
+            cached_node->w_high == w_high) {
             cached_node->increment_ref();
             return cached_node;
         }
+        ++it;
     }
 
+    HDDNode* new_node = new HDDNode(level, low, high, w_low, w_high);
     bucket.push_back(new_node);
     ++cached_node_count_;
     return new_node;
@@ -167,18 +216,27 @@ HDDNode* HDDNodeManager::get_or_create_node(int16_t level, HDDNode* low, HDDNode
  * 创建终端节点
  */
 HDDNode* HDDNodeManager::create_terminal_node(int32_t cv_state_id) {
-    HDDNode* new_node = new HDDNode(cv_state_id);
-    size_t hash_key = new_node->unique_id;
+    const size_t hash_key = compute_terminal_hash(cv_state_id);
 
     auto& bucket = node_cache_[hash_key];
-    for (HDDNode* cached_node : bucket) {
-        if (nodes_equivalent(cached_node, new_node)) {
-            delete new_node;
+    for (auto it = bucket.begin(); it != bucket.end();) {
+        HDDNode* cached_node = *it;
+        if (cached_node->get_ref_count() <= 0) {
+            delete cached_node;
+            it = bucket.erase(it);
+            if (cached_node_count_ > 0) {
+                --cached_node_count_;
+            }
+            continue;
+        }
+        if (cached_node->is_terminal() && cached_node->tensor_id == cv_state_id) {
             cached_node->increment_ref();
             return cached_node;
         }
+        ++it;
     }
 
+    HDDNode* new_node = new HDDNode(cv_state_id);
     bucket.push_back(new_node);
     ++cached_node_count_;
     return new_node;

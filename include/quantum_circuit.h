@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vector>
+#include <array>
 #include <complex>
 #include <memory>
 #include <string>
@@ -104,7 +105,10 @@ private:
     double computation_time_;     // 计算时延 (毫秒)
     double planning_time_;        // 块级编译/规划时间 (毫秒)
     int gaussian_symbolic_mode_limit_; // Gaussian symbolic路径的活跃mode上限
+    int symbolic_branch_limit_;   // symbolic terminal在exact-preserving路径中的分支上限
+    int gaussian_state_pool_capacity_override_; // 显式指定Gaussian branch池容量；0表示自动推导
     int next_symbolic_terminal_id_; // 负ID用于symbolic terminal sidecar
+    size_t pending_gc_replacements_; // 延迟到block/阈值触发的HDD垃圾回收计数
 
 public:
     /**
@@ -140,6 +144,12 @@ public:
      * 执行量子线路
      */
     void execute();
+    size_t execute_range(size_t start_block, size_t max_blocks);
+    size_t get_execution_block_count() const;
+    void save_exact_fock_checkpoint(const std::string& path,
+                                    size_t next_block_index,
+                                    size_t total_blocks) const;
+    size_t load_exact_fock_checkpoint(const std::string& path, size_t* total_blocks = nullptr);
 
     /**
      * 方案 B：基于交互绘景（Interaction Picture）的执行引擎
@@ -161,6 +171,26 @@ public:
      * 获取Gaussian symbolic执行的活跃mode上限
      */
     int get_gaussian_symbolic_mode_limit() const { return gaussian_symbolic_mode_limit_; }
+
+    /**
+     * 显式设置Gaussian symbolic branch池容量；必须在池初始化前调用
+     */
+    void set_gaussian_state_pool_capacity(int capacity);
+
+    /**
+     * 设置symbolic terminal的精确回退分支阈值
+     */
+    void set_symbolic_branch_limit(int limit);
+
+    /**
+     * 获取显式设置的Gaussian symbolic branch池容量；0表示自动推导
+     */
+    int get_gaussian_state_pool_capacity() const { return gaussian_state_pool_capacity_override_; }
+
+    /**
+     * 获取symbolic terminal的精确回退分支阈值
+     */
+    int get_symbolic_branch_limit() const { return symbolic_branch_limit_; }
 
     /**
      * 获取最终状态的振幅
@@ -280,12 +310,42 @@ private:
         GaussianFrame(int M) : symplectic(M), alpha(M, 0.0) {}
     };
 
+    struct TargetUploadSlot {
+        GPUScratchBuffer device_buffer;
+        PinnedHostBuffer host_buffer;
+        cudaEvent_t upload_ready = nullptr;
+        cudaEvent_t reusable = nullptr;
+        bool reusable_recorded = false;
+    };
+
     std::unordered_map<int, SymbolicTerminalState> symbolic_terminal_states_;
+    cudaStream_t compute_stream_ = nullptr;
+    cudaStream_t upload_stream_ = nullptr;
+    std::array<TargetUploadSlot, 2> target_upload_slots_{};
+    size_t next_target_upload_slot_ = 0;
+    size_t root_revision_ = 1;
+    mutable size_t cached_target_state_revision_ = 0;
+    mutable std::vector<int> cached_target_state_ids_;
+    mutable size_t cached_symbolic_terminal_revision_ = 0;
+    mutable std::vector<int> cached_symbolic_terminal_ids_;
+    bool async_cv_work_pending_ = false;
+    bool async_cv_pipeline_enabled_ = false;
 
     /**
      * 初始化HDD结构
      */
     void initialize_hdd();
+    void ensure_async_cv_pipeline();
+    void release_async_cv_pipeline();
+    void prewarm_async_target_upload_slots();
+    void synchronize_async_cv_pipeline();
+    std::pair<int*, size_t> upload_target_states_for_compute(
+        const std::vector<int>& target_states,
+        size_t* slot_index = nullptr);
+    void mark_target_upload_slot_in_use(size_t slot_index);
+    void invalidate_root_caches();
+    const std::vector<int>& get_cached_target_states() const;
+    const std::vector<int>& get_cached_symbolic_terminal_ids() const;
 
     /**
      * 执行单个门操作
@@ -367,6 +427,8 @@ private:
      * 替换当前HDD根节点并回收旧分支引用的状态
      */
     void replace_root_node(HDDNode* new_root);
+    void replace_root_node_preserving_terminals(HDDNode* new_root);
+    void collect_hdd_garbage_if_needed(bool force = false);
 
     /**
      * 执行Level 0门 (对角门)

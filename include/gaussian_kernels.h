@@ -19,5 +19,9 @@ void apply_batched_symplectic_update(
     const int* state_ids,
     int batch_size,
     const double* d_S,
-    const double* d_dg
+    const double* d_dg,
+    double* d_old_buffer = nullptr,
+    double* d_temp_buffer = nullptr,
+    cudaStream_t stream = nullptr,
+    bool synchronize = true
 );

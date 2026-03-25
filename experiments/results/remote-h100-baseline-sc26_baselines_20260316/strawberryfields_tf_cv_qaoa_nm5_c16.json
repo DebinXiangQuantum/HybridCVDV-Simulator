@@ -1,0 +1,48 @@
+{
+  "schema_version": "2.0",
+  "generated_at_utc": "2026-03-17T05:12:53Z",
+  "backend": "strawberryfields_tf",
+  "single_gpu_focus": true,
+  "status": "ok",
+  "backend_runtime": {
+    "strawberryfields_version": "0.23.0",
+    "tensorflow_version": "2.21.0",
+    "visible_gpu_devices": [
+      "/physical_device:GPU:0"
+    ]
+  },
+  "results": [
+    {
+      "name": "cv_qaoa_modes_5_layers_2_cutoff_16",
+      "category": "baseline_scaling",
+      "status": "ok",
+      "note": "Strawberry Fields tf backend; communication time is measured as final state materialization from device to host",
+      "params": {
+        "workload": "cv_qaoa",
+        "cutoff": "16",
+        "num_modes": "5",
+        "layers": "2",
+        "timesteps": "5",
+        "warmup_runs": "2",
+        "measured_runs": "5",
+        "squeezing_r": "0.5",
+        "displacement_scale": "1.0",
+        "j_coupling": "1.0",
+        "omega_r": "1.0",
+        "tau": "0.1"
+      },
+      "metrics": {
+        "median_total_ms": 25.377861922606826,
+        "median_compute_ms": 24.407048942521214,
+        "median_communication_ms": 0.9758910164237022,
+        "min_total_ms": 25.361428037285805,
+        "max_total_ms": 25.68810002412647,
+        "p25_total_ms": 25.37576004397124,
+        "p75_total_ms": 25.4993150010705,
+        "throughput_ops_per_sec": 39.404422762234006,
+        "median_output_norm": 1.0093742508487935e-10,
+        "state_vector_bytes_estimate": 16777216.0
+      }
+    }
+  ]
+}

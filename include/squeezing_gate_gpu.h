@@ -18,7 +18,9 @@ void apply_squeezing_gate_gpu(
     double r,
     double theta,
     int target_qumode = 0,
-    int num_qumodes = 1
+    int num_qumodes = 1,
+    cudaStream_t stream = nullptr,
+    bool synchronize = true
 );
 
 /**

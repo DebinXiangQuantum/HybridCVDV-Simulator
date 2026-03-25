@@ -1,11 +1,34 @@
 cmake_minimum_required(VERSION 3.18)
 
-# 设置CUDA环境变量
-set(ENV{CUDA_HOME} "/usr/lib/nvidia-cuda-toolkit")
-set(ENV{LD_LIBRARY_PATH} "$ENV{CUDA_HOME}/lib64:$ENV{LD_LIBRARY_PATH}")
+# 优先尊重外部 CUDA 配置，未显式提供时再回退到常见安装路径。
+if(NOT DEFINED ENV{CUDA_HOME} OR "$ENV{CUDA_HOME}" STREQUAL "")
+    if(EXISTS "/usr/local/cuda")
+        set(ENV{CUDA_HOME} "/usr/local/cuda")
+    elseif(EXISTS "/usr/lib/nvidia-cuda-toolkit")
+        set(ENV{CUDA_HOME} "/usr/lib/nvidia-cuda-toolkit")
+    endif()
+endif()
+
+if((NOT DEFINED CUDAToolkit_ROOT OR "${CUDAToolkit_ROOT}" STREQUAL "") AND DEFINED ENV{CUDA_HOME} AND NOT "$ENV{CUDA_HOME}" STREQUAL "")
+    set(CUDAToolkit_ROOT "$ENV{CUDA_HOME}")
+endif()
+
+if((NOT DEFINED CMAKE_CUDA_COMPILER OR "${CMAKE_CUDA_COMPILER}" STREQUAL "") AND DEFINED ENV{CUDA_HOME} AND EXISTS "$ENV{CUDA_HOME}/bin/nvcc")
+    set(CMAKE_CUDA_COMPILER "$ENV{CUDA_HOME}/bin/nvcc")
+endif()
+
+if(DEFINED ENV{CUDA_HOME} AND EXISTS "$ENV{CUDA_HOME}/lib64")
+    set(ENV{LD_LIBRARY_PATH} "$ENV{CUDA_HOME}/lib64:$ENV{LD_LIBRARY_PATH}")
+endif()
 
 # 设置CUDA架构 (必须在project()之前)
-set(CMAKE_CUDA_ARCHITECTURES 60 70 80)
+if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES OR "${CMAKE_CUDA_ARCHITECTURES}" STREQUAL "")
+    if(DEFINED ENV{HYBRIDCVDV_CUDA_ARCHITECTURES} AND NOT "$ENV{HYBRIDCVDV_CUDA_ARCHITECTURES}" STREQUAL "")
+        set(CMAKE_CUDA_ARCHITECTURES "$ENV{HYBRIDCVDV_CUDA_ARCHITECTURES}")
+    else()
+        set(CMAKE_CUDA_ARCHITECTURES 60 70 80)
+    endif()
+endif()
 
 # 指定CUDA主机编译器为GCC 9 (兼容CUDA 12.0)
 set(CMAKE_CUDA_HOST_COMPILER "/usr/bin/gcc-9")
@@ -106,6 +129,13 @@ set(CPU_SOURCES
     src/cpu/quantum_circuit.cpp
 )
 
+if(CMAKE_BUILD_TYPE STREQUAL "Release" AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    set_source_files_properties(
+        src/cpu/quantum_circuit.cpp
+        PROPERTIES COMPILE_OPTIONS "-O1"
+    )
+endif()
+
 set(SCHEDULER_SOURCES
     src/scheduler/batch_scheduler.cpp
     src/scheduler/instruction_fusion.cpp
@@ -199,6 +229,12 @@ if(CUDA_FOUND)
         experiments/cpp/single_gpu_experiments.cpp
     )
     target_link_libraries(hybridcvdv_single_gpu_experiments ${PROJECT_NAME} ${CUDA_LIBRARIES} CUDA::cublas)
+    if(CMAKE_BUILD_TYPE STREQUAL "Release" AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        # This benchmark driver is a very large translation unit and can be killed during
+        # optimization on shared remote hosts. Lowering only the driver TU keeps the core
+        # simulator library in Release mode while making the benchmark binary build reliably.
+        target_compile_options(hybridcvdv_single_gpu_experiments PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-O1>)
+    endif()
 endif()
 
 # Profiling Test

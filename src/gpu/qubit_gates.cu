@@ -26,7 +26,7 @@
 __global__ void apply_pauli_x_kernel(
     cuDoubleComplex* state_data,
     const size_t* state_offsets,
-    const int* state_dims,
+    const int64_t* state_dims,
     const int* target_indices,
     int batch_size
 ) {
@@ -34,7 +34,7 @@ __global__ void apply_pauli_x_kernel(
     if (batch_id >= batch_size) return;
 
     int state_idx = target_indices[batch_id];
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int64_t idx = (int64_t)blockIdx.x * blockDim.x + threadIdx.x;
 
     // 量子比特维度固定为 2
     if (idx >= 2) return;
@@ -57,7 +57,7 @@ __global__ void apply_pauli_x_kernel(
 __global__ void apply_pauli_y_kernel(
     cuDoubleComplex* state_data,
     const size_t* state_offsets,
-    const int* state_dims,
+    const int64_t* state_dims,
     const int* target_indices,
     int batch_size
 ) {
@@ -65,7 +65,7 @@ __global__ void apply_pauli_y_kernel(
     if (batch_id >= batch_size) return;
 
     int state_idx = target_indices[batch_id];
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int64_t idx = (int64_t)blockIdx.x * blockDim.x + threadIdx.x;
 
     if (idx >= 2) return;
 
@@ -90,7 +90,7 @@ __global__ void apply_pauli_y_kernel(
 __global__ void apply_pauli_z_kernel(
     cuDoubleComplex* state_data,
     const size_t* state_offsets,
-    const int* state_dims,
+    const int64_t* state_dims,
     const int* target_indices,
     int batch_size
 ) {
@@ -98,7 +98,7 @@ __global__ void apply_pauli_z_kernel(
     if (batch_id >= batch_size) return;
 
     int state_idx = target_indices[batch_id];
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int64_t idx = (int64_t)blockIdx.x * blockDim.x + threadIdx.x;
 
     if (idx >= 2) return;
 
@@ -118,7 +118,7 @@ __global__ void apply_pauli_z_kernel(
 __global__ void apply_sigma_plus_kernel(
     cuDoubleComplex* state_data,
     const size_t* state_offsets,
-    const int* state_dims,
+    const int64_t* state_dims,
     const int* target_indices,
     int batch_size
 ) {
@@ -126,7 +126,7 @@ __global__ void apply_sigma_plus_kernel(
     if (batch_id >= batch_size) return;
 
     int state_idx = target_indices[batch_id];
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int64_t idx = (int64_t)blockIdx.x * blockDim.x + threadIdx.x;
 
     if (idx >= 2) return;
 
@@ -148,7 +148,7 @@ __global__ void apply_sigma_plus_kernel(
 __global__ void apply_sigma_minus_kernel(
     cuDoubleComplex* state_data,
     const size_t* state_offsets,
-    const int* state_dims,
+    const int64_t* state_dims,
     const int* target_indices,
     int batch_size
 ) {
@@ -156,7 +156,7 @@ __global__ void apply_sigma_minus_kernel(
     if (batch_id >= batch_size) return;
 
     int state_idx = target_indices[batch_id];
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int64_t idx = (int64_t)blockIdx.x * blockDim.x + threadIdx.x;
 
     if (idx >= 2) return;
 
@@ -178,7 +178,7 @@ __global__ void apply_sigma_minus_kernel(
 __global__ void apply_projector_0_kernel(
     cuDoubleComplex* state_data,
     const size_t* state_offsets,
-    const int* state_dims,
+    const int64_t* state_dims,
     const int* target_indices,
     int batch_size
 ) {
@@ -186,7 +186,7 @@ __global__ void apply_projector_0_kernel(
     if (batch_id >= batch_size) return;
 
     int state_idx = target_indices[batch_id];
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int64_t idx = (int64_t)blockIdx.x * blockDim.x + threadIdx.x;
 
     if (idx >= 2) return;
 
@@ -206,7 +206,7 @@ __global__ void apply_projector_0_kernel(
 __global__ void apply_projector_1_kernel(
     cuDoubleComplex* state_data,
     const size_t* state_offsets,
-    const int* state_dims,
+    const int64_t* state_dims,
     const int* target_indices,
     int batch_size
 ) {
@@ -214,7 +214,7 @@ __global__ void apply_projector_1_kernel(
     if (batch_id >= batch_size) return;
 
     int state_idx = target_indices[batch_id];
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int64_t idx = (int64_t)blockIdx.x * blockDim.x + threadIdx.x;
 
     if (idx >= 2) return;
 
@@ -228,192 +228,79 @@ __global__ void apply_projector_1_kernel(
 }
 
 // ==================== 主机端接口 ====================
+// Qubit states are 2-dimensional; use block_dim(32) (one warp) instead of 256.
 
-/**
- * 应用 Pauli X 门
- */
+static void launch_qubit_gate_and_sync(cudaError_t launch_err, const char* gate_name) {
+    if (launch_err != cudaSuccess) {
+        throw std::runtime_error(std::string(gate_name) + " kernel launch failed: " +
+                                 std::string(cudaGetErrorString(launch_err)));
+    }
+    cudaError_t err = cudaDeviceSynchronize();
+    if (err != cudaSuccess) {
+        throw std::runtime_error(std::string(gate_name) + " kernel synchronization failed: " +
+                                 std::string(cudaGetErrorString(err)));
+    }
+}
+
 void apply_pauli_x(CVStatePool* state_pool, const int* target_indices, int batch_size) {
-    dim3 block_dim(256);
-    dim3 grid_dim(1, batch_size);  // 量子比特只有 2 个元素
-
+    dim3 block_dim(32);
+    dim3 grid_dim(1, batch_size);
     apply_pauli_x_kernel<<<grid_dim, block_dim>>>(
-        state_pool->data,
-        state_pool->state_offsets,
-        state_pool->state_dims,
-        target_indices, batch_size
-    );
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Pauli X kernel launch failed: " +
-                                std::string(cudaGetErrorString(err)));
-    }
-
-    err = cudaDeviceSynchronize();
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Pauli X kernel synchronization failed: " +
-                                std::string(cudaGetErrorString(err)));
-    }
+        state_pool->data, state_pool->state_offsets,
+        state_pool->state_dims, target_indices, batch_size);
+    launch_qubit_gate_and_sync(cudaGetLastError(), "Pauli X");
 }
 
-/**
- * 应用 Pauli Y 门
- */
 void apply_pauli_y(CVStatePool* state_pool, const int* target_indices, int batch_size) {
-    dim3 block_dim(256);
+    dim3 block_dim(32);
     dim3 grid_dim(1, batch_size);
-
     apply_pauli_y_kernel<<<grid_dim, block_dim>>>(
-        state_pool->data,
-        state_pool->state_offsets,
-        state_pool->state_dims,
-        target_indices, batch_size
-    );
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Pauli Y kernel launch failed: " +
-                                std::string(cudaGetErrorString(err)));
-    }
-
-    err = cudaDeviceSynchronize();
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Pauli Y kernel synchronization failed: " +
-                                std::string(cudaGetErrorString(err)));
-    }
+        state_pool->data, state_pool->state_offsets,
+        state_pool->state_dims, target_indices, batch_size);
+    launch_qubit_gate_and_sync(cudaGetLastError(), "Pauli Y");
 }
 
-/**
- * 应用 Pauli Z 门
- */
 void apply_pauli_z(CVStatePool* state_pool, const int* target_indices, int batch_size) {
-    dim3 block_dim(256);
+    dim3 block_dim(32);
     dim3 grid_dim(1, batch_size);
-
     apply_pauli_z_kernel<<<grid_dim, block_dim>>>(
-        state_pool->data,
-        state_pool->state_offsets,
-        state_pool->state_dims,
-        target_indices, batch_size
-    );
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Pauli Z kernel launch failed: " +
-                                std::string(cudaGetErrorString(err)));
-    }
-
-    err = cudaDeviceSynchronize();
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Pauli Z kernel synchronization failed: " +
-                                std::string(cudaGetErrorString(err)));
-    }
+        state_pool->data, state_pool->state_offsets,
+        state_pool->state_dims, target_indices, batch_size);
+    launch_qubit_gate_and_sync(cudaGetLastError(), "Pauli Z");
 }
 
-/**
- * 应用 S+ 门（升算符）
- */
 void apply_sigma_plus(CVStatePool* state_pool, const int* target_indices, int batch_size) {
-    dim3 block_dim(256);
+    dim3 block_dim(32);
     dim3 grid_dim(1, batch_size);
-
     apply_sigma_plus_kernel<<<grid_dim, block_dim>>>(
-        state_pool->data,
-        state_pool->state_offsets,
-        state_pool->state_dims,
-        target_indices, batch_size
-    );
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Sigma Plus kernel launch failed: " +
-                                std::string(cudaGetErrorString(err)));
-    }
-
-    err = cudaDeviceSynchronize();
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Sigma Plus kernel synchronization failed: " +
-                                std::string(cudaGetErrorString(err)));
-    }
+        state_pool->data, state_pool->state_offsets,
+        state_pool->state_dims, target_indices, batch_size);
+    launch_qubit_gate_and_sync(cudaGetLastError(), "Sigma Plus");
 }
 
-/**
- * 应用 S- 门（降算符）
- */
 void apply_sigma_minus(CVStatePool* state_pool, const int* target_indices, int batch_size) {
-    dim3 block_dim(256);
+    dim3 block_dim(32);
     dim3 grid_dim(1, batch_size);
-
     apply_sigma_minus_kernel<<<grid_dim, block_dim>>>(
-        state_pool->data,
-        state_pool->state_offsets,
-        state_pool->state_dims,
-        target_indices, batch_size
-    );
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Sigma Minus kernel launch failed: " +
-                                std::string(cudaGetErrorString(err)));
-    }
-
-    err = cudaDeviceSynchronize();
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Sigma Minus kernel synchronization failed: " +
-                                std::string(cudaGetErrorString(err)));
-    }
+        state_pool->data, state_pool->state_offsets,
+        state_pool->state_dims, target_indices, batch_size);
+    launch_qubit_gate_and_sync(cudaGetLastError(), "Sigma Minus");
 }
 
-/**
- * 应用 P0 门（投影到 |0⟩）
- */
 void apply_projector_0(CVStatePool* state_pool, const int* target_indices, int batch_size) {
-    dim3 block_dim(256);
+    dim3 block_dim(32);
     dim3 grid_dim(1, batch_size);
-
     apply_projector_0_kernel<<<grid_dim, block_dim>>>(
-        state_pool->data,
-        state_pool->state_offsets,
-        state_pool->state_dims,
-        target_indices, batch_size
-    );
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Projector 0 kernel launch failed: " +
-                                std::string(cudaGetErrorString(err)));
-    }
-
-    err = cudaDeviceSynchronize();
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Projector 0 kernel synchronization failed: " +
-                                std::string(cudaGetErrorString(err)));
-    }
+        state_pool->data, state_pool->state_offsets,
+        state_pool->state_dims, target_indices, batch_size);
+    launch_qubit_gate_and_sync(cudaGetLastError(), "Projector 0");
 }
 
-/**
- * 应用 P1 门（投影到 |1⟩）
- */
 void apply_projector_1(CVStatePool* state_pool, const int* target_indices, int batch_size) {
-    dim3 block_dim(256);
+    dim3 block_dim(32);
     dim3 grid_dim(1, batch_size);
-
     apply_projector_1_kernel<<<grid_dim, block_dim>>>(
-        state_pool->data,
-        state_pool->state_offsets,
-        state_pool->state_dims,
-        target_indices, batch_size
-    );
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Projector 1 kernel launch failed: " +
-                                std::string(cudaGetErrorString(err)));
-    }
-
-    err = cudaDeviceSynchronize();
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Projector 1 kernel synchronization failed: " +
-                                std::string(cudaGetErrorString(err)));
-    }
+        state_pool->data, state_pool->state_offsets,
+        state_pool->state_dims, target_indices, batch_size);
+    launch_qubit_gate_and_sync(cudaGetLastError(), "Projector 1");
 }

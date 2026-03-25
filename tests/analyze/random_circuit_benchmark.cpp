@@ -1,23 +1,69 @@
 #include <algorithm>
 #include <chrono>
+#include <csignal>
 #include <cmath>
 #include <complex>
+#include <cstring>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
+#include <exception>
+#include <execinfo.h>
 #include <functional>
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <limits>
 #include <random>
 #include <stdexcept>
 #include <string>
 #include <sys/resource.h>
+#include <unistd.h>
 #include <utility>
 #include <vector>
 
 #include "quantum_circuit.h"
 
 namespace {
+
+void fatal_signal_handler(int signal_number) {
+    const char* signal_name = strsignal(signal_number);
+    std::cerr << "random_circuit_benchmark fatal signal: " << signal_number;
+    if (signal_name) {
+        std::cerr << " (" << signal_name << ")";
+    }
+    std::cerr << '\n';
+
+    void* frames[64];
+    const int frame_count = backtrace(frames, 64);
+    backtrace_symbols_fd(frames, frame_count, STDERR_FILENO);
+    std::_Exit(128 + signal_number);
+}
+
+void install_fatal_handlers() {
+    std::signal(SIGABRT, fatal_signal_handler);
+    std::signal(SIGBUS, fatal_signal_handler);
+    std::signal(SIGFPE, fatal_signal_handler);
+    std::signal(SIGILL, fatal_signal_handler);
+    std::signal(SIGSEGV, fatal_signal_handler);
+    std::set_terminate([]() {
+        std::cerr << "random_circuit_benchmark terminate handler invoked\n";
+        if (const std::exception_ptr current = std::current_exception()) {
+            try {
+                std::rethrow_exception(current);
+            } catch (const std::exception& e) {
+                std::cerr << "terminate reason: " << e.what() << '\n';
+            } catch (...) {
+                std::cerr << "terminate reason: non-std exception\n";
+            }
+        }
+
+        void* frames[64];
+        const int frame_count = backtrace(frames, 64);
+        backtrace_symbols_fd(frames, frame_count, STDERR_FILENO);
+        std::_Exit(134);
+    });
+}
 
 constexpr double kPi = 3.14159265358979323846;
 
@@ -31,8 +77,13 @@ struct BenchmarkOptions {
     int num_qumodes = 3;
     int cutoff = 8;
     int max_states = 4096;
+    int gaussian_pool_capacity = 0;
+    int symbolic_branch_limit = 0;
     int total_gates = 72;
+    int max_blocks_per_run = 0;
     std::uint64_t seed = 20260315ULL;
+    std::string checkpoint_file;
+    bool resume_from_checkpoint = false;
     bool gaussian_only = false;
     int non_gaussian_gates = -1;
     NonGaussianProfile non_gaussian_profile = NonGaussianProfile::General;
@@ -113,10 +164,22 @@ BenchmarkOptions parse_args(int argc, char** argv) {
             options.cutoff = std::stoi(require_value("--cutoff"));
         } else if (arg == "--max-states") {
             options.max_states = std::stoi(require_value("--max-states"));
+        } else if (arg == "--gaussian-pool-capacity") {
+            options.gaussian_pool_capacity =
+                std::stoi(require_value("--gaussian-pool-capacity"));
+        } else if (arg == "--symbolic-branch-limit") {
+            options.symbolic_branch_limit =
+                std::stoi(require_value("--symbolic-branch-limit"));
         } else if (arg == "--total-gates") {
             options.total_gates = std::stoi(require_value("--total-gates"));
+        } else if (arg == "--max-blocks-per-run") {
+            options.max_blocks_per_run = std::stoi(require_value("--max-blocks-per-run"));
         } else if (arg == "--seed") {
             options.seed = static_cast<std::uint64_t>(std::stoull(require_value("--seed")));
+        } else if (arg == "--checkpoint-file") {
+            options.checkpoint_file = require_value("--checkpoint-file");
+        } else if (arg == "--resume-from-checkpoint") {
+            options.resume_from_checkpoint = true;
         } else if (arg == "--gaussian-only") {
             options.gaussian_only = true;
         } else if (arg == "--non-gaussian-gates") {
@@ -145,6 +208,9 @@ BenchmarkOptions parse_args(int argc, char** argv) {
     if (options.max_states <= 0 || options.total_gates <= 0) {
         throw std::invalid_argument("max_states and total_gates must be positive");
     }
+    if (options.gaussian_pool_capacity < 0) {
+        throw std::invalid_argument("gaussian-pool-capacity must be non-negative");
+    }
     if (options.gaussian_only && options.non_gaussian_gates >= 0) {
         throw std::invalid_argument("gaussian-only and non-gaussian-gates cannot be used together");
     }
@@ -153,6 +219,12 @@ BenchmarkOptions parse_args(int argc, char** argv) {
     }
     if (options.non_gaussian_gates < -1) {
         throw std::invalid_argument("non-gaussian-gates must be -1 or a non-negative integer");
+    }
+    if (options.max_blocks_per_run < 0) {
+        throw std::invalid_argument("max-blocks-per-run must be non-negative");
+    }
+    if (options.resume_from_checkpoint && options.checkpoint_file.empty()) {
+        throw std::invalid_argument("resume-from-checkpoint requires --checkpoint-file");
     }
 
     return options;
@@ -453,6 +525,7 @@ void print_gate_preview(const std::vector<BuiltGate>& gates) {
 
 int main(int argc, char** argv) {
     try {
+        install_fatal_handlers();
         const BenchmarkOptions options = parse_args(argc, argv);
         const std::vector<BuiltGate> gates = build_random_circuit(options);
 
@@ -463,7 +536,23 @@ int main(int argc, char** argv) {
                   << ", qubits=" << options.num_qubits
                   << ", qumodes=" << options.num_qumodes
                   << ", cutoff=" << options.cutoff
-                  << ", max_states=" << options.max_states
+                  << ", max_states=" << options.max_states;
+        if (options.gaussian_pool_capacity > 0) {
+            std::cout << ", gaussian_pool_capacity=" << options.gaussian_pool_capacity;
+        }
+        if (options.symbolic_branch_limit > 0) {
+            std::cout << ", symbolic_branch_limit=" << options.symbolic_branch_limit;
+        }
+        if (options.max_blocks_per_run > 0) {
+            std::cout << ", max_blocks_per_run=" << options.max_blocks_per_run;
+        }
+        if (!options.checkpoint_file.empty()) {
+            std::cout << ", checkpoint_file=" << options.checkpoint_file;
+            if (options.resume_from_checkpoint) {
+                std::cout << " (resume)";
+            }
+        }
+        std::cout
                   << ", total_gates=" << options.total_gates;
         if (options.gaussian_only) {
             std::cout << ", workload=gaussian-only";
@@ -492,6 +581,12 @@ int main(int argc, char** argv) {
             options.num_qumodes,
             options.cutoff,
             options.max_states);
+        if (options.gaussian_pool_capacity > 0) {
+            circuit.set_gaussian_state_pool_capacity(options.gaussian_pool_capacity);
+        }
+        if (options.symbolic_branch_limit > 0) {
+            circuit.set_symbolic_branch_limit(options.symbolic_branch_limit);
+        }
 
         for (const BuiltGate& built_gate : gates) {
             circuit.add_gate(built_gate.gate);
@@ -503,9 +598,36 @@ int main(int argc, char** argv) {
         circuit.build();
         const auto build_end = std::chrono::high_resolution_clock::now();
 
+        const size_t total_blocks = circuit.get_execution_block_count();
+        size_t checkpoint_total_blocks = total_blocks;
+        size_t start_block = 0;
+        if (options.resume_from_checkpoint) {
+            start_block = circuit.load_exact_fock_checkpoint(
+                options.checkpoint_file,
+                &checkpoint_total_blocks);
+            if (checkpoint_total_blocks != total_blocks) {
+                throw std::runtime_error("checkpoint total block count does not match current circuit");
+            }
+        }
+
         const auto execute_start = std::chrono::high_resolution_clock::now();
-        circuit.execute();
+        const size_t next_block = circuit.execute_range(
+            start_block,
+            options.max_blocks_per_run > 0
+                ? static_cast<size_t>(options.max_blocks_per_run)
+                : std::numeric_limits<size_t>::max());
         const auto execute_end = std::chrono::high_resolution_clock::now();
+
+        const bool completed = (next_block == total_blocks);
+        if (!completed) {
+            if (options.checkpoint_file.empty()) {
+                throw std::runtime_error(
+                    "execution stopped before completion but no checkpoint file was provided");
+            }
+            circuit.save_exact_fock_checkpoint(options.checkpoint_file, next_block, total_blocks);
+        } else if (!options.checkpoint_file.empty()) {
+            std::remove(options.checkpoint_file.c_str());
+        }
 
         const auto wall_end = std::chrono::high_resolution_clock::now();
 
@@ -526,6 +648,10 @@ int main(int argc, char** argv) {
         std::cout << "Build wall time (ms):     " << build_ms << '\n';
         std::cout << "Execute wall time (ms):   " << execute_wall_ms << '\n';
         std::cout << "End-to-end wall time (ms): " << total_wall_ms << '\n';
+        std::cout << "Execution blocks total:   " << total_blocks << '\n';
+        std::cout << "Execution start block:    " << start_block << '\n';
+        std::cout << "Execution next block:     " << next_block << '\n';
+        std::cout << "Execution completed:      " << (completed ? "yes" : "no") << '\n';
         std::cout << "Recorded total (ms):      " << time_stats.total_time << '\n';
         std::cout << "Transfer time (ms):       " << time_stats.transfer_time << '\n';
         std::cout << "Compute time (ms):        " << time_stats.computation_time << '\n';
@@ -537,6 +663,9 @@ int main(int argc, char** argv) {
         std::cout << "Peak RSS (MB):            " << peak_rss << '\n';
         std::cout << "Active states:            " << stats.active_states << '\n';
         std::cout << "HDD nodes:                " << stats.hdd_nodes << '\n';
+        if (!completed) {
+            std::cout << "Checkpoint saved:         " << options.checkpoint_file << '\n';
+        }
         std::cout << "=================================================\n";
         return 0;
     } catch (const std::exception& e) {

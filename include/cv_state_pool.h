@@ -5,8 +5,10 @@
 
 #include <vector>
 #include <cstdint>
+#include <cstring>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 
 /**
  * High-water-mark GPU scratch buffer.
@@ -44,6 +46,39 @@ struct GPUScratchBuffer {
 };
 
 /**
+ * Reusable pinned host staging buffer for faster H2D uploads.
+ * This keeps small/medium parameter uploads off pageable memory.
+ */
+struct PinnedHostBuffer {
+    void* ptr = nullptr;
+    size_t capacity_bytes = 0;
+
+    void* ensure(size_t required_bytes) {
+        if (required_bytes <= capacity_bytes) return ptr;
+        if (ptr) { cudaFreeHost(ptr); ptr = nullptr; capacity_bytes = 0; }
+        cudaError_t err = cudaHostAlloc(&ptr, required_bytes, cudaHostAllocDefault);
+        if (err != cudaSuccess) {
+            throw std::runtime_error(
+                "PinnedHostBuffer::ensure cudaHostAlloc failed (" +
+                std::to_string(required_bytes) + " bytes): " +
+                std::string(cudaGetErrorString(err)));
+        }
+        capacity_bytes = required_bytes;
+        return ptr;
+    }
+
+    void release() {
+        if (ptr) { cudaFreeHost(ptr); ptr = nullptr; capacity_bytes = 0; }
+    }
+
+    ~PinnedHostBuffer() { release(); }
+
+    PinnedHostBuffer() = default;
+    PinnedHostBuffer(const PinnedHostBuffer&) = delete;
+    PinnedHostBuffer& operator=(const PinnedHostBuffer&) = delete;
+};
+
+/**
  * 连续变量状态池 (CV State Pool)
  *
  * 该结构体管理GPU上的连续变量量子态存储，支持动态张量积管理：
@@ -62,11 +97,11 @@ struct CVStatePool {
     int* free_list = nullptr; // 垃圾回收链表，存储可用状态ID
 
     // 向后兼容：最大可能维度 (用于GPU内核的静态分配)
-    int max_total_dim = 0;  // D^max_qumodes 或内存限制下的最大维度
-    int total_dim = 0;      // 别名，用于向后兼容
+    int64_t max_total_dim = 0;  // D^max_qumodes 或内存限制下的最大维度
+    int64_t total_dim = 0;      // 别名，用于向后兼容
 
     // 动态张量积管理
-    int* state_dims = nullptr;       // 每个状态的当前维度 [capacity]
+    int64_t* state_dims = nullptr;       // 每个状态的当前维度 [capacity]
     size_t* state_offsets = nullptr; // 每个状态在data中的偏移量 [capacity] (元素偏移量)
 
     // 内存管理
@@ -76,7 +111,7 @@ struct CVStatePool {
     // 主机端状态跟踪
     std::vector<int> free_state_ids;
     std::vector<uint8_t> active_flags;
-    std::vector<int> host_state_dims;
+    std::vector<int64_t> host_state_dims;
     std::vector<size_t> host_state_offsets;
     std::vector<size_t> host_state_capacities;
 
@@ -152,13 +187,23 @@ struct CVStatePool {
      * @param state_id 状态ID
      * @return 状态的当前维度
      */
-    int get_state_dim(int state_id) const;
+    int64_t get_state_dim(int state_id) const;
 
     /**
      * 获取最大总维度 (向后兼容)
      * @return 最大可能的张量积维度
      */
-    int get_max_total_dim() const { return max_total_dim; }
+    int64_t get_max_total_dim() const { return max_total_dim; }
+
+    /**
+     * 获取当前活跃状态实际占用的总元素数。
+     */
+    size_t get_active_storage_elements() const;
+
+    /**
+     * 预留至少指定总元素数的连续设备存储。
+     */
+    void reserve_total_storage_elements(size_t required_elements);
 
     /**
      * 复制状态 (Deep Copy)
@@ -179,7 +224,25 @@ struct CVStatePool {
      * 为状态预留指定维度的存储空间。
      * 调用者负责后续写满该状态向量。
      */
-    void reserve_state_storage(int state_id, int state_dim);
+    void reserve_state_storage(int state_id, int64_t state_dim);
+
+    /**
+     * 为临时输出预留独立存储块，但不立即绑定到任何状态ID。
+     */
+    size_t allocate_detached_storage(size_t required_elements);
+
+    /**
+     * 释放未绑定到状态ID的独立存储块。
+     */
+    void release_detached_storage(size_t offset, size_t reserved_elements);
+
+    /**
+     * 将状态ID重新绑定到一个已经写满的新存储块，并释放旧存储块。
+     */
+    void replace_state_storage(int state_id,
+                               size_t new_offset,
+                               size_t new_capacity,
+                               int state_dim);
 
     /**
      * 检查内存使用情况
@@ -197,6 +260,41 @@ struct CVStatePool {
     GPUScratchBuffer scratch_target_ids;  // for d_target_ids (int arrays)
     GPUScratchBuffer scratch_temp;        // for gate temp buffers (cuDoubleComplex)
     GPUScratchBuffer scratch_aux;         // for small auxiliary allocations
+    PinnedHostBuffer host_transfer_staging; // reusable pinned staging for H2D uploads
+
+    template <typename T>
+    T* upload_values_to_buffer(const T* host_values,
+                               size_t count,
+                               GPUScratchBuffer& scratch) {
+        static_assert(std::is_trivially_copyable_v<T>,
+                      "upload_values_to_buffer requires trivially copyable elements");
+        if (count == 0) {
+            return nullptr;
+        }
+        if (!host_values) {
+            throw std::invalid_argument("upload_values_to_buffer host_values must not be null");
+        }
+
+        const size_t bytes = count * sizeof(T);
+        T* staged = static_cast<T*>(host_transfer_staging.ensure(bytes));
+        std::memcpy(staged, host_values, bytes);
+
+        T* device_ptr = static_cast<T*>(scratch.ensure(bytes));
+        const cudaError_t err = cudaMemcpy(device_ptr, staged, bytes, cudaMemcpyHostToDevice);
+        if (err != cudaSuccess) {
+            throw std::runtime_error(
+                "upload_values_to_buffer cudaMemcpy failed (" +
+                std::to_string(bytes) + " bytes): " +
+                std::string(cudaGetErrorString(err)));
+        }
+        return device_ptr;
+    }
+
+    template <typename T>
+    T* upload_vector_to_buffer(const std::vector<T>& host_values,
+                               GPUScratchBuffer& scratch) {
+        return upload_values_to_buffer(host_values.data(), host_values.size(), scratch);
+    }
 
 private:
     struct FreeBlock {
@@ -209,6 +307,8 @@ private:
     size_t metadata_memory_size_ = 0;
     std::vector<FreeBlock> free_blocks_;
 
+    void release_device_scratch_buffers();
+    size_t active_storage_elements() const;
     void refresh_total_memory_size();
     void sync_state_metadata_to_device(int state_id);
     void ensure_data_capacity(size_t required_elements);

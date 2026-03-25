@@ -86,7 +86,7 @@ int main(int argc, char** argv) {
     try {
         const Options options = parse_args(argc, argv);
         CVStatePool pool(options.cutoff, options.num_states + 8, options.num_qumodes);
-        const int state_dim = pool.get_max_total_dim();
+        const int64_t state_dim = pool.get_max_total_dim();
 
         std::vector<int> state_ids;
         state_ids.reserve(options.num_states);

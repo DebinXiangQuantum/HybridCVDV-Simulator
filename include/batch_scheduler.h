@@ -59,6 +59,7 @@ private:
     size_t total_batches_executed_;
     double total_execution_time_;
     std::vector<CapturedGraphTask> captured_graph_tasks_;
+    GPUScratchBuffer captured_graph_target_storage_;
 
 public:
     /**

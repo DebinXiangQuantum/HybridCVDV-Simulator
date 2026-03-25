@@ -25,18 +25,24 @@ void apply_ckgate_on_modes(CVStatePool* state_pool, const int* target_indices,
 void apply_beam_splitter_recursive(CVStatePool* state_pool, const int* target_indices,
                                   int batch_size, double theta, double phi,
                                   int target_qumode1 = 0, int target_qumode2 = 1,
-                                  int num_qumodes = 2);
+                                  int num_qumodes = 2,
+                                  cudaStream_t stream = nullptr,
+                                  bool synchronize = true);
 
 // 双模挤压门 TMS(r, theta)
 void apply_two_mode_squeezing_recursive(CVStatePool* state_pool, const int* target_indices,
                                        int batch_size, double r, double theta,
                                        int target_qumode1 = 0, int target_qumode2 = 1,
-                                       int num_qumodes = 2);
+                                       int num_qumodes = 2,
+                                       cudaStream_t stream = nullptr,
+                                       bool synchronize = true);
 
 // SUM 门
 void apply_sum_gate(CVStatePool* state_pool, const int* target_indices,
                    int batch_size, double scale, int cutoff_a, int cutoff_b,
                    int target_qumode1 = 0, int target_qumode2 = 1,
-                   int num_qumodes = 2);
+                   int num_qumodes = 2,
+                   cudaStream_t stream = nullptr,
+                   bool synchronize = true);
 
 #endif // TWO_MODE_GATES_H

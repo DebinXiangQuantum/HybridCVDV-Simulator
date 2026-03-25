@@ -8,13 +8,19 @@
 #include <iostream>
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <fstream>
 #include <cuda_runtime.h>
 #include <cuComplex.h>
 #include <stdexcept>
 #include <chrono>
 #include <future>
 #include <map>
+#include <limits>
 #include <optional>
+#include <tuple>
 #include <unordered_set>
 #if defined(HYBRIDCVDV_HAS_NVTX) && HYBRIDCVDV_HAS_NVTX
 #include <nvtx3/nvToolsExt.h>
@@ -53,26 +59,39 @@ struct FusedDiagonalOp {
 };
 void apply_fused_diagonal_gates(CVStatePool* state_pool, const int* target_indices,
                                 int batch_size, const std::vector<FusedDiagonalOp>& ops_host,
-                                int num_qumodes);
+                                int num_qumodes,
+                                cudaStream_t stream = nullptr, bool synchronize = true);
 
-void zero_state_device(CVStatePool* pool, int state_id);
-void initialize_vacuum_state_device(CVStatePool* pool, int state_id, int state_dim);
-void copy_state_device(CVStatePool* pool, int src_state_id, int dst_state_id);
-void axpy_state_device(CVStatePool* pool, int src_state_id, int dst_state_id, cuDoubleComplex weight);
+void zero_state_device(CVStatePool* pool, int state_id,
+                       cudaStream_t stream = nullptr, bool synchronize = true);
+void initialize_vacuum_state_device(CVStatePool* pool, int state_id, int64_t state_dim,
+                                    cudaStream_t stream = nullptr, bool synchronize = true);
+void copy_state_device(CVStatePool* pool, int src_state_id, int dst_state_id,
+                       cudaStream_t stream = nullptr, bool synchronize = true);
+void copy_scale_state_device(CVStatePool* pool, int src_state_id, int dst_state_id, cuDoubleComplex weight,
+                             cudaStream_t stream = nullptr, bool synchronize = true);
+void scale_state_device(CVStatePool* pool, int state_id, cuDoubleComplex weight,
+                        cudaStream_t stream = nullptr, bool synchronize = true);
+void axpy_state_device(CVStatePool* pool, int src_state_id, int dst_state_id, cuDoubleComplex weight,
+                       cudaStream_t stream = nullptr, bool synchronize = true);
 void classify_vacuum_ray_device(CVStatePool* pool, int state_id, double tolerance,
                                 int* is_zero, int* is_scaled_vacuum, cuDoubleComplex* scale);
 
 // Level 1
 void apply_creation_operator_on_mode(CVStatePool* pool, const int* targets, int batch_size,
-                                     int target_qumode, int num_qumodes);
+                                     int target_qumode, int num_qumodes,
+                                     cudaStream_t stream = nullptr, bool synchronize = true);
 void apply_annihilation_operator_on_mode(CVStatePool* pool, const int* targets, int batch_size,
-                                         int target_qumode, int num_qumodes);
+                                         int target_qumode, int num_qumodes,
+                                         cudaStream_t stream = nullptr, bool synchronize = true);
 
 // Level 2
 void apply_single_mode_gate(CVStatePool* pool, FockELLOperator* ell_op,
-                           const int* targets, int batch_size);
+                           const int* targets, int batch_size,
+                           cudaStream_t stream = nullptr, bool synchronize = true);
 void apply_displacement_gate(CVStatePool* pool, const int* targets, int batch_size,
-                            cuDoubleComplex alpha);
+                            cuDoubleComplex alpha,
+                            cudaStream_t stream = nullptr, bool synchronize = true);
 
 // Level 3
 // Level 4
@@ -133,8 +152,74 @@ void add_states(CVStatePool* state_pool,
                 const cuDoubleComplex* weights2,
                 const int* dst_indices,
                 int batch_size);
+void combine_states_device(CVStatePool* state_pool,
+                           int src1_state_id,
+                           cuDoubleComplex weight1,
+                           int src2_state_id,
+                           cuDoubleComplex weight2,
+                           int dst_state_id,
+                           cudaStream_t stream = nullptr,
+                           bool synchronize = true);
 
 namespace {
+
+bool fallback_debug_logging_enabled() {
+    static const bool enabled = []() {
+        const char* env = std::getenv("HYBRIDCVDV_FALLBACK_DEBUG");
+        return env != nullptr && env[0] != '\0' && env[0] != '0';
+    }();
+    return enabled;
+}
+
+bool async_cv_pipeline_disabled() {
+    static const bool disabled = []() {
+        const char* env = std::getenv("HYBRIDCVDV_DISABLE_ASYNC_CV_PIPELINE");
+        return env != nullptr && env[0] != '\0' && env[0] != '0';
+    }();
+    return disabled;
+}
+
+#define FALLBACK_DEBUG_LOG if (!fallback_debug_logging_enabled()) {} else std::cout
+
+const char* block_progress_log_path() {
+    static const char* path = std::getenv("HYBRIDCVDV_BLOCK_PROGRESS_LOG");
+    return (path != nullptr && path[0] != '\0') ? path : nullptr;
+}
+
+size_t block_progress_log_interval() {
+    static const size_t interval = []() -> size_t {
+        const char* env = std::getenv("HYBRIDCVDV_BLOCK_PROGRESS_EVERY");
+        if (env == nullptr || env[0] == '\0') {
+            return 0;
+        }
+        char* end = nullptr;
+        const long value = std::strtol(env, &end, 10);
+        if (end == env || value <= 0) {
+            return 0;
+        }
+        return static_cast<size_t>(value);
+    }();
+    return interval;
+}
+
+void log_block_progress_if_requested(size_t block_index, size_t total_blocks) {
+    const char* path = block_progress_log_path();
+    const size_t interval = block_progress_log_interval();
+    if (path == nullptr || interval == 0 || total_blocks == 0) {
+        return;
+    }
+    if ((block_index % interval) != 0 && (block_index + 1) != total_blocks) {
+        return;
+    }
+
+    std::ofstream progress_log(path, std::ios::app);
+    if (!progress_log) {
+        return;
+    }
+    progress_log << "BLOCK " << (block_index + 1) << "/" << total_blocks << '\n';
+}
+
+std::vector<int> collect_terminal_state_ids(HDDNode* root);
 
 class ScopedNvtxRange {
 public:
@@ -161,19 +246,473 @@ int compute_qumode_right_stride(int trunc_dim, int target_qumode, int num_qumode
     return right_stride;
 }
 
+size_t align_scratch_offset(size_t offset, size_t alignment) {
+    const size_t mask = alignment - 1;
+    return (offset + mask) & ~mask;
+}
+
+struct WeightedNodePairKey {
+    HDDNode* low_node = nullptr;
+    HDDNode* high_node = nullptr;
+    std::complex<double> low_weight{1.0, 0.0};
+    std::complex<double> high_weight{1.0, 0.0};
+
+    bool operator==(const WeightedNodePairKey& other) const {
+        return low_node == other.low_node &&
+               high_node == other.high_node &&
+               low_weight == other.low_weight &&
+               high_weight == other.high_weight;
+    }
+};
+
+struct ExactFockCheckpointHeader {
+    char magic[8];
+    uint32_t version;
+    uint32_t num_qubits;
+    uint32_t num_qumodes;
+    uint32_t cv_truncation;
+    uint32_t max_states;
+    int32_t shared_zero_state_id;
+    uint64_t next_block_index;
+    uint64_t total_blocks;
+    uint64_t state_count;
+    uint64_t node_count;
+    uint64_t root_index;
+};
+
+struct ExactFockCheckpointStateRecord {
+    int32_t state_id;
+    int32_t state_dim;
+};
+
+struct ExactFockCheckpointNodeRecord {
+    uint8_t is_terminal;
+    int16_t qubit_level;
+    int32_t tensor_id;
+    uint64_t low_index;
+    uint64_t high_index;
+    double w_low_real;
+    double w_low_imag;
+    double w_high_real;
+    double w_high_imag;
+};
+
+struct WeightedNodePairKeyHash {
+    size_t operator()(const WeightedNodePairKey& key) const {
+        size_t hash = std::hash<HDDNode*>()(key.low_node);
+        hash ^= std::hash<HDDNode*>()(key.high_node) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        hash ^= std::hash<double>()(key.low_weight.real()) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        hash ^= std::hash<double>()(key.low_weight.imag()) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        hash ^= std::hash<double>()(key.high_weight.real()) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        hash ^= std::hash<double>()(key.high_weight.imag()) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        return hash;
+    }
+};
+
+struct PairwiseHybridStorageEstimate {
+    size_t pair_count = 0;
+    size_t duplicate_state_count = 0;
+    size_t extra_elements = 0;
+};
+
+bool is_pairwise_hybrid_gate_type(GateType type) {
+    switch (type) {
+        case GateType::RABI_INTERACTION:
+        case GateType::JAYNES_CUMMINGS:
+        case GateType::ANTI_JAYNES_CUMMINGS:
+        case GateType::SELECTIVE_QUBIT_ROTATION:
+            return true;
+        default:
+            return false;
+    }
+}
+
+PairwiseHybridStorageEstimate estimate_pairwise_hybrid_storage(HDDNode* root,
+                                                               int control_qubit,
+                                                               size_t state_dim) {
+    PairwiseHybridStorageEstimate estimate;
+    if (!root || state_dim == 0) {
+        return estimate;
+    }
+
+    std::unordered_set<WeightedNodePairKey, WeightedNodePairKeyHash> visited_pairs;
+    std::unordered_set<HDDNode*> visited_nodes;
+
+    std::function<size_t(HDDNode*, std::complex<double>, HDDNode*, std::complex<double>)>
+        count_pairs =
+            [&](HDDNode* low_node,
+                std::complex<double> low_weight,
+                HDDNode* high_node,
+                std::complex<double> high_weight) -> size_t {
+                if (!low_node || !high_node) {
+                    throw std::runtime_error(
+                        "pairwise hybrid storage estimate encountered null HDD branch");
+                }
+
+                const WeightedNodePairKey key{low_node, high_node, low_weight, high_weight};
+                if (!visited_pairs.insert(key).second) {
+                    return 0;
+                }
+
+                if (low_node->is_terminal() && high_node->is_terminal()) {
+                    return 1;
+                }
+
+                if (low_node->is_terminal() || high_node->is_terminal()) {
+                    throw std::runtime_error(
+                        "pairwise hybrid storage estimate encountered mismatched HDD structure");
+                }
+                if (low_node->qubit_level != high_node->qubit_level) {
+                    throw std::runtime_error(
+                        "pairwise hybrid storage estimate encountered mismatched HDD levels");
+                }
+
+                return count_pairs(low_node->low,
+                                   low_weight * low_node->w_low,
+                                   high_node->low,
+                                   high_weight * high_node->w_low) +
+                       count_pairs(low_node->high,
+                                   low_weight * low_node->w_high,
+                                   high_node->high,
+                                   high_weight * high_node->w_high);
+            };
+
+    std::function<size_t(HDDNode*)> count_transform =
+        [&](HDDNode* node) -> size_t {
+            if (!node || node->is_terminal()) {
+                return 0;
+            }
+
+            if (!visited_nodes.insert(node).second) {
+                return 0;
+            }
+
+            if (node->qubit_level == control_qubit) {
+                return count_pairs(node->low, node->w_low, node->high, node->w_high);
+            }
+            if (node->qubit_level > control_qubit) {
+                return count_transform(node->low) + count_transform(node->high);
+            }
+            return 0;
+        };
+
+    estimate.pair_count = count_transform(root);
+    if (estimate.pair_count == 0) {
+        return estimate;
+    }
+    if (estimate.pair_count > std::numeric_limits<size_t>::max() / 2) {
+        throw std::overflow_error("pairwise hybrid duplicate state estimate overflow");
+    }
+
+    estimate.duplicate_state_count = estimate.pair_count * 2;
+    if (estimate.duplicate_state_count > std::numeric_limits<size_t>::max() / state_dim) {
+        throw std::overflow_error("pairwise hybrid storage estimate overflow");
+    }
+    estimate.extra_elements = estimate.duplicate_state_count * state_dim;
+    return estimate;
+}
+
+std::unordered_map<int, size_t> collect_pairwise_replaced_state_use_counts(
+    HDDNode* root,
+    int control_qubit) {
+    std::unordered_map<int, size_t> state_use_counts;
+    if (!root) {
+        return state_use_counts;
+    }
+
+    std::unordered_set<WeightedNodePairKey, WeightedNodePairKeyHash> visited_pairs;
+    std::unordered_set<HDDNode*> visited_nodes;
+
+    std::function<void(HDDNode*, std::complex<double>, HDDNode*, std::complex<double>)> count_pairs =
+        [&](HDDNode* low_node,
+            std::complex<double> low_weight,
+            HDDNode* high_node,
+            std::complex<double> high_weight) {
+            if (!low_node || !high_node) {
+                throw std::runtime_error(
+                    "pairwise replaced-state counting encountered null HDD branch");
+            }
+
+            const WeightedNodePairKey key{low_node, high_node, low_weight, high_weight};
+            if (!visited_pairs.insert(key).second) {
+                return;
+            }
+
+            if (low_node->is_terminal() && high_node->is_terminal()) {
+                if (low_node->tensor_id >= 0) {
+                    ++state_use_counts[low_node->tensor_id];
+                }
+                if (high_node->tensor_id >= 0) {
+                    ++state_use_counts[high_node->tensor_id];
+                }
+                return;
+            }
+
+            if (low_node->is_terminal() || high_node->is_terminal()) {
+                throw std::runtime_error(
+                    "pairwise replaced-state counting encountered mismatched HDD structure");
+            }
+            if (low_node->qubit_level != high_node->qubit_level) {
+                throw std::runtime_error(
+                    "pairwise replaced-state counting encountered mismatched HDD levels");
+            }
+
+            count_pairs(low_node->low,
+                        low_weight * low_node->w_low,
+                        high_node->low,
+                        high_weight * high_node->w_low);
+            count_pairs(low_node->high,
+                        low_weight * low_node->w_high,
+                        high_node->high,
+                        high_weight * high_node->w_high);
+        };
+
+    std::function<void(HDDNode*)> walk_transform_region =
+        [&](HDDNode* node) {
+            if (!node || node->is_terminal()) {
+                return;
+            }
+            if (!visited_nodes.insert(node).second) {
+                return;
+            }
+            if (node->qubit_level == control_qubit) {
+                count_pairs(node->low, node->w_low, node->high, node->w_high);
+                return;
+            }
+            if (node->qubit_level > control_qubit) {
+                walk_transform_region(node->low);
+                walk_transform_region(node->high);
+            }
+        };
+
+    walk_transform_region(root);
+    return state_use_counts;
+}
+
+std::unordered_set<int> collect_retained_state_ids_outside_pairwise_region(
+    HDDNode* root,
+    int control_qubit) {
+    std::unordered_set<int> retained_state_ids;
+    if (!root) {
+        return retained_state_ids;
+    }
+
+    std::unordered_set<size_t> visited_transform_nodes;
+    std::unordered_set<size_t> visited_retained_nodes;
+    std::function<void(HDDNode*)> collect_retained_subtree =
+        [&](HDDNode* node) {
+            if (!node) {
+                return;
+            }
+            if (!visited_retained_nodes.insert(node->get_unique_id()).second) {
+                return;
+            }
+            if (node->is_terminal()) {
+                if (node->tensor_id >= 0) {
+                    retained_state_ids.insert(node->tensor_id);
+                }
+                return;
+            }
+            collect_retained_subtree(node->low);
+            collect_retained_subtree(node->high);
+        };
+
+    std::function<void(HDDNode*)> walk =
+        [&](HDDNode* node) {
+            if (!node) {
+                return;
+            }
+            if (node->is_terminal()) {
+                return;
+            }
+            if (node->qubit_level < control_qubit) {
+                collect_retained_subtree(node);
+                return;
+            }
+            if (!visited_transform_nodes.insert(node->get_unique_id()).second) {
+                return;
+            }
+            if (node->qubit_level > control_qubit) {
+                walk(node->low);
+                walk(node->high);
+            }
+        };
+
+    walk(root);
+    return retained_state_ids;
+}
+
+size_t pairwise_hybrid_working_extra_elements(
+    HDDNode* root,
+    int control_qubit,
+    size_t state_dim,
+    const PairwiseHybridStorageEstimate& full_estimate,
+    bool* early_release_enabled = nullptr) {
+    const bool allow_early_release =
+        full_estimate.extra_elements != 0 &&
+        collect_retained_state_ids_outside_pairwise_region(root, control_qubit).empty();
+    if (early_release_enabled) {
+        *early_release_enabled = allow_early_release;
+    }
+    if (!allow_early_release || full_estimate.extra_elements == 0) {
+        return full_estimate.extra_elements;
+    }
+    if (state_dim > std::numeric_limits<size_t>::max() / 2) {
+        throw std::overflow_error("pairwise hybrid working-set estimate overflow");
+    }
+    return std::min(full_estimate.extra_elements, static_cast<size_t>(2) * state_dim);
+}
+
+void release_pairwise_replaced_state_if_safe(
+    int state_id,
+    bool allow_early_release,
+    std::unordered_map<int, size_t>& remaining_use_counts,
+    CVStatePool& state_pool,
+    int shared_zero_state_id) {
+    if (!allow_early_release || state_id < 0 || state_id == shared_zero_state_id) {
+        return;
+    }
+
+    const auto it = remaining_use_counts.find(state_id);
+    if (it == remaining_use_counts.end()) {
+        return;
+    }
+
+    if (it->second == 0) {
+        remaining_use_counts.erase(it);
+        return;
+    }
+
+    if (--(it->second) != 0) {
+        return;
+    }
+
+    remaining_use_counts.erase(it);
+    if (state_pool.is_valid_state(state_id)) {
+        state_pool.free_state(state_id);
+    }
+}
+
+void reserve_pairwise_hybrid_headroom(const char* gate_name,
+                                      HDDNode* root,
+                                      int control_qubit,
+                                      CVStatePool& state_pool) {
+    const size_t state_dim = static_cast<size_t>(state_pool.get_max_total_dim());
+    if (state_dim == 0) {
+        return;
+    }
+
+    const PairwiseHybridStorageEstimate estimate =
+        estimate_pairwise_hybrid_storage(root, control_qubit, state_dim);
+    if (estimate.extra_elements == 0) {
+        return;
+    }
+
+    bool early_release_enabled = false;
+    const size_t working_extra_elements =
+        pairwise_hybrid_working_extra_elements(
+            root, control_qubit, state_dim, estimate, &early_release_enabled);
+
+    const size_t active_storage = state_pool.get_active_storage_elements();
+    if (active_storage > std::numeric_limits<size_t>::max() - working_extra_elements) {
+        throw std::overflow_error("pairwise hybrid headroom reservation overflow");
+    }
+
+    FALLBACK_DEBUG_LOG << "[fallback] " << gate_name
+                       << " pre-reserving pairwise headroom"
+                       << " pairs=" << estimate.pair_count
+                       << " duplicate_states=" << estimate.duplicate_state_count
+                       << " working_extra_elements=" << working_extra_elements
+                       << " early_release=" << (early_release_enabled ? 1 : 0)
+                       << " active_storage=" << active_storage
+                       << std::endl;
+    state_pool.reserve_total_storage_elements(active_storage + working_extra_elements);
+}
+
+void cleanup_duplicated_pairwise_states(CVStatePool& state_pool,
+                                        const std::vector<int>& low_ids,
+                                        const std::vector<int>& high_ids) {
+    std::unordered_set<int> unique_state_ids;
+    unique_state_ids.reserve(low_ids.size() + high_ids.size());
+    for (int state_id : low_ids) {
+        if (state_id >= 0) {
+            unique_state_ids.insert(state_id);
+        }
+    }
+    for (int state_id : high_ids) {
+        if (state_id >= 0) {
+            unique_state_ids.insert(state_id);
+        }
+    }
+
+    for (int state_id : unique_state_ids) {
+        if (state_pool.is_valid_state(state_id)) {
+            state_pool.free_state(state_id);
+        }
+    }
+}
+
+void cleanup_pairwise_build_failure(
+    HDDNodeManager& node_manager,
+    CVStatePool& state_pool,
+    const std::unordered_map<WeightedNodePairKey, std::pair<HDDNode*, HDDNode*>, WeightedNodePairKeyHash>& pair_memo,
+    const std::unordered_map<HDDNode*, HDDNode*>& node_memo,
+    const std::vector<int>& low_ids,
+    const std::vector<int>& high_ids) {
+    for (const auto& [original_node, transformed_node] : node_memo) {
+        if (transformed_node && transformed_node != original_node) {
+            node_manager.release_node(transformed_node);
+        }
+    }
+
+    for (const auto& [pair_key, pair] : pair_memo) {
+        (void)pair_key;
+        if (pair.first) {
+            node_manager.release_node(pair.first);
+        }
+        if (pair.second) {
+            node_manager.release_node(pair.second);
+        }
+    }
+
+    cleanup_duplicated_pairwise_states(state_pool, low_ids, high_ids);
+}
+
+void release_transient_pairwise_node(
+    HDDNodeManager& node_manager,
+    CVStatePool& state_pool,
+    HDDNode* node,
+    const std::vector<int>& low_ids,
+    const std::vector<int>& high_ids) {
+    if (!node) {
+        return;
+    }
+
+    const int state_id = node->tensor_id;
+    node_manager.release_node(node);
+
+    const bool tracked_low =
+        std::find(low_ids.begin(), low_ids.end(), state_id) != low_ids.end();
+    const bool tracked_high =
+        std::find(high_ids.begin(), high_ids.end(), state_id) != high_ids.end();
+    if (state_id >= 0 && !tracked_low && !tracked_high && state_pool.is_valid_state(state_id)) {
+        state_pool.free_state(state_id);
+    }
+}
+
 std::vector<double> expand_selective_rotation_profile(
     const std::vector<double>& per_photon_values,
     int trunc_dim,
     int control_qumode,
     int num_qumodes,
-    int max_total_dim) {
+    int64_t max_total_dim) {
     std::vector<double> expanded(static_cast<size_t>(max_total_dim), 0.0);
     if (trunc_dim <= 0 || max_total_dim <= 0 || control_qumode < 0 || control_qumode >= num_qumodes) {
         return expanded;
     }
 
     const int right_stride = compute_qumode_right_stride(trunc_dim, control_qumode, num_qumodes);
-    for (int flat_index = 0; flat_index < max_total_dim; ++flat_index) {
+    for (int64_t flat_index = 0; flat_index < max_total_dim; ++flat_index) {
         const int photon_number = (flat_index / right_stride) % trunc_dim;
         if (photon_number < static_cast<int>(per_photon_values.size())) {
             expanded[static_cast<size_t>(flat_index)] = per_photon_values[static_cast<size_t>(photon_number)];
@@ -184,7 +723,7 @@ std::vector<double> expand_selective_rotation_profile(
 
 constexpr double kVacuumTolerance = 1e-12;
 constexpr double kSymbolicBranchPruneTolerance = 1e-14;
-constexpr size_t kMaxSymbolicBranchesPerTerminal = 256;
+constexpr int kDefaultSymbolicBranchLimit = 64;
 constexpr double kTargetMixtureFidelity = 0.9999;
 constexpr int kMaxKerrMixtureBranches = 32;
 constexpr int kMaxSnapMixtureBranches = 32;
@@ -201,6 +740,65 @@ size_t integer_power(size_t base, int exponent) {
 
 bool is_nontrivial_phase(double theta) {
     return std::abs(theta) > kDiagonalCanonicalizationTolerance;
+}
+
+bool symbolic_mixture_would_exceed_branch_limit(
+    const std::vector<std::complex<double>>& initial_weights,
+    const std::vector<GaussianMixtureApproximation>& approximations,
+    size_t branch_limit,
+    size_t* projected_branch_count,
+    size_t* failing_update_index) {
+    std::vector<std::complex<double>> current_weights;
+    current_weights.reserve(initial_weights.size());
+    for (const std::complex<double>& weight : initial_weights) {
+        if (std::abs(weight) >= kSymbolicBranchPruneTolerance) {
+            current_weights.push_back(weight);
+        }
+    }
+
+    if (projected_branch_count) {
+        *projected_branch_count = current_weights.size();
+    }
+    if (failing_update_index) {
+        *failing_update_index = approximations.size();
+    }
+
+    for (size_t approximation_index = 0; approximation_index < approximations.size();
+         ++approximation_index) {
+        const GaussianMixtureApproximation& approximation = approximations[approximation_index];
+        std::vector<std::complex<double>> expanded_weights;
+        expanded_weights.reserve(std::min(branch_limit + 1, current_weights.size() + approximation.branches.size()));
+
+        for (const std::complex<double>& base_weight : current_weights) {
+            for (const GaussianMixtureBranch& mixture_branch : approximation.branches) {
+                const std::complex<double> new_weight = base_weight * mixture_branch.weight;
+                if (std::abs(new_weight) < kSymbolicBranchPruneTolerance) {
+                    continue;
+                }
+
+                expanded_weights.push_back(new_weight);
+                if (expanded_weights.size() > branch_limit) {
+                    if (projected_branch_count) {
+                        *projected_branch_count = expanded_weights.size();
+                    }
+                    if (failing_update_index) {
+                        *failing_update_index = approximation_index;
+                    }
+                    return true;
+                }
+            }
+        }
+
+        current_weights = std::move(expanded_weights);
+        if (projected_branch_count) {
+            *projected_branch_count = current_weights.size();
+        }
+        if (current_weights.empty()) {
+            return false;
+        }
+    }
+
+    return false;
 }
 
 double conservative_fidelity_lower_bound_from_operator_error(double operator_error) {
@@ -285,12 +883,17 @@ VacuumRayInfo classify_vacuum_ray_on_device(CVStatePool& state_pool, int state_i
     int is_zero = 0;
     int is_scaled_vacuum = 0;
     cuDoubleComplex scale = make_cuDoubleComplex(0.0, 0.0);
-    classify_vacuum_ray_device(&state_pool, state_id, kVacuumTolerance,
-                               &is_zero, &is_scaled_vacuum, &scale);
+    classify_vacuum_ray_device(
+        &state_pool,
+        state_id,
+        kVacuumTolerance,
+        &is_zero,
+        &is_scaled_vacuum,
+        &scale);
 
     VacuumRayInfo info;
-    info.is_zero = is_zero != 0;
-    info.is_scaled_vacuum = is_scaled_vacuum != 0;
+    info.is_zero = (is_zero != 0);
+    info.is_scaled_vacuum = (is_scaled_vacuum != 0);
     info.scale = std::complex<double>(cuCreal(scale), cuCimag(scale));
     return info;
 }
@@ -326,6 +929,180 @@ std::vector<std::complex<double>> to_host_complex(
     }
     return host_state;
 }
+
+}  // namespace
+
+void QuantumCircuit::ensure_async_cv_pipeline() {
+    if (compute_stream_ && upload_stream_) {
+        return;
+    }
+
+    CHECK_CUDA(cudaStreamCreateWithFlags(&compute_stream_, cudaStreamNonBlocking));
+    CHECK_CUDA(cudaStreamCreateWithFlags(&upload_stream_, cudaStreamNonBlocking));
+    for (TargetUploadSlot& slot : target_upload_slots_) {
+        if (!slot.upload_ready) {
+            CHECK_CUDA(cudaEventCreateWithFlags(&slot.upload_ready, cudaEventDisableTiming));
+        }
+        if (!slot.reusable) {
+            CHECK_CUDA(cudaEventCreateWithFlags(&slot.reusable, cudaEventDisableTiming));
+        }
+        slot.reusable_recorded = false;
+    }
+    next_target_upload_slot_ = 0;
+    async_cv_work_pending_ = false;
+}
+
+void QuantumCircuit::release_async_cv_pipeline() {
+    synchronize_async_cv_pipeline();
+
+    for (TargetUploadSlot& slot : target_upload_slots_) {
+        if (slot.upload_ready) {
+            cudaEventDestroy(slot.upload_ready);
+            slot.upload_ready = nullptr;
+        }
+        if (slot.reusable) {
+            cudaEventDestroy(slot.reusable);
+            slot.reusable = nullptr;
+        }
+        slot.reusable_recorded = false;
+        slot.device_buffer.release();
+        slot.host_buffer.release();
+    }
+
+    if (upload_stream_) {
+        cudaStreamDestroy(upload_stream_);
+        upload_stream_ = nullptr;
+    }
+    if (compute_stream_) {
+        cudaStreamDestroy(compute_stream_);
+        compute_stream_ = nullptr;
+    }
+    next_target_upload_slot_ = 0;
+    async_cv_work_pending_ = false;
+}
+
+void QuantumCircuit::prewarm_async_target_upload_slots() {
+    ensure_async_cv_pipeline();
+
+    const size_t target_id_bytes = static_cast<size_t>(state_pool_.capacity) * sizeof(int);
+    if (target_id_bytes == 0) {
+        return;
+    }
+
+    for (TargetUploadSlot& slot : target_upload_slots_) {
+        slot.device_buffer.ensure(target_id_bytes);
+        slot.host_buffer.ensure(target_id_bytes);
+    }
+}
+
+void QuantumCircuit::synchronize_async_cv_pipeline() {
+    if (!async_cv_work_pending_) {
+        return;
+    }
+    if (upload_stream_) {
+        CHECK_CUDA(cudaStreamSynchronize(upload_stream_));
+    }
+    if (compute_stream_) {
+        CHECK_CUDA(cudaStreamSynchronize(compute_stream_));
+    }
+    async_cv_work_pending_ = false;
+}
+
+std::pair<int*, size_t> QuantumCircuit::upload_target_states_for_compute(
+    const std::vector<int>& target_states,
+    size_t* slot_index) {
+    if (target_states.empty()) {
+        if (slot_index) {
+            *slot_index = 0;
+        }
+        return {nullptr, 0};
+    }
+
+    if (!async_cv_pipeline_enabled_) {
+        int* d_target_ids = state_pool_.upload_vector_to_buffer(
+            target_states, state_pool_.scratch_target_ids);
+        if (slot_index) {
+            *slot_index = 0;
+        }
+        return {d_target_ids, target_states.size() * sizeof(int)};
+    }
+
+    ensure_async_cv_pipeline();
+    const size_t ids_bytes = target_states.size() * sizeof(int);
+    const size_t current_slot = next_target_upload_slot_;
+    TargetUploadSlot& slot = target_upload_slots_[current_slot];
+
+    if (slot.reusable_recorded) {
+        CHECK_CUDA(cudaEventSynchronize(slot.reusable));
+        slot.reusable_recorded = false;
+    }
+
+    int* staged_host = static_cast<int*>(slot.host_buffer.ensure(ids_bytes));
+    std::memcpy(staged_host, target_states.data(), ids_bytes);
+    int* device_target_ids = static_cast<int*>(slot.device_buffer.ensure(ids_bytes));
+
+    CHECK_CUDA(cudaMemcpyAsync(device_target_ids,
+                               staged_host,
+                               ids_bytes,
+                               cudaMemcpyHostToDevice,
+                               upload_stream_));
+    CHECK_CUDA(cudaEventRecord(slot.upload_ready, upload_stream_));
+    CHECK_CUDA(cudaStreamWaitEvent(compute_stream_, slot.upload_ready, 0));
+
+    next_target_upload_slot_ = (current_slot + 1) % target_upload_slots_.size();
+    if (slot_index) {
+        *slot_index = current_slot;
+    }
+    return {device_target_ids, ids_bytes};
+}
+
+void QuantumCircuit::mark_target_upload_slot_in_use(size_t slot_index) {
+    if (!async_cv_pipeline_enabled_) {
+        return;
+    }
+    if (slot_index >= target_upload_slots_.size()) {
+        throw std::out_of_range("target upload slot index out of range");
+    }
+    TargetUploadSlot& slot = target_upload_slots_[slot_index];
+    CHECK_CUDA(cudaEventRecord(slot.reusable, compute_stream_));
+    slot.reusable_recorded = true;
+    async_cv_work_pending_ = true;
+}
+
+void QuantumCircuit::invalidate_root_caches() {
+    ++root_revision_;
+    cached_target_state_revision_ = 0;
+    cached_target_state_ids_.clear();
+    cached_symbolic_terminal_revision_ = 0;
+    cached_symbolic_terminal_ids_.clear();
+}
+
+const std::vector<int>& QuantumCircuit::get_cached_target_states() const {
+    if (cached_target_state_revision_ == root_revision_) {
+        return cached_target_state_ids_;
+    }
+
+    cached_target_state_ids_ = collect_terminal_state_ids(root_node_);
+    cached_target_state_ids_.erase(
+        std::remove(cached_target_state_ids_.begin(),
+                    cached_target_state_ids_.end(),
+                    shared_zero_state_id_),
+        cached_target_state_ids_.end());
+    cached_target_state_revision_ = root_revision_;
+    return cached_target_state_ids_;
+}
+
+const std::vector<int>& QuantumCircuit::get_cached_symbolic_terminal_ids() const {
+    if (cached_symbolic_terminal_revision_ == root_revision_) {
+        return cached_symbolic_terminal_ids_;
+    }
+
+    cached_symbolic_terminal_ids_ = collect_symbolic_terminal_ids(root_node_);
+    cached_symbolic_terminal_revision_ = root_revision_;
+    return cached_symbolic_terminal_ids_;
+}
+
+namespace {
 
 void trim_trailing_zero_phases(std::vector<double>* phase_map) {
     while (!phase_map->empty() && !is_nontrivial_phase(phase_map->back())) {
@@ -412,6 +1189,43 @@ bool is_pure_qubit_gate(const GateParams& gate) {
             return !gate.target_qubits.empty();
         default:
             return false;
+    }
+}
+
+const char* gate_type_name(GateType type) {
+    switch (type) {
+        case GateType::HADAMARD: return "Hadamard";
+        case GateType::PAULI_X: return "PauliX";
+        case GateType::PAULI_Y: return "PauliY";
+        case GateType::PAULI_Z: return "PauliZ";
+        case GateType::ROTATION_X: return "RotationX";
+        case GateType::ROTATION_Y: return "RotationY";
+        case GateType::ROTATION_Z: return "RotationZ";
+        case GateType::PHASE_GATE_S: return "PhaseS";
+        case GateType::PHASE_GATE_T: return "PhaseT";
+        case GateType::CNOT: return "CNOT";
+        case GateType::CZ: return "CZ";
+        case GateType::PHASE_ROTATION: return "PhaseRotation";
+        case GateType::KERR_GATE: return "Kerr";
+        case GateType::CONDITIONAL_PARITY: return "ConditionalParity";
+        case GateType::SNAP_GATE: return "SNAP";
+        case GateType::MULTI_SNAP_GATE: return "MultiSNAP";
+        case GateType::CROSS_KERR_GATE: return "CrossKerr";
+        case GateType::CREATION_OPERATOR: return "Creation";
+        case GateType::ANNIHILATION_OPERATOR: return "Annihilation";
+        case GateType::DISPLACEMENT: return "Displacement";
+        case GateType::SQUEEZING: return "Squeezing";
+        case GateType::BEAM_SPLITTER: return "BeamSplitter";
+        case GateType::CONDITIONAL_DISPLACEMENT: return "ConditionalDisplacement";
+        case GateType::CONDITIONAL_SQUEEZING: return "ConditionalSqueezing";
+        case GateType::CONDITIONAL_BEAM_SPLITTER: return "ConditionalBeamSplitter";
+        case GateType::CONDITIONAL_TWO_MODE_SQUEEZING: return "ConditionalTwoModeSqueezing";
+        case GateType::CONDITIONAL_SUM: return "ConditionalSUM";
+        case GateType::RABI_INTERACTION: return "RabiInteraction";
+        case GateType::JAYNES_CUMMINGS: return "JaynesCummings";
+        case GateType::ANTI_JAYNES_CUMMINGS: return "AntiJaynesCummings";
+        case GateType::SELECTIVE_QUBIT_ROTATION: return "SelectiveQubitRotation";
+        default: return "UnknownGate";
     }
 }
 
@@ -1206,6 +2020,23 @@ size_t count_reachable_hdd_nodes(HDDNode* root) {
     return count_reachable_hdd_nodes_recursive(root, visited_nodes);
 }
 
+struct NodeSignKey {
+    HDDNode* node = nullptr;
+    bool negated = false;
+
+    bool operator==(const NodeSignKey& other) const {
+        return node == other.node && negated == other.negated;
+    }
+};
+
+struct NodeSignKeyHash {
+    size_t operator()(const NodeSignKey& key) const {
+        size_t seed = std::hash<HDDNode*>()(key.node);
+        seed ^= std::hash<bool>()(key.negated) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        return seed;
+    }
+};
+
 std::complex<double> compute_qumode_overlap(
     const std::vector<cuDoubleComplex>& state_data,
     int d_trunc,
@@ -1269,7 +2100,7 @@ HDDNode* QuantumCircuit::scale_hdd_node(HDDNode* node, std::complex<double> weig
             throw std::runtime_error("HDD缩放失败：无法分配零状态");
         }
 
-        int zero_dim = shared_zero_state_id_ >= 0 ? state_pool_.get_state_dim(shared_zero_state_id_) : 0;
+        int64_t zero_dim = shared_zero_state_id_ >= 0 ? state_pool_.get_state_dim(shared_zero_state_id_) : 0;
         if (node->is_terminal()) {
             zero_dim = state_pool_.get_state_dim(node->tensor_id);
         }
@@ -1277,9 +2108,13 @@ HDDNode* QuantumCircuit::scale_hdd_node(HDDNode* node, std::complex<double> weig
             zero_dim = state_pool_.get_max_total_dim();
         }
 
-        std::vector<cuDoubleComplex> zeros(static_cast<size_t>(zero_dim),
-                                           make_cuDoubleComplex(0.0, 0.0));
-        state_pool_.upload_state(zero_id, zeros);
+        try {
+            state_pool_.reserve_state_storage(zero_id, zero_dim);
+            zero_state_device(&state_pool_, zero_id, nullptr, false);
+        } catch (...) {
+            state_pool_.free_state(zero_id);
+            throw;
+        }
         return node_manager_.create_terminal_node(zero_id);
     }
 
@@ -1288,6 +2123,9 @@ HDDNode* QuantumCircuit::scale_hdd_node(HDDNode* node, std::complex<double> weig
     }
 
     if (node->is_terminal()) {
+        if (node->tensor_id == shared_zero_state_id_) {
+            return node_manager_.create_terminal_node(shared_zero_state_id_);
+        }
         if (is_symbolic_terminal_id(node->tensor_id)) {
             const SymbolicTerminalState& symbolic_state =
                 symbolic_terminal_states_.at(node->tensor_id);
@@ -1301,6 +2139,10 @@ HDDNode* QuantumCircuit::scale_hdd_node(HDDNode* node, std::complex<double> weig
                 scaled_branches.push_back(std::move(scaled_branch));
             }
 
+            if (scaled_branches.empty()) {
+                return node_manager_.create_terminal_node(shared_zero_state_id_);
+            }
+
             const int scaled_terminal_id = allocate_symbolic_terminal_id();
             symbolic_terminal_states_.emplace(
                 scaled_terminal_id,
@@ -1308,18 +2150,18 @@ HDDNode* QuantumCircuit::scale_hdd_node(HDDNode* node, std::complex<double> weig
             return node_manager_.create_terminal_node(scaled_terminal_id);
         }
 
-        const int scaled_state_id = state_pool_.duplicate_state(node->tensor_id);
+        const int scaled_state_id = state_pool_.allocate_state();
         if (scaled_state_id < 0) {
-            throw std::runtime_error("HDD缩放失败：无法复制终端状态");
+            throw std::runtime_error("HDD缩放失败：无法分配目标终端状态");
         }
 
-        std::vector<cuDoubleComplex> scaled_state;
-        state_pool_.download_state(scaled_state_id, scaled_state);
         const cuDoubleComplex weight_cu = make_cuDoubleComplex(weight.real(), weight.imag());
-        for (cuDoubleComplex& amplitude : scaled_state) {
-            amplitude = cuCmul(weight_cu, amplitude);
+        try {
+            copy_scale_state_device(&state_pool_, node->tensor_id, scaled_state_id, weight_cu, nullptr, false);
+        } catch (...) {
+            state_pool_.free_state(scaled_state_id);
+            throw;
         }
-        state_pool_.upload_state(scaled_state_id, scaled_state);
         return node_manager_.create_terminal_node(scaled_state_id);
     }
 
@@ -1339,13 +2181,13 @@ HDDNode* QuantumCircuit::duplicate_scaled_terminal_node(HDDNode* terminal_node,
         throw std::runtime_error("终端节点复制失败：输入节点不是终端节点");
     }
 
-    const int scaled_state_id = state_pool_.duplicate_state(terminal_node->tensor_id);
+    const int scaled_state_id = state_pool_.allocate_state();
     if (scaled_state_id < 0) {
-        throw std::runtime_error("终端节点复制失败：无法复制状态");
+        throw std::runtime_error("终端节点复制失败：无法分配状态");
     }
 
     if (std::abs(weight) < 1e-14) {
-        int zero_dim = state_pool_.get_state_dim(scaled_state_id);
+        int64_t zero_dim = state_pool_.get_state_dim(scaled_state_id);
         if (zero_dim <= 0) {
             zero_dim = state_pool_.get_state_dim(terminal_node->tensor_id);
         }
@@ -1353,23 +2195,33 @@ HDDNode* QuantumCircuit::duplicate_scaled_terminal_node(HDDNode* terminal_node,
             zero_dim = state_pool_.get_max_total_dim();
         }
 
-        std::vector<cuDoubleComplex> zeros(static_cast<size_t>(zero_dim),
-                                           make_cuDoubleComplex(0.0, 0.0));
-        state_pool_.upload_state(scaled_state_id, zeros);
+        try {
+            state_pool_.reserve_state_storage(scaled_state_id, zero_dim);
+            zero_state_device(&state_pool_, scaled_state_id, nullptr, false);
+        } catch (...) {
+            state_pool_.free_state(scaled_state_id);
+            throw;
+        }
         return node_manager_.create_terminal_node(scaled_state_id);
     }
 
     if (std::abs(weight - std::complex<double>(1.0, 0.0)) < 1e-14) {
+        try {
+            copy_state_device(&state_pool_, terminal_node->tensor_id, scaled_state_id, nullptr, false);
+        } catch (...) {
+            state_pool_.free_state(scaled_state_id);
+            throw;
+        }
         return node_manager_.create_terminal_node(scaled_state_id);
     }
 
-    std::vector<cuDoubleComplex> scaled_state;
-    state_pool_.download_state(scaled_state_id, scaled_state);
     const cuDoubleComplex weight_cu = make_cuDoubleComplex(weight.real(), weight.imag());
-    for (cuDoubleComplex& amplitude : scaled_state) {
-        amplitude = cuCmul(weight_cu, amplitude);
+    try {
+        copy_scale_state_device(&state_pool_, terminal_node->tensor_id, scaled_state_id, weight_cu, nullptr, false);
+    } catch (...) {
+        state_pool_.free_state(scaled_state_id);
+        throw;
     }
-    state_pool_.upload_state(scaled_state_id, scaled_state);
     return node_manager_.create_terminal_node(scaled_state_id);
 }
 
@@ -1377,151 +2229,248 @@ HDDNode* QuantumCircuit::duplicate_scaled_terminal_node(HDDNode* terminal_node,
  * HDD节点加法: result = w1 * n1 + w2 * n2
  */
 HDDNode* QuantumCircuit::hdd_add(HDDNode* n1, std::complex<double> w1, HDDNode* n2, std::complex<double> w2) {
-    // 处理零权重
-    if (std::abs(w1) < 1e-14) {
-        if (std::abs(w2) < 1e-14) {
-            return scale_hdd_node(n1 ? n1 : n2, std::complex<double>(0.0, 0.0));
-        }
-        return scale_hdd_node(n2, w2);
-    }
-    if (std::abs(w2) < 1e-14) {
-        return scale_hdd_node(n1, w1);
-    }
+    std::unordered_map<WeightedNodePairKey, HDDNode*, WeightedNodePairKeyHash> add_memo;
+    std::unordered_map<int, int> projected_symbolic_terminal_cache;
 
-    // 基本情况：终端节点
-    if (n1->is_terminal() && n2->is_terminal()) {
-        int id1 = n1->tensor_id;
-        int id2 = n2->tensor_id;
-        if (id1 == id2) {
-            return scale_hdd_node(n1, w1 + w2);
-        }
-
-        const bool symbolic1 = is_symbolic_terminal_id(id1);
-        const bool symbolic2 = is_symbolic_terminal_id(id2);
-        const bool zero1 = id1 == shared_zero_state_id_;
-        const bool zero2 = id2 == shared_zero_state_id_;
-
-        if ((symbolic1 || zero1) && (symbolic2 || zero2)) {
-            std::vector<SymbolicGaussianBranch> combined_branches;
-
-            auto append_scaled_branches =
-                [&](int terminal_id, std::complex<double> scale) {
-                    if (std::abs(scale) < 1e-14 || !is_symbolic_terminal_id(terminal_id)) {
-                        return;
-                    }
-                    const SymbolicTerminalState& symbolic_state =
-                        symbolic_terminal_states_.at(terminal_id);
-                    for (const SymbolicGaussianBranch& existing_branch : symbolic_state.branches) {
-                        SymbolicGaussianBranch new_branch = existing_branch;
-                        new_branch.gaussian_state_id =
-                            duplicate_gaussian_state(existing_branch.gaussian_state_id);
-                        new_branch.weight *= scale;
-                        combined_branches.push_back(std::move(new_branch));
-                    }
-                };
-
-            append_scaled_branches(id1, w1);
-            append_scaled_branches(id2, w2);
-
-            if (combined_branches.empty()) {
-                return node_manager_.create_terminal_node(shared_zero_state_id_);
+    const auto project_symbolic_terminal =
+        [&](int terminal_id) -> int {
+            const auto cached = projected_symbolic_terminal_cache.find(terminal_id);
+            if (cached != projected_symbolic_terminal_cache.end()) {
+                return cached->second;
             }
 
-            const int symbolic_terminal_id = allocate_symbolic_terminal_id();
-            symbolic_terminal_states_.emplace(
-                symbolic_terminal_id,
-                SymbolicTerminalState{std::move(combined_branches)});
-            return node_manager_.create_terminal_node(symbolic_terminal_id);
-        }
+            const int projected_id = project_symbolic_terminal_to_fock_state(terminal_id);
+            projected_symbolic_terminal_cache.emplace(terminal_id, projected_id);
+            return projected_id;
+        };
 
-        if (symbolic1) {
-            id1 = project_symbolic_terminal_to_fock_state(id1);
-        }
-        if (symbolic2) {
-            id2 = project_symbolic_terminal_to_fock_state(id2);
-        }
+    const auto free_temporary_symbolic_branches =
+        [&](std::vector<SymbolicGaussianBranch>* branches) {
+            if (!gaussian_state_pool_) {
+                branches->clear();
+                return;
+            }
+            for (const SymbolicGaussianBranch& branch : *branches) {
+                if (branch.gaussian_state_id >= 0) {
+                    gaussian_state_pool_->free_state(branch.gaussian_state_id);
+                }
+            }
+            branches->clear();
+        };
 
-        int new_id = state_pool_.allocate_state();
-        
-        // 统计传输时延
-        auto transfer_start = std::chrono::high_resolution_clock::now();
-        
-        // 准备设备端数据
-        int* d_src1 = nullptr;
-        int* d_src2 = nullptr;
-        int* d_dst = nullptr;
-        cuDoubleComplex* d_w1 = nullptr;
-        cuDoubleComplex* d_w2 = nullptr;
-        
-        cudaMalloc(&d_src1, sizeof(int));
-        cudaMalloc(&d_src2, sizeof(int));
-        cudaMalloc(&d_dst, sizeof(int));
-        cudaMalloc(&d_w1, sizeof(cuDoubleComplex));
-        cudaMalloc(&d_w2, sizeof(cuDoubleComplex));
-        
-        cudaMemcpy(d_src1, &id1, sizeof(int), cudaMemcpyHostToDevice);
-        cudaMemcpy(d_src2, &id2, sizeof(int), cudaMemcpyHostToDevice);
-        cudaMemcpy(d_dst, &new_id, sizeof(int), cudaMemcpyHostToDevice);
-        
-        cuDoubleComplex w1_cu = make_cuDoubleComplex(w1.real(), w1.imag());
-        cuDoubleComplex w2_cu = make_cuDoubleComplex(w2.real(), w2.imag());
-        cudaMemcpy(d_w1, &w1_cu, sizeof(cuDoubleComplex), cudaMemcpyHostToDevice);
-        cudaMemcpy(d_w2, &w2_cu, sizeof(cuDoubleComplex), cudaMemcpyHostToDevice);
-        
-        auto transfer_end = std::chrono::high_resolution_clock::now();
-        transfer_time_ += std::chrono::duration<double, std::milli>(transfer_end - transfer_start).count();
+    std::function<HDDNode*(HDDNode*, std::complex<double>, HDDNode*, std::complex<double>)>
+        add_recursive =
+            [&](HDDNode* lhs,
+                std::complex<double> lhs_weight,
+                HDDNode* rhs,
+                std::complex<double> rhs_weight) -> HDDNode* {
+                if (!lhs || !rhs) {
+                    return scale_hdd_node(lhs ? lhs : rhs, std::complex<double>(0.0, 0.0));
+                }
 
-        // 统计计算时延
-        auto compute_start = std::chrono::high_resolution_clock::now();
-        
-        // 调用GPU内核
-        add_states(&state_pool_, d_src1, d_w1, d_src2, d_w2, d_dst, 1);
-        
-        cudaDeviceSynchronize();
-        
-        auto compute_end = std::chrono::high_resolution_clock::now();
-        computation_time_ += std::chrono::duration<double, std::milli>(compute_end - compute_start).count();
-        
-        // 清理
-        cudaFree(d_src1);
-        cudaFree(d_src2);
-        cudaFree(d_dst);
-        cudaFree(d_w1);
-        cudaFree(d_w2);
-        
-        return node_manager_.create_terminal_node(new_id);
-    }
-    
-    // 递归步骤
-    int level1 = n1->is_terminal() ? -1 : n1->qubit_level;
-    int level2 = n2->is_terminal() ? -1 : n2->qubit_level;
-    
-    if (level1 != level2) {
-        if (level1 > level2) {
-            HDDNode* new_low = hdd_add(n1->low, w1 * n1->w_low, n2, w2);
-            HDDNode* new_high = hdd_add(n1->high, w1 * n1->w_high, n2, w2);
-            return node_manager_.get_or_create_node(level1, new_low, new_high, 1.0, 1.0);
-        } else {
-            // level2 > level1
-            HDDNode* new_low = hdd_add(n1, w1, n2->low, w2 * n2->w_low);
-            HDDNode* new_high = hdd_add(n1, w1, n2->high, w2 * n2->w_high);
-            return node_manager_.get_or_create_node(level2, new_low, new_high, 1.0, 1.0);
-        }
-    }
-    
-    // 相同层级
-    int level = level1;
-    HDDNode* new_low = hdd_add(n1->low, w1 * n1->w_low, n2->low, w2 * n2->w_low);
-    HDDNode* new_high = hdd_add(n1->high, w1 * n1->w_high, n2->high, w2 * n2->w_high);
-    
-    return node_manager_.get_or_create_node(level, new_low, new_high, 1.0, 1.0);
+                const WeightedNodePairKey key{lhs, rhs, lhs_weight, rhs_weight};
+                const auto memo_it = add_memo.find(key);
+                if (memo_it != add_memo.end()) {
+                    return memo_it->second;
+                }
+
+                HDDNode* result = nullptr;
+
+                if (std::abs(lhs_weight) < 1e-14) {
+                    if (std::abs(rhs_weight) < 1e-14) {
+                        result = scale_hdd_node(lhs, std::complex<double>(0.0, 0.0));
+                    } else {
+                        result = scale_hdd_node(rhs, rhs_weight);
+                    }
+                    add_memo.emplace(key, result);
+                    return result;
+                }
+                if (std::abs(rhs_weight) < 1e-14) {
+                    result = scale_hdd_node(lhs, lhs_weight);
+                    add_memo.emplace(key, result);
+                    return result;
+                }
+
+                if (lhs == rhs) {
+                    result = scale_hdd_node(lhs, lhs_weight + rhs_weight);
+                    add_memo.emplace(key, result);
+                    return result;
+                }
+
+                if (lhs->is_terminal() && rhs->is_terminal()) {
+                    int id1 = lhs->tensor_id;
+                    int id2 = rhs->tensor_id;
+                    const bool symbolic1 = is_symbolic_terminal_id(id1);
+                    const bool symbolic2 = is_symbolic_terminal_id(id2);
+                    const bool zero1 = id1 == shared_zero_state_id_;
+                    const bool zero2 = id2 == shared_zero_state_id_;
+                    bool force_project_symbolic_sum = false;
+
+                    if ((symbolic1 || zero1) && (symbolic2 || zero2)) {
+                        std::vector<SymbolicGaussianBranch> combined_branches;
+
+                        auto append_scaled_branches =
+                            [&](int terminal_id, std::complex<double> scale) {
+                                if (std::abs(scale) < 1e-14 || !is_symbolic_terminal_id(terminal_id)) {
+                                    return;
+                                }
+                                const SymbolicTerminalState& symbolic_state =
+                                    symbolic_terminal_states_.at(terminal_id);
+                                for (const SymbolicGaussianBranch& existing_branch : symbolic_state.branches) {
+                                    SymbolicGaussianBranch new_branch = existing_branch;
+                                    new_branch.gaussian_state_id =
+                                        duplicate_gaussian_state(existing_branch.gaussian_state_id);
+                                    new_branch.weight *= scale;
+                                    combined_branches.push_back(std::move(new_branch));
+                                }
+                            };
+
+                        append_scaled_branches(id1, lhs_weight);
+                        append_scaled_branches(id2, rhs_weight);
+
+                        if (combined_branches.empty()) {
+                            result = node_manager_.create_terminal_node(shared_zero_state_id_);
+                            add_memo.emplace(key, result);
+                            return result;
+                        }
+
+                        if (combined_branches.size() <=
+                            static_cast<size_t>(symbolic_branch_limit_)) {
+                            const int symbolic_terminal_id = allocate_symbolic_terminal_id();
+                            symbolic_terminal_states_.emplace(
+                                symbolic_terminal_id,
+                                SymbolicTerminalState{std::move(combined_branches)});
+                            result = node_manager_.create_terminal_node(symbolic_terminal_id);
+                            add_memo.emplace(key, result);
+                            return result;
+                        }
+
+                        FALLBACK_DEBUG_LOG
+                            << "[fallback] hdd_add materializing symbolic sum because combined branches would grow to "
+                            << combined_branches.size() << std::endl;
+                        free_temporary_symbolic_branches(&combined_branches);
+                        force_project_symbolic_sum = true;
+                    }
+
+                    if (force_project_symbolic_sum) {
+                        if (symbolic1) {
+                            id1 = project_symbolic_terminal(id1);
+                        }
+                        if (symbolic2) {
+                            id2 = project_symbolic_terminal(id2);
+                        }
+                    }
+
+                    if (zero1) {
+                        if (force_project_symbolic_sum) {
+                            result = scale_hdd_node(
+                                node_manager_.create_terminal_node(id2), rhs_weight);
+                        } else {
+                            result = scale_hdd_node(rhs, rhs_weight);
+                        }
+                        add_memo.emplace(key, result);
+                        return result;
+                    }
+                    if (zero2) {
+                        if (force_project_symbolic_sum) {
+                            result = scale_hdd_node(
+                                node_manager_.create_terminal_node(id1), lhs_weight);
+                        } else {
+                            result = scale_hdd_node(lhs, lhs_weight);
+                        }
+                        add_memo.emplace(key, result);
+                        return result;
+                    }
+
+                    if (symbolic1 && !force_project_symbolic_sum) {
+                        id1 = project_symbolic_terminal(id1);
+                    }
+                    if (symbolic2 && !force_project_symbolic_sum) {
+                        id2 = project_symbolic_terminal(id2);
+                    }
+
+                    if (id1 == id2) {
+                        result = scale_hdd_node(
+                            node_manager_.create_terminal_node(id1), lhs_weight + rhs_weight);
+                        add_memo.emplace(key, result);
+                        return result;
+                    }
+                    if (id1 == shared_zero_state_id_) {
+                        result = scale_hdd_node(
+                            node_manager_.create_terminal_node(id2), rhs_weight);
+                        add_memo.emplace(key, result);
+                        return result;
+                    }
+                    if (id2 == shared_zero_state_id_) {
+                        result = scale_hdd_node(
+                            node_manager_.create_terminal_node(id1), lhs_weight);
+                        add_memo.emplace(key, result);
+                        return result;
+                    }
+
+                    const int new_id = state_pool_.allocate_state();
+
+                    auto transfer_start = std::chrono::high_resolution_clock::now();
+                    const cuDoubleComplex w1_cu =
+                        make_cuDoubleComplex(lhs_weight.real(), lhs_weight.imag());
+                    const cuDoubleComplex w2_cu =
+                        make_cuDoubleComplex(rhs_weight.real(), rhs_weight.imag());
+                    auto transfer_end = std::chrono::high_resolution_clock::now();
+                    transfer_time_ += std::chrono::duration<double, std::milli>(
+                        transfer_end - transfer_start).count();
+
+                    auto compute_start = std::chrono::high_resolution_clock::now();
+                    combine_states_device(&state_pool_, id1, w1_cu, id2, w2_cu, new_id, nullptr, false);
+                    auto compute_end = std::chrono::high_resolution_clock::now();
+                    computation_time_ += std::chrono::duration<double, std::milli>(
+                        compute_end - compute_start).count();
+
+                    result = node_manager_.create_terminal_node(new_id);
+                    add_memo.emplace(key, result);
+                    return result;
+                }
+
+                const int level1 = lhs->is_terminal() ? -1 : lhs->qubit_level;
+                const int level2 = rhs->is_terminal() ? -1 : rhs->qubit_level;
+
+                if (level1 != level2) {
+                    if (level1 > level2) {
+                        result = node_manager_.get_or_create_node(
+                            level1,
+                            add_recursive(lhs->low, lhs_weight * lhs->w_low, rhs, rhs_weight),
+                            add_recursive(lhs->high, lhs_weight * lhs->w_high, rhs, rhs_weight),
+                            1.0,
+                            1.0);
+                    } else {
+                        result = node_manager_.get_or_create_node(
+                            level2,
+                            add_recursive(lhs, lhs_weight, rhs->low, rhs_weight * rhs->w_low),
+                            add_recursive(lhs, lhs_weight, rhs->high, rhs_weight * rhs->w_high),
+                            1.0,
+                            1.0);
+                    }
+                    add_memo.emplace(key, result);
+                    return result;
+                }
+
+                result = node_manager_.get_or_create_node(
+                    level1,
+                    add_recursive(lhs->low, lhs_weight * lhs->w_low, rhs->low, rhs_weight * rhs->w_low),
+                    add_recursive(lhs->high, lhs_weight * lhs->w_high, rhs->high, rhs_weight * rhs->w_high),
+                    1.0,
+                    1.0);
+                add_memo.emplace(key, result);
+                return result;
+            };
+
+    return add_recursive(n1, w1, n2, w2);
 }
 
 HDDNode* QuantumCircuit::apply_single_qubit_gate_recursive(HDDNode* node, int target_qubit, const std::vector<std::complex<double>>& u) {
     if (node->is_terminal()) {
         return node;
     }
-    
+
     if (node->qubit_level == target_qubit) {
         // 应用矩阵
         // u: [u00, u01, u10, u11]
@@ -1601,10 +2550,13 @@ QuantumCircuit::QuantumCircuit(int num_qubits, int num_qumodes, int cv_truncatio
       gaussian_state_pool_(nullptr),
       is_built_(false), is_executed_(false), shared_zero_state_id_(-1),
       total_time_(0.0), transfer_time_(0.0), computation_time_(0.0), planning_time_(0.0),
-      gaussian_symbolic_mode_limit_(4), next_symbolic_terminal_id_(-2) {
+      gaussian_symbolic_mode_limit_(4), symbolic_branch_limit_(kDefaultSymbolicBranchLimit),
+      gaussian_state_pool_capacity_override_(0),
+      next_symbolic_terminal_id_(-2),
+      pending_gc_replacements_(0) {
 
-    if (num_qubits <= 0 || num_qumodes <= 0 || cv_truncation <= 0) {
-        throw std::invalid_argument("Qubit数量、Qumode数量和截断维度必须为正数");
+    if (num_qubits < 0 || num_qumodes <= 0 || cv_truncation <= 0) {
+        throw std::invalid_argument("Qubit数量不能为负数，Qumode数量和截断维度必须为正数");
     }
 
     std::cout << "创建量子电路: " << num_qubits << " qubits, "
@@ -1632,14 +2584,16 @@ std::vector<int> QuantumCircuit::collect_symbolic_terminal_ids(HDDNode* root) co
 }
 
 bool QuantumCircuit::has_symbolic_terminals() const {
-    return !collect_symbolic_terminal_ids(root_node_).empty();
+    return !get_cached_symbolic_terminal_ids().empty();
 }
 
 void QuantumCircuit::ensure_gaussian_state_pool() {
     if (gaussian_state_pool_) {
         return;
     }
-    const int capacity = std::max(4096, state_pool_.capacity * 16);
+    const int capacity = gaussian_state_pool_capacity_override_ > 0
+        ? gaussian_state_pool_capacity_override_
+        : std::max(4096, state_pool_.capacity * 16);
     gaussian_state_pool_ = std::make_unique<GaussianStatePool>(num_qumodes_, capacity);
 }
 
@@ -1694,32 +2648,60 @@ void QuantumCircuit::apply_symplectic_update_to_gaussian_states(
 
     ensure_gaussian_state_pool();
 
-    int* d_state_ids = nullptr;
-    double* d_S = nullptr;
-    double* d_dg = nullptr;
+    size_t offset = 0;
+    offset = align_scratch_offset(offset, alignof(int));
+    const size_t state_ids_offset = offset;
+    offset += gaussian_state_ids.size() * sizeof(int);
 
-    CHECK_CUDA(cudaMalloc(&d_state_ids, gaussian_state_ids.size() * sizeof(int)));
-    CHECK_CUDA(cudaMalloc(&d_S, gate.S.size() * sizeof(double)));
-    CHECK_CUDA(cudaMalloc(&d_dg, gate.d.size() * sizeof(double)));
+    offset = align_scratch_offset(offset, alignof(double));
+    const size_t s_offset = offset;
+    offset += gate.S.size() * sizeof(double);
 
-    CHECK_CUDA(cudaMemcpy(
-        d_state_ids, gaussian_state_ids.data(),
-        gaussian_state_ids.size() * sizeof(int), cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpy(
-        d_S, gate.S.data(), gate.S.size() * sizeof(double), cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpy(
-        d_dg, gate.d.data(), gate.d.size() * sizeof(double), cudaMemcpyHostToDevice));
+    offset = align_scratch_offset(offset, alignof(double));
+    const size_t dg_offset = offset;
+    offset += gate.d.size() * sizeof(double);
+
+    const int dim = 2 * num_qumodes_;
+    offset = align_scratch_offset(offset, alignof(double));
+    const size_t old_offset = offset;
+    offset += gaussian_state_ids.size() * static_cast<size_t>(dim) * sizeof(double);
+
+    offset = align_scratch_offset(offset, alignof(double));
+    const size_t temp_offset = offset;
+    offset += gaussian_state_ids.size() * static_cast<size_t>(dim) * dim * sizeof(double);
+
+    char* scratch = static_cast<char*>(state_pool_.scratch_aux.ensure(offset));
+    int* d_state_ids = reinterpret_cast<int*>(scratch + state_ids_offset);
+    double* d_S = reinterpret_cast<double*>(scratch + s_offset);
+    double* d_dg = reinterpret_cast<double*>(scratch + dg_offset);
+    double* d_old = reinterpret_cast<double*>(scratch + old_offset);
+    double* d_temp = reinterpret_cast<double*>(scratch + temp_offset);
+
+    char* staged = static_cast<char*>(state_pool_.host_transfer_staging.ensure(dg_offset + gate.d.size() * sizeof(double)));
+    std::memcpy(staged + state_ids_offset,
+                gaussian_state_ids.data(),
+                gaussian_state_ids.size() * sizeof(int));
+    std::memcpy(staged + s_offset,
+                gate.S.data(),
+                gate.S.size() * sizeof(double));
+    std::memcpy(staged + dg_offset,
+                gate.d.data(),
+                gate.d.size() * sizeof(double));
+    CHECK_CUDA(cudaMemcpy(scratch,
+                          staged,
+                          dg_offset + gate.d.size() * sizeof(double),
+                          cudaMemcpyHostToDevice));
 
     apply_batched_symplectic_update(
         gaussian_state_pool_.get(),
         d_state_ids,
         static_cast<int>(gaussian_state_ids.size()),
         d_S,
-        d_dg);
-
-    CHECK_CUDA(cudaFree(d_state_ids));
-    CHECK_CUDA(cudaFree(d_S));
-    CHECK_CUDA(cudaFree(d_dg));
+        d_dg,
+        d_old,
+        d_temp,
+        nullptr,
+        true);
 }
 
 void QuantumCircuit::release_symbolic_terminal(int terminal_id) {
@@ -1777,6 +2759,19 @@ void QuantumCircuit::build() {
     if (is_built_) return;
 
     std::cout << "构建量子线路..." << std::endl;
+
+    async_cv_pipeline_enabled_ = !async_cv_pipeline_disabled();
+    if (async_cv_pipeline_enabled_) {
+        prewarm_async_target_upload_slots();
+    } else {
+        std::cout << "异步CV流水线已通过环境变量禁用" << std::endl;
+    }
+
+    const size_t target_id_bytes = static_cast<size_t>(state_pool_.capacity) * sizeof(int);
+    if (target_id_bytes > 0) {
+        state_pool_.scratch_target_ids.ensure(target_id_bytes);
+        state_pool_.host_transfer_staging.ensure(target_id_bytes);
+    }
 
     // 初始化HDD结构
     initialize_hdd();
@@ -2103,11 +3098,12 @@ bool QuantumCircuit::try_execute_gaussian_block_with_ede(
 
         replace_root_node(transform_gaussian_block_recursive(root_node_));
 
-        std::cout << "Gaussian EDE块级加速已启用，块门数=" << compiled_block.gates.size() << std::endl;
+        FALLBACK_DEBUG_LOG << "Gaussian EDE块级加速已启用，块门数="
+                           << compiled_block.gates.size() << std::endl;
         return true;
     } catch (const std::exception& e) {
         clear_cuda_runtime_error_state();
-        std::cout << "Gaussian EDE块回退到全量Fock执行: " << e.what() << std::endl;
+        FALLBACK_DEBUG_LOG << "Gaussian EDE块回退到全量Fock执行: " << e.what() << std::endl;
         return false;
     }
 }
@@ -2119,7 +3115,7 @@ bool QuantumCircuit::apply_gaussian_mixture_approximation_on_gpu(
         return true;
     }
 
-    const int state_dim = state_pool_.get_state_dim(state_id);
+    const int64_t state_dim = state_pool_.get_state_dim(state_id);
     if (state_dim <= 0) {
         return false;
     }
@@ -2137,10 +3133,6 @@ bool QuantumCircuit::apply_gaussian_mixture_approximation_on_gpu(
 
     int* d_single_target = nullptr;
     auto cleanup = [&]() {
-        if (d_single_target) {
-            cudaFree(d_single_target);
-            d_single_target = nullptr;
-        }
         state_pool_.free_state(accum_state_id);
         state_pool_.free_state(scratch_state_id);
     };
@@ -2148,10 +3140,18 @@ bool QuantumCircuit::apply_gaussian_mixture_approximation_on_gpu(
     try {
         state_pool_.reserve_state_storage(scratch_state_id, state_dim);
         state_pool_.reserve_state_storage(accum_state_id, state_dim);
-        zero_state_device(&state_pool_, accum_state_id);
+        zero_state_device(&state_pool_, accum_state_id, nullptr, false);
 
-        CHECK_CUDA(cudaMalloc(&d_single_target, sizeof(int)));
-        CHECK_CUDA(cudaMemcpy(d_single_target, &scratch_state_id, sizeof(int), cudaMemcpyHostToDevice));
+        d_single_target = state_pool_.upload_values_to_buffer(
+            &scratch_state_id, 1, state_pool_.scratch_target_ids);
+
+        size_t max_diagonal_ops = 0;
+        for (const GaussianMixtureBranch& branch : approximation.branches) {
+            max_diagonal_ops = std::max(max_diagonal_ops, branch.target_qumodes.size());
+        }
+        if (max_diagonal_ops > 0) {
+            state_pool_.scratch_aux.ensure(max_diagonal_ops * sizeof(FusedDiagonalOp));
+        }
 
         for (const GaussianMixtureBranch& branch : approximation.branches) {
             if (branch.gaussian_gate.num_qumodes != num_qumodes_) {
@@ -2161,29 +3161,45 @@ bool QuantumCircuit::apply_gaussian_mixture_approximation_on_gpu(
                 throw std::runtime_error("Gaussian Mixture分支target/theta长度不匹配");
             }
 
-            copy_state_device(&state_pool_, state_id, scratch_state_id);
+            copy_state_device(&state_pool_, state_id, scratch_state_id, nullptr, false);
+
+            std::vector<FusedDiagonalOp> diagonal_ops;
+            diagonal_ops.reserve(branch.target_qumodes.size());
             for (size_t idx = 0; idx < branch.target_qumodes.size(); ++idx) {
                 const double theta = branch.phase_rotation_thetas[idx];
                 if (std::abs(theta) < kDiagonalCanonicalizationTolerance) {
                     continue;
                 }
-                apply_phase_rotation_on_mode(
+                diagonal_ops.push_back(FusedDiagonalOp{
+                    compute_qumode_right_stride(state_pool_.d_trunc,
+                                                branch.target_qumodes[idx],
+                                                num_qumodes_),
+                    theta,
+                    0.0,
+                    0.0});
+            }
+            if (!diagonal_ops.empty()) {
+                apply_fused_diagonal_gates(
                     &state_pool_,
                     d_single_target,
                     1,
-                    theta,
-                    branch.target_qumodes[idx],
-                    num_qumodes_);
+                    diagonal_ops,
+                    num_qumodes_,
+                    nullptr,
+                    false);
             }
 
             axpy_state_device(
                 &state_pool_,
                 scratch_state_id,
                 accum_state_id,
-                make_cuDoubleComplex(branch.weight.real(), branch.weight.imag()));
+                make_cuDoubleComplex(branch.weight.real(), branch.weight.imag()),
+                nullptr,
+                false);
         }
 
-        copy_state_device(&state_pool_, accum_state_id, state_id);
+        copy_state_device(&state_pool_, accum_state_id, state_id, nullptr, false);
+        CHECK_CUDA(cudaDeviceSynchronize());
     } catch (...) {
         cleanup();
         throw;
@@ -2196,17 +3212,17 @@ bool QuantumCircuit::apply_gaussian_mixture_approximation_on_gpu(
 void QuantumCircuit::apply_replayable_gaussian_gate_to_state(int state_id, const GateParams& gate) {
     switch (gate.type) {
         case GateType::PHASE_ROTATION: {
-            int* d_state_id = nullptr;
-            CHECK_CUDA(cudaMalloc(&d_state_id, sizeof(int)));
-            CHECK_CUDA(cudaMemcpy(d_state_id, &state_id, sizeof(int), cudaMemcpyHostToDevice));
+            int* d_state_id = state_pool_.upload_values_to_buffer(
+                &state_id, 1, state_pool_.scratch_target_ids);
             apply_phase_rotation_on_mode(
                 &state_pool_,
                 d_state_id,
                 1,
                 gate.params[0].real(),
                 gate.target_qumodes[0],
-                num_qumodes_);
-            CHECK_CUDA(cudaFree(d_state_id));
+                num_qumodes_,
+                nullptr,
+                false);
             break;
         }
         case GateType::DISPLACEMENT:
@@ -2250,16 +3266,76 @@ void QuantumCircuit::apply_replayable_gaussian_gate_to_state(int state_id, const
 }
 
 int QuantumCircuit::project_symbolic_terminal_to_fock_state(int terminal_id) {
-    const auto it = symbolic_terminal_states_.find(terminal_id);
+    auto it = symbolic_terminal_states_.find(terminal_id);
     if (it == symbolic_terminal_states_.end()) {
         throw std::runtime_error("symbolic terminal sidecar missing during Fock materialization");
+    }
+
+    if (gaussian_state_pool_ && it->second.branches.size() > 1) {
+        std::unordered_map<std::string, size_t> unique_branch_index;
+        std::vector<SymbolicGaussianBranch> coalesced_branches;
+        coalesced_branches.reserve(it->second.branches.size());
+
+        std::vector<double> displacement;
+        std::vector<double> covariance;
+        for (SymbolicGaussianBranch& branch : it->second.branches) {
+            if (branch.gaussian_state_id < 0 ||
+                std::abs(branch.weight) < kSymbolicBranchPruneTolerance) {
+                if (branch.gaussian_state_id >= 0) {
+                    gaussian_state_pool_->free_state(branch.gaussian_state_id);
+                }
+                continue;
+            }
+
+            gaussian_state_pool_->download_state(
+                branch.gaussian_state_id, displacement, covariance);
+
+            std::string state_key;
+            state_key.resize((displacement.size() + covariance.size()) * sizeof(double));
+            std::memcpy(state_key.data(),
+                        displacement.data(),
+                        displacement.size() * sizeof(double));
+            std::memcpy(state_key.data() + displacement.size() * sizeof(double),
+                        covariance.data(),
+                        covariance.size() * sizeof(double));
+
+            const auto [dedup_it, inserted] =
+                unique_branch_index.emplace(state_key, coalesced_branches.size());
+            if (inserted) {
+                coalesced_branches.push_back(std::move(branch));
+                continue;
+            }
+
+            SymbolicGaussianBranch& canonical_branch = coalesced_branches[dedup_it->second];
+            canonical_branch.weight += branch.weight;
+            gaussian_state_pool_->free_state(branch.gaussian_state_id);
+        }
+
+        std::vector<SymbolicGaussianBranch> pruned_branches;
+        pruned_branches.reserve(coalesced_branches.size());
+        for (SymbolicGaussianBranch& branch : coalesced_branches) {
+            if (std::abs(branch.weight) < kSymbolicBranchPruneTolerance) {
+                if (branch.gaussian_state_id >= 0) {
+                    gaussian_state_pool_->free_state(branch.gaussian_state_id);
+                }
+                continue;
+            }
+            pruned_branches.push_back(std::move(branch));
+        }
+
+        if (pruned_branches.size() != it->second.branches.size()) {
+            FALLBACK_DEBUG_LOG << "[fallback] coalesced symbolic terminal " << terminal_id
+                               << " branches: " << it->second.branches.size()
+                               << " -> " << pruned_branches.size() << std::endl;
+        }
+        it->second.branches = std::move(pruned_branches);
     }
 
     if (it->second.branches.empty()) {
         return shared_zero_state_id_;
     }
 
-    const int state_dim = state_pool_.get_max_total_dim();
+    const int64_t state_dim = state_pool_.get_max_total_dim();
     const int accum_state_id = state_pool_.allocate_state();
     if (accum_state_id < 0) {
         throw std::runtime_error("symbolic->Fock materialization failed: unable to allocate accumulator");
@@ -2270,27 +3346,97 @@ int QuantumCircuit::project_symbolic_terminal_to_fock_state(int terminal_id) {
         throw std::runtime_error("symbolic->Fock materialization failed: unable to allocate scratch");
     }
 
+    FALLBACK_DEBUG_LOG << "[fallback] projecting symbolic terminal " << terminal_id
+                       << " to Fock, branches=" << it->second.branches.size() << std::endl;
+
     try {
-        initialize_vacuum_state_device(&state_pool_, accum_state_id, state_dim);
-        zero_state_device(&state_pool_, accum_state_id);
+        state_pool_.reserve_state_storage(accum_state_id, state_dim);
+        zero_state_device(&state_pool_, accum_state_id, nullptr, false);
         state_pool_.reserve_state_storage(scratch_state_id, state_dim);
 
-        for (const SymbolicGaussianBranch& branch : it->second.branches) {
+        for (size_t branch_index = 0; branch_index < it->second.branches.size(); ++branch_index) {
+            const SymbolicGaussianBranch& branch = it->second.branches[branch_index];
             if (std::abs(branch.weight) < kSymbolicBranchPruneTolerance) {
                 continue;
             }
 
-            initialize_vacuum_state_device(&state_pool_, scratch_state_id, state_dim);
-            for (const GateParams& replay_gate : branch.replay_gates) {
-                apply_replayable_gaussian_gate_to_state(scratch_state_id, replay_gate);
+            if (branch_index == 0 ||
+                branch_index + 1 == it->second.branches.size() ||
+                ((branch_index + 1) % 32 == 0)) {
+                FALLBACK_DEBUG_LOG << "[fallback] terminal " << terminal_id
+                                   << " replay branch " << (branch_index + 1)
+                                   << "/" << it->second.branches.size() << std::endl;
             }
 
+            FALLBACK_DEBUG_LOG << "[fallback] terminal " << terminal_id
+                               << " branch " << (branch_index + 1)
+                               << " reset scratch state " << scratch_state_id << std::endl;
+            initialize_vacuum_state_device(&state_pool_, scratch_state_id, state_dim, nullptr, false);
+            if (fallback_debug_logging_enabled()) {
+                CHECK_CUDA(cudaGetLastError());
+                CHECK_CUDA(cudaDeviceSynchronize());
+            }
+            for (size_t replay_gate_index = 0; replay_gate_index < branch.replay_gates.size(); ++replay_gate_index) {
+                const GateParams& replay_gate = branch.replay_gates[replay_gate_index];
+                FALLBACK_DEBUG_LOG << "[fallback] terminal " << terminal_id
+                                   << " branch " << (branch_index + 1)
+                                   << " gate " << (replay_gate_index + 1)
+                                   << "/" << branch.replay_gates.size()
+                                   << " " << gate_type_name(replay_gate.type)
+                                   << " target_qumodes=";
+                for (size_t tq_index = 0; tq_index < replay_gate.target_qumodes.size(); ++tq_index) {
+                    if (tq_index != 0) {
+                        FALLBACK_DEBUG_LOG << ",";
+                    }
+                    FALLBACK_DEBUG_LOG << replay_gate.target_qumodes[tq_index];
+                }
+                if (!replay_gate.params.empty()) {
+                    FALLBACK_DEBUG_LOG << " param0=" << replay_gate.params[0];
+                }
+                FALLBACK_DEBUG_LOG << std::endl;
+                apply_replayable_gaussian_gate_to_state(scratch_state_id, replay_gate);
+                if (fallback_debug_logging_enabled()) {
+                    CHECK_CUDA(cudaGetLastError());
+                    CHECK_CUDA(cudaDeviceSynchronize());
+                }
+                FALLBACK_DEBUG_LOG << "[fallback] terminal " << terminal_id
+                                   << " branch " << (branch_index + 1)
+                                   << " gate " << (replay_gate_index + 1)
+                                   << " complete" << std::endl;
+            }
+
+            FALLBACK_DEBUG_LOG << "[fallback] terminal " << terminal_id
+                               << " branch " << (branch_index + 1)
+                               << " accumulate into state " << accum_state_id << std::endl;
+            if (fallback_debug_logging_enabled()) {
+                FALLBACK_DEBUG_LOG << "[fallback] terminal " << terminal_id
+                                   << " accum metadata: id=" << accum_state_id
+                                   << " dim=" << state_pool_.host_state_dims[accum_state_id]
+                                   << " offset=" << state_pool_.host_state_offsets[accum_state_id]
+                                   << " capacity=" << state_pool_.host_state_capacities[accum_state_id]
+                                   << " ptr="
+                                   << static_cast<const void*>(state_pool_.get_state_ptr(accum_state_id))
+                                   << " | scratch metadata: id=" << scratch_state_id
+                                   << " dim=" << state_pool_.host_state_dims[scratch_state_id]
+                                   << " offset=" << state_pool_.host_state_offsets[scratch_state_id]
+                                   << " capacity=" << state_pool_.host_state_capacities[scratch_state_id]
+                                   << " ptr="
+                                   << static_cast<const void*>(state_pool_.get_state_ptr(scratch_state_id))
+                                   << std::endl;
+            }
             axpy_state_device(
                 &state_pool_,
                 scratch_state_id,
                 accum_state_id,
-                make_cuDoubleComplex(branch.weight.real(), branch.weight.imag()));
+                make_cuDoubleComplex(branch.weight.real(), branch.weight.imag()),
+                nullptr,
+                false);
+            if (fallback_debug_logging_enabled()) {
+                CHECK_CUDA(cudaGetLastError());
+                CHECK_CUDA(cudaDeviceSynchronize());
+            }
         }
+        CHECK_CUDA(cudaDeviceSynchronize());
     } catch (...) {
         state_pool_.free_state(scratch_state_id);
         state_pool_.free_state(accum_state_id);
@@ -2298,6 +3444,8 @@ int QuantumCircuit::project_symbolic_terminal_to_fock_state(int terminal_id) {
     }
 
     state_pool_.free_state(scratch_state_id);
+    FALLBACK_DEBUG_LOG << "[fallback] symbolic terminal " << terminal_id
+                       << " projected to Fock state " << accum_state_id << std::endl;
     return accum_state_id;
 }
 
@@ -2306,6 +3454,26 @@ bool QuantumCircuit::materialize_symbolic_terminals_to_fock() {
     if (!has_symbolic_terminals()) {
         return true;
     }
+
+    const std::vector<int> symbolic_terminal_ids = collect_symbolic_terminal_ids(root_node_);
+    if (!symbolic_terminal_ids.empty()) {
+        const size_t state_dim = static_cast<size_t>(state_pool_.get_max_total_dim());
+        if (state_dim > 0) {
+            const size_t active_storage = state_pool_.get_active_storage_elements();
+            const size_t projected_terminal_count = symbolic_terminal_ids.size();
+            if (projected_terminal_count >
+                (std::numeric_limits<size_t>::max() / state_dim) - 1) {
+                throw std::overflow_error(
+                    "symbolic->Fock materialization storage estimate overflow");
+            }
+            const size_t reserved_projection_elements =
+                (projected_terminal_count + 1) * state_dim;
+            state_pool_.reserve_total_storage_elements(
+                active_storage + reserved_projection_elements);
+        }
+    }
+    FALLBACK_DEBUG_LOG << "[fallback] materialize_symbolic_terminals_to_fock begin"
+                       << ", symbolic terminals=" << symbolic_terminal_ids.size() << std::endl;
 
     std::unordered_map<int, HDDNode*> projected_terminal_cache;
     std::function<HDDNode*(HDDNode*)> transform_recursive =
@@ -2339,6 +3507,8 @@ bool QuantumCircuit::materialize_symbolic_terminals_to_fock() {
         };
 
     replace_root_node(transform_recursive(root_node_));
+    FALLBACK_DEBUG_LOG << "[fallback] materialize_symbolic_terminals_to_fock complete"
+                       << std::endl;
     return true;
 }
 
@@ -2353,8 +3523,8 @@ bool QuantumCircuit::try_execute_diagonal_non_gaussian_block_with_mixture(
     if (!compiled_block.diagonal_mixture_ready ||
         compiled_block.diagonal_mixture_updates.size() != compiled_block.gates.size()) {
         if (!compiled_block.compile_error.empty()) {
-            std::cout << "对角非高斯块Mixture预编译失败，回退到精确Fock执行: "
-                      << compiled_block.compile_error << std::endl;
+            FALLBACK_DEBUG_LOG << "对角非高斯块Mixture预编译失败，回退到精确Fock执行: "
+                               << compiled_block.compile_error << std::endl;
         }
         return false;
     }
@@ -2415,6 +3585,28 @@ bool QuantumCircuit::try_execute_diagonal_non_gaussian_block_with_mixture(
                     if (is_symbolic_terminal_id(node->tensor_id)) {
                         const SymbolicTerminalState& symbolic_state =
                             symbolic_terminal_states_.at(node->tensor_id);
+                        std::vector<std::complex<double>> initial_branch_weights;
+                        initial_branch_weights.reserve(symbolic_state.branches.size());
+                        for (const SymbolicGaussianBranch& existing_branch : symbolic_state.branches) {
+                            initial_branch_weights.push_back(existing_branch.weight);
+                        }
+
+                        size_t projected_branch_count = symbolic_state.branches.size();
+                        size_t failing_update_index = compiled_block.diagonal_mixture_updates.size();
+                        if (symbolic_mixture_would_exceed_branch_limit(
+                                initial_branch_weights,
+                                compiled_block.diagonal_mixture_updates,
+                                static_cast<size_t>(symbolic_branch_limit_),
+                                &projected_branch_count,
+                                &failing_update_index)) {
+                            throw std::runtime_error(
+                                "symbolic mixture branch expansion would exceed limit before update " +
+                                std::to_string(failing_update_index + 1) +
+                                " (" + std::to_string(projected_branch_count) +
+                                " > " + std::to_string(symbolic_branch_limit_) +
+                                "), switching block to exact Fock");
+                        }
+
                         current_branches.reserve(symbolic_state.branches.size());
                         for (const SymbolicGaussianBranch& existing_branch : symbolic_state.branches) {
                             SymbolicGaussianBranch duplicated_branch = existing_branch;
@@ -2441,6 +3633,23 @@ bool QuantumCircuit::try_execute_diagonal_non_gaussian_block_with_mixture(
                                 std::to_string(node->tensor_id));
                         }
 
+                        const std::vector<std::complex<double>> initial_branch_weights{info.scale};
+                        size_t projected_branch_count = 1;
+                        size_t failing_update_index = compiled_block.diagonal_mixture_updates.size();
+                        if (symbolic_mixture_would_exceed_branch_limit(
+                                initial_branch_weights,
+                                compiled_block.diagonal_mixture_updates,
+                                static_cast<size_t>(symbolic_branch_limit_),
+                                &projected_branch_count,
+                                &failing_update_index)) {
+                            throw std::runtime_error(
+                                "symbolic mixture branch expansion would exceed limit before update " +
+                                std::to_string(failing_update_index + 1) +
+                                " (" + std::to_string(projected_branch_count) +
+                                " > " + std::to_string(symbolic_branch_limit_) +
+                                "), switching block to exact Fock");
+                        }
+
                         const int gaussian_state_id = gaussian_state_pool_->allocate_state();
                         if (gaussian_state_id < 0) {
                             throw std::runtime_error("Gaussian状态池已满，无法创建mixture base branch");
@@ -2454,6 +3663,9 @@ bool QuantumCircuit::try_execute_diagonal_non_gaussian_block_with_mixture(
                         for (const GaussianMixtureApproximation& approximation :
                              compiled_block.diagonal_mixture_updates) {
                             std::vector<SymbolicGaussianBranch> expanded_branches;
+                            expanded_branches.reserve(std::min(
+                                current_branches.size() * std::max<size_t>(size_t{1}, approximation.branches.size()),
+                                static_cast<size_t>(symbolic_branch_limit_)));
                             for (const SymbolicGaussianBranch& base_branch : current_branches) {
                                 for (const GaussianMixtureBranch& mixture_branch : approximation.branches) {
                                     const std::complex<double> new_weight =
@@ -2488,7 +3700,8 @@ bool QuantumCircuit::try_execute_diagonal_non_gaussian_block_with_mixture(
 
                             free_branch_states(&current_branches);
                             current_branches = std::move(expanded_branches);
-                            if (current_branches.size() > kMaxSymbolicBranchesPerTerminal) {
+                            if (current_branches.size() >
+                                static_cast<size_t>(symbolic_branch_limit_)) {
                                 free_branch_states(&current_branches);
                                 throw std::runtime_error("symbolic mixture branch count exceeded limit");
                             }
@@ -2532,16 +3745,17 @@ bool QuantumCircuit::try_execute_diagonal_non_gaussian_block_with_mixture(
             release_symbolic_terminal(terminal_id);
         }
         next_symbolic_terminal_id_ = saved_next_symbolic_terminal_id;
-        std::cout << "对角非高斯块Gaussian Mixture回退到精确Fock执行: " << e.what() << std::endl;
+        FALLBACK_DEBUG_LOG << "对角非高斯块Gaussian Mixture回退到精确Fock执行: "
+                           << e.what() << std::endl;
         return false;
     }
 
-    std::cout << "对角非高斯块Gaussian Mixture已启用，块门数="
-              << compiled_block.gates.size()
-              << "，总分支数=" << compiled_block.mixture_branch_count
-              << "，估计对角L2误差=" << compiled_block.estimated_diagonal_l2_error
-              << "，保守fidelity下界=" << compiled_block.diagonal_fidelity_lower_bound
-              << std::endl;
+    FALLBACK_DEBUG_LOG << "对角非高斯块Gaussian Mixture已启用，块门数="
+                       << compiled_block.gates.size()
+                       << "，总分支数=" << compiled_block.mixture_branch_count
+                       << "，估计对角L2误差=" << compiled_block.estimated_diagonal_l2_error
+                       << "，保守fidelity下界=" << compiled_block.diagonal_fidelity_lower_bound
+                       << std::endl;
     return true;
 }
 
@@ -2549,14 +3763,27 @@ bool QuantumCircuit::try_execute_diagonal_non_gaussian_block_with_mixture(
  * 执行量子线路
  */
 void QuantumCircuit::execute() {
+    (void)execute_range(0, std::numeric_limits<size_t>::max());
+}
+
+size_t QuantumCircuit::get_execution_block_count() const {
+    const std::vector<GateParams> execution_sequence = canonicalize_gate_sequence_for_execution();
+    return partition_execution_blocks(execution_sequence).size();
+}
+
+size_t QuantumCircuit::execute_range(size_t start_block, size_t max_blocks) {
     ScopedNvtxRange nvtx_range("qc::execute");
     if (!is_built_) {
         throw std::runtime_error("必须先构建量子线路");
     }
 
-    if (is_executed_) {
+    if (max_blocks == 0) {
+        return start_block;
+    }
+
+    if (is_executed_ && start_block == 0) {
         std::cout << "线路已执行，跳过重复执行" << std::endl;
-        return;
+        return get_execution_block_count();
     }
 
     std::cout << "执行量子线路..." << std::endl;
@@ -2582,25 +3809,44 @@ void QuantumCircuit::execute() {
     planning_time_ +=
         std::chrono::duration<double, std::milli>(planning_end - planning_start).count();
 
+    const size_t total_blocks = execution_blocks.size();
     if (execution_blocks.empty()) {
+        collect_hdd_garbage_if_needed(true);
         is_executed_ = true;
         auto end_total = std::chrono::high_resolution_clock::now();
         total_time_ = std::chrono::duration<double, std::milli>(end_total - start_total).count();
-        return;
+        return 0;
+    }
+
+    if (start_block > total_blocks) {
+        throw std::out_of_range("start_block 超出执行块范围");
+    }
+    if (start_block == total_blocks) {
+        is_executed_ = true;
+        auto end_total = std::chrono::high_resolution_clock::now();
+        total_time_ = std::chrono::duration<double, std::milli>(end_total - start_total).count();
+        return total_blocks;
     }
 
     CompiledExecutionBlock current_block =
-        compile_execution_block(execution_sequence, execution_blocks, 0);
+        compile_execution_block(execution_sequence, execution_blocks, start_block);
     planning_time_ += current_block.compile_time_ms;
 
     std::future<CompiledExecutionBlock> next_block_future;
 
-    if (execution_blocks.size() > 1) {
-        std::cout << "块级编译-执行流水线已启用，块数=" << execution_blocks.size() << std::endl;
+    if (total_blocks > 1) {
+        std::cout << "块级编译-执行流水线已启用，块数=" << total_blocks << std::endl;
     }
 
-    for (size_t block_index = 0; block_index < execution_blocks.size(); ++block_index) {
-        if (block_index + 1 < execution_blocks.size() && !next_block_future.valid()) {
+    size_t executed_blocks = 0;
+    for (size_t block_index = start_block;
+         block_index < total_blocks && executed_blocks < max_blocks;
+         ++block_index, ++executed_blocks) {
+        log_block_progress_if_requested(block_index, total_blocks);
+
+        if (block_index + 1 < total_blocks &&
+            executed_blocks + 1 < max_blocks &&
+            !next_block_future.valid()) {
             next_block_future = std::async(
                 std::launch::async,
                 [this, &execution_sequence, &execution_blocks, block_index]() {
@@ -2617,7 +3863,10 @@ void QuantumCircuit::execute() {
         }
 
         if (block_executed) {
-            if (block_index + 1 < execution_blocks.size()) {
+            synchronize_async_cv_pipeline();
+            collect_hdd_garbage_if_needed(false);
+            if (block_index + 1 < total_blocks &&
+                executed_blocks + 1 < max_blocks) {
                 current_block = next_block_future.get();
                 planning_time_ += current_block.compile_time_ms;
                 next_block_future = std::future<CompiledExecutionBlock>();
@@ -2627,7 +3876,81 @@ void QuantumCircuit::execute() {
 
         if (current_block.kind != ExecutionBlockKind::QubitOnly &&
             has_symbolic_terminals()) {
+            const auto symbolic_terminal_ids = collect_symbolic_terminal_ids(root_node_);
+            if (!symbolic_terminal_ids.empty()) {
+                const size_t state_dim = static_cast<size_t>(state_pool_.get_max_total_dim());
+                if (state_dim > 0) {
+                    const size_t active_storage = state_pool_.get_active_storage_elements();
+                    const size_t projected_terminal_count = symbolic_terminal_ids.size();
+                    if (projected_terminal_count >
+                        (std::numeric_limits<size_t>::max() / state_dim) - 1) {
+                        throw std::overflow_error(
+                            "symbolic->Fock materialization storage estimate overflow");
+                    }
+
+                    size_t extra_pairwise_elements = 0;
+                    PairwiseHybridStorageEstimate pairwise_estimate;
+                    bool pairwise_early_release_enabled = false;
+                    for (const GateParams& gate : current_block.gates) {
+                        if (!is_pairwise_hybrid_gate_type(gate.type) ||
+                            gate.target_qubits.empty()) {
+                            continue;
+                        }
+
+                        const PairwiseHybridStorageEstimate candidate =
+                            estimate_pairwise_hybrid_storage(
+                                root_node_,
+                                gate.target_qubits[0],
+                                state_dim);
+                        const size_t candidate_working_extra =
+                            pairwise_hybrid_working_extra_elements(
+                                root_node_,
+                                gate.target_qubits[0],
+                                state_dim,
+                                candidate);
+                        if (candidate_working_extra > extra_pairwise_elements) {
+                            pairwise_estimate = candidate;
+                            extra_pairwise_elements = candidate_working_extra;
+                            pairwise_early_release_enabled =
+                                candidate.extra_elements != 0 &&
+                                candidate_working_extra < candidate.extra_elements;
+                        }
+                    }
+                    if (extra_pairwise_elements != 0) {
+                        FALLBACK_DEBUG_LOG << "[fallback] block " << block_index
+                                           << " pre-reserving pairwise hybrid headroom"
+                                           << " projected_terminals=" << projected_terminal_count
+                                           << " pairwise_pairs=" << pairwise_estimate.pair_count
+                                           << " duplicate_states="
+                                           << pairwise_estimate.duplicate_state_count
+                                           << " working_extra_elements=" << extra_pairwise_elements
+                                           << " early_release="
+                                           << (pairwise_early_release_enabled ? 1 : 0)
+                                           << std::endl;
+                    }
+
+                    const size_t reserved_projection_elements =
+                        (projected_terminal_count + 1) * state_dim;
+                    size_t exact_phase_peak_elements = reserved_projection_elements;
+                    if (projected_terminal_count >
+                        std::numeric_limits<size_t>::max() / state_dim) {
+                        throw std::overflow_error(
+                            "pairwise hybrid active exact-state estimate overflow");
+                    }
+                    const size_t duplicated_gate_peak_elements =
+                        projected_terminal_count * state_dim + extra_pairwise_elements;
+                    exact_phase_peak_elements =
+                        std::max(exact_phase_peak_elements, duplicated_gate_peak_elements);
+                    state_pool_.reserve_total_storage_elements(
+                        active_storage + exact_phase_peak_elements);
+                }
+            }
+            FALLBACK_DEBUG_LOG << "[fallback] block " << block_index
+                               << " materializing symbolic terminals to exact Fock"
+                               << std::endl;
             materialize_symbolic_terminals_to_fock();
+            FALLBACK_DEBUG_LOG << "[fallback] block " << block_index
+                               << " symbolic materialization complete" << std::endl;
         }
 
         // ── Cross-mode fused diagonal optimization ──────────────────
@@ -2684,14 +4007,12 @@ void QuantumCircuit::execute() {
                 }
 
                 if (!ops_vec.empty()) {
-                    auto target_states = collect_target_states(fusable_gates[0]);
+                    const auto& target_states = get_cached_target_states();
                     if (!target_states.empty()) {
                         auto transfer_start = std::chrono::high_resolution_clock::now();
-                        const size_t ids_bytes = target_states.size() * sizeof(int);
-                        int* d_target_ids = static_cast<int*>(
-                            state_pool_.scratch_target_ids.ensure(ids_bytes));
-                        CHECK_CUDA(cudaMemcpy(d_target_ids, target_states.data(),
-                                   ids_bytes, cudaMemcpyHostToDevice));
+                        size_t upload_slot = 0;
+                        auto [d_target_ids, ids_bytes] = upload_target_states_for_compute(
+                            target_states, &upload_slot);
                         auto transfer_end = std::chrono::high_resolution_clock::now();
                         transfer_time_ += std::chrono::duration<double, std::milli>(
                             transfer_end - transfer_start).count();
@@ -2699,7 +4020,12 @@ void QuantumCircuit::execute() {
                         auto compute_start = std::chrono::high_resolution_clock::now();
                         apply_fused_diagonal_gates(&state_pool_, d_target_ids,
                                                    static_cast<int>(target_states.size()),
-                                                   ops_vec, num_qumodes_);
+                                                   ops_vec, num_qumodes_,
+                                                   async_cv_pipeline_enabled_ ? compute_stream_ : nullptr,
+                                                   !async_cv_pipeline_enabled_);
+                        if (async_cv_pipeline_enabled_) {
+                            mark_target_upload_slot_in_use(upload_slot);
+                        }
                         auto compute_end = std::chrono::high_resolution_clock::now();
                         computation_time_ += std::chrono::duration<double, std::milli>(
                             compute_end - compute_start).count();
@@ -2707,11 +4033,28 @@ void QuantumCircuit::execute() {
                 }
 
                 // Execute remaining non-fusable gates normally
-                for (const GateParams& gate : other_gates) {
+                FALLBACK_DEBUG_LOG << "[fallback] block " << block_index
+                                   << " executing exact path after fused diagonal split"
+                                   << " kind=" << static_cast<int>(current_block.kind)
+                                   << " (remaining gates=" << other_gates.size() << ")"
+                                   << std::endl;
+                for (size_t gate_index = 0; gate_index < other_gates.size(); ++gate_index) {
+                    const GateParams& gate = other_gates[gate_index];
+                    FALLBACK_DEBUG_LOG << "[fallback] block " << block_index
+                                       << " gate " << (gate_index + 1) << "/"
+                                       << other_gates.size() << " "
+                                       << gate_type_name(gate.type) << std::endl;
                     execute_gate(gate);
                 }
 
-                if (block_index + 1 < execution_blocks.size()) {
+                synchronize_async_cv_pipeline();
+                collect_hdd_garbage_if_needed(false);
+                FALLBACK_DEBUG_LOG << "[fallback] block " << block_index
+                                   << " exact path complete after fused diagonal split"
+                                   << std::endl;
+
+                if (block_index + 1 < total_blocks &&
+                    executed_blocks + 1 < max_blocks) {
                     current_block = next_block_future.get();
                     planning_time_ += current_block.compile_time_ms;
                     next_block_future = std::future<CompiledExecutionBlock>();
@@ -2721,11 +4064,26 @@ void QuantumCircuit::execute() {
         }
         // ── End fused diagonal ──────────────────────────────────────
 
-        for (const GateParams& gate : current_block.gates) {
+        FALLBACK_DEBUG_LOG << "[fallback] block " << block_index
+                           << " executing exact path with " << current_block.gates.size()
+                           << " gates"
+                           << " kind=" << static_cast<int>(current_block.kind) << std::endl;
+        for (size_t gate_index = 0; gate_index < current_block.gates.size(); ++gate_index) {
+            const GateParams& gate = current_block.gates[gate_index];
+            FALLBACK_DEBUG_LOG << "[fallback] block " << block_index
+                               << " gate " << (gate_index + 1) << "/"
+                               << current_block.gates.size() << " "
+                               << gate_type_name(gate.type) << std::endl;
             execute_gate(gate);
         }
 
-        if (block_index + 1 < execution_blocks.size()) {
+        synchronize_async_cv_pipeline();
+        collect_hdd_garbage_if_needed(false);
+        FALLBACK_DEBUG_LOG << "[fallback] block " << block_index
+                           << " exact path complete" << std::endl;
+
+        if (block_index + 1 < total_blocks &&
+            executed_blocks + 1 < max_blocks) {
             current_block = next_block_future.get();
             planning_time_ += current_block.compile_time_ms;
             next_block_future = std::future<CompiledExecutionBlock>();
@@ -2736,12 +4094,219 @@ void QuantumCircuit::execute() {
     auto end_total = std::chrono::high_resolution_clock::now();
     total_time_ = std::chrono::duration<double, std::milli>(end_total - start_total).count();
 
-    is_executed_ = true;
-    std::cout << "量子线路执行完成" << std::endl;
-    std::cout << "执行时间: " << total_time_ << " ms" << std::endl;
-    std::cout << "传输时延: " << transfer_time_ << " ms" << std::endl;
-    std::cout << "计算时延: " << computation_time_ << " ms" << std::endl;
-    std::cout << "规划时延: " << planning_time_ << " ms" << std::endl;
+    const size_t next_block_index =
+        std::min(start_block + executed_blocks, total_blocks);
+    is_executed_ = (next_block_index == total_blocks);
+    if (is_executed_) {
+        std::cout << "量子线路执行完成" << std::endl;
+        std::cout << "执行时间: " << total_time_ << " ms" << std::endl;
+        std::cout << "传输时延: " << transfer_time_ << " ms" << std::endl;
+        std::cout << "计算时延: " << computation_time_ << " ms" << std::endl;
+        std::cout << "规划时延: " << planning_time_ << " ms" << std::endl;
+    }
+    return next_block_index;
+}
+
+void QuantumCircuit::save_exact_fock_checkpoint(const std::string& path,
+                                                size_t next_block_index,
+                                                size_t total_blocks) const {
+    if (!is_built_ || !root_node_) {
+        throw std::runtime_error("无法保存checkpoint：线路未构建或根节点为空");
+    }
+    if (has_symbolic_terminals()) {
+        throw std::runtime_error("当前checkpoint仅支持exact Fock状态，不支持symbolic terminals");
+    }
+
+    std::vector<int> state_ids = collect_terminal_state_ids(root_node_);
+    if (shared_zero_state_id_ >= 0 &&
+        std::find(state_ids.begin(), state_ids.end(), shared_zero_state_id_) == state_ids.end()) {
+        state_ids.push_back(shared_zero_state_id_);
+        std::sort(state_ids.begin(), state_ids.end());
+    }
+
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (!out) {
+        throw std::runtime_error("无法打开checkpoint文件用于写入: " + path);
+    }
+
+    ExactFockCheckpointHeader header{};
+    std::memcpy(header.magic, "HCVDVCK1", sizeof(header.magic));
+    header.version = 1;
+    header.num_qubits = static_cast<uint32_t>(num_qubits_);
+    header.num_qumodes = static_cast<uint32_t>(num_qumodes_);
+    header.cv_truncation = static_cast<uint32_t>(cv_truncation_);
+    header.max_states = static_cast<uint32_t>(state_pool_.capacity);
+    header.shared_zero_state_id = shared_zero_state_id_;
+    header.next_block_index = static_cast<uint64_t>(next_block_index);
+    header.total_blocks = static_cast<uint64_t>(total_blocks);
+    header.state_count = static_cast<uint64_t>(state_ids.size());
+
+    std::vector<ExactFockCheckpointStateRecord> state_records;
+    state_records.reserve(state_ids.size());
+    std::vector<std::vector<cuDoubleComplex>> state_payloads;
+    state_payloads.reserve(state_ids.size());
+    for (int state_id : state_ids) {
+        std::vector<cuDoubleComplex> host_state;
+        state_pool_.download_state(state_id, host_state);
+        state_records.push_back(
+            ExactFockCheckpointStateRecord{state_id, static_cast<int32_t>(host_state.size())});
+        state_payloads.push_back(std::move(host_state));
+    }
+
+    std::vector<ExactFockCheckpointNodeRecord> node_records;
+    std::unordered_map<HDDNode*, uint64_t> node_indices;
+    std::function<uint64_t(HDDNode*)> serialize_node =
+        [&](HDDNode* node) -> uint64_t {
+            const auto cached = node_indices.find(node);
+            if (cached != node_indices.end()) {
+                return cached->second;
+            }
+
+            ExactFockCheckpointNodeRecord record{};
+            if (node->is_terminal()) {
+                record.is_terminal = 1;
+                record.qubit_level = -1;
+                record.tensor_id = node->tensor_id;
+            } else {
+                record.is_terminal = 0;
+                record.qubit_level = node->qubit_level;
+                record.low_index = serialize_node(node->low);
+                record.high_index = serialize_node(node->high);
+                record.w_low_real = node->w_low.real();
+                record.w_low_imag = node->w_low.imag();
+                record.w_high_real = node->w_high.real();
+                record.w_high_imag = node->w_high.imag();
+            }
+
+            const uint64_t index = static_cast<uint64_t>(node_records.size());
+            node_records.push_back(record);
+            node_indices.emplace(node, index);
+            return index;
+        };
+    header.root_index = serialize_node(root_node_);
+    header.node_count = static_cast<uint64_t>(node_records.size());
+
+    out.write(reinterpret_cast<const char*>(&header), sizeof(header));
+    for (size_t i = 0; i < state_records.size(); ++i) {
+        out.write(reinterpret_cast<const char*>(&state_records[i]), sizeof(state_records[i]));
+        const std::vector<cuDoubleComplex>& payload = state_payloads[i];
+        if (!payload.empty()) {
+            out.write(reinterpret_cast<const char*>(payload.data()),
+                      static_cast<std::streamsize>(payload.size() * sizeof(cuDoubleComplex)));
+        }
+    }
+    for (const ExactFockCheckpointNodeRecord& record : node_records) {
+        out.write(reinterpret_cast<const char*>(&record), sizeof(record));
+    }
+    if (!out) {
+        throw std::runtime_error("写入checkpoint失败: " + path);
+    }
+}
+
+size_t QuantumCircuit::load_exact_fock_checkpoint(const std::string& path, size_t* total_blocks) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        throw std::runtime_error("无法打开checkpoint文件: " + path);
+    }
+
+    ExactFockCheckpointHeader header{};
+    in.read(reinterpret_cast<char*>(&header), sizeof(header));
+    if (!in) {
+        throw std::runtime_error("读取checkpoint头失败: " + path);
+    }
+    if (std::memcmp(header.magic, "HCVDVCK1", sizeof(header.magic)) != 0 || header.version != 1) {
+        throw std::runtime_error("checkpoint格式不受支持: " + path);
+    }
+    if (header.num_qubits != static_cast<uint32_t>(num_qubits_) ||
+        header.num_qumodes != static_cast<uint32_t>(num_qumodes_) ||
+        header.cv_truncation != static_cast<uint32_t>(cv_truncation_) ||
+        header.max_states != static_cast<uint32_t>(state_pool_.capacity)) {
+        throw std::runtime_error("checkpoint配置与当前线路不匹配");
+    }
+
+    synchronize_async_cv_pipeline();
+    if (root_node_) {
+        node_manager_.release_node(root_node_);
+        root_node_ = nullptr;
+    }
+    node_manager_.clear();
+    clear_symbolic_terminals();
+    state_pool_.reset();
+    invalidate_root_caches();
+    is_executed_ = false;
+    pending_gc_replacements_ = 0;
+
+    std::unordered_map<int32_t, int32_t> state_id_map;
+    for (uint64_t state_index = 0; state_index < header.state_count; ++state_index) {
+        ExactFockCheckpointStateRecord record{};
+        in.read(reinterpret_cast<char*>(&record), sizeof(record));
+        if (!in || record.state_dim < 0) {
+            throw std::runtime_error("读取checkpoint状态元数据失败: " + path);
+        }
+
+        std::vector<cuDoubleComplex> payload(static_cast<size_t>(record.state_dim));
+        if (!payload.empty()) {
+            in.read(reinterpret_cast<char*>(payload.data()),
+                    static_cast<std::streamsize>(payload.size() * sizeof(cuDoubleComplex)));
+            if (!in) {
+                throw std::runtime_error("读取checkpoint状态数据失败: " + path);
+            }
+        }
+
+        const int new_state_id = state_pool_.allocate_state();
+        if (new_state_id < 0) {
+            throw std::runtime_error("加载checkpoint失败：状态池容量不足");
+        }
+        state_pool_.upload_state(new_state_id, payload);
+        state_id_map.emplace(record.state_id, new_state_id);
+    }
+
+    if (header.node_count == 0 || header.root_index >= header.node_count) {
+        throw std::runtime_error("checkpoint节点图无效");
+    }
+
+    std::vector<HDDNode*> rebuilt_nodes(static_cast<size_t>(header.node_count), nullptr);
+    for (uint64_t node_index = 0; node_index < header.node_count; ++node_index) {
+        ExactFockCheckpointNodeRecord record{};
+        in.read(reinterpret_cast<char*>(&record), sizeof(record));
+        if (!in) {
+            throw std::runtime_error("读取checkpoint节点失败: " + path);
+        }
+
+        if (record.is_terminal != 0) {
+            const auto mapped = state_id_map.find(record.tensor_id);
+            if (mapped == state_id_map.end()) {
+                throw std::runtime_error("checkpoint引用了未知状态ID");
+            }
+            rebuilt_nodes[static_cast<size_t>(node_index)] =
+                node_manager_.create_terminal_node(mapped->second);
+        } else {
+            if (record.low_index >= node_index || record.high_index >= node_index) {
+                throw std::runtime_error("checkpoint节点拓扑顺序无效");
+            }
+            rebuilt_nodes[static_cast<size_t>(node_index)] =
+                node_manager_.get_or_create_node(
+                    record.qubit_level,
+                    rebuilt_nodes[static_cast<size_t>(record.low_index)],
+                    rebuilt_nodes[static_cast<size_t>(record.high_index)],
+                    std::complex<double>(record.w_low_real, record.w_low_imag),
+                    std::complex<double>(record.w_high_real, record.w_high_imag));
+        }
+    }
+
+    root_node_ = rebuilt_nodes[static_cast<size_t>(header.root_index)];
+    shared_zero_state_id_ = -1;
+    if (header.shared_zero_state_id >= 0) {
+        const auto mapped = state_id_map.find(header.shared_zero_state_id);
+        if (mapped == state_id_map.end()) {
+            throw std::runtime_error("checkpoint缺少shared zero state");
+        }
+        shared_zero_state_id_ = mapped->second;
+    }
+    if (total_blocks) {
+        *total_blocks = static_cast<size_t>(header.total_blocks);
+    }
+    return static_cast<size_t>(header.next_block_index);
 }
 
 /**
@@ -2749,6 +4314,7 @@ void QuantumCircuit::execute() {
  */
 void QuantumCircuit::reset() {
     // 同步所有GPU操作，确保在重置前所有操作完成
+    release_async_cv_pipeline();
     cudaDeviceSynchronize();
     cudaError_t sync_err = cudaGetLastError();
     if (sync_err != cudaSuccess && sync_err != cudaErrorNotReady) {
@@ -2770,6 +4336,9 @@ void QuantumCircuit::reset() {
     is_built_ = false;
     is_executed_ = false;
     shared_zero_state_id_ = -1;
+    pending_gc_replacements_ = 0;
+    async_cv_pipeline_enabled_ = false;
+    invalidate_root_caches();
     
     // 重置时间统计
     total_time_ = 0.0;
@@ -2785,18 +4354,55 @@ void QuantumCircuit::set_gaussian_symbolic_mode_limit(int limit) {
     gaussian_symbolic_mode_limit_ = limit;
 }
 
+void QuantumCircuit::set_symbolic_branch_limit(int limit) {
+    if (limit <= 0) {
+        throw std::invalid_argument("symbolic branch limit must be positive");
+    }
+    symbolic_branch_limit_ = limit;
+}
+
+void QuantumCircuit::set_gaussian_state_pool_capacity(int capacity) {
+    if (capacity <= 0) {
+        throw std::invalid_argument("Gaussian state pool capacity must be positive");
+    }
+
+    const int desired_capacity = capacity;
+    if (gaussian_state_pool_ &&
+        gaussian_state_pool_->get_capacity() != desired_capacity) {
+        throw std::logic_error(
+            "Gaussian state pool capacity must be configured before the pool is initialized");
+    }
+
+    gaussian_state_pool_capacity_override_ = desired_capacity;
+}
+
 /**
  * 初始化HDD结构
  */
 void QuantumCircuit::initialize_hdd() {
     const int vacuum_state_id = state_pool_.allocate_state();
-    const int zero_state_id = state_pool_.allocate_state();
-    if (vacuum_state_id < 0 || zero_state_id < 0) {
+    if (vacuum_state_id < 0) {
         throw std::runtime_error("初始化HDD失败：无法分配初始状态");
     }
 
-    const int total_dim = state_pool_.get_max_total_dim();
+    const int64_t total_dim = state_pool_.get_max_total_dim();
     initialize_vacuum_state_device(&state_pool_, vacuum_state_id, total_dim);
+
+    // Pure CV (nq=0): no qubit branching, so skip zero_state allocation to save
+    // one full state_dim of GPU memory (critical for nm=8 where state = 68.7GB).
+    if (num_qubits_ == 0) {
+        shared_zero_state_id_ = -1;
+        HDDNode* active_branch = node_manager_.create_terminal_node(vacuum_state_id);
+        root_node_ = active_branch;
+        invalidate_root_caches();
+        return;
+    }
+
+    const int zero_state_id = state_pool_.allocate_state();
+    if (zero_state_id < 0) {
+        throw std::runtime_error("初始化HDD失败：无法分配零状态");
+    }
+
     state_pool_.reserve_state_storage(zero_state_id, total_dim);
     zero_state_device(&state_pool_, zero_state_id);
     shared_zero_state_id_ = zero_state_id;
@@ -2817,6 +4423,7 @@ void QuantumCircuit::initialize_hdd() {
     }
 
     root_node_ = active_branch;
+    invalidate_root_caches();
 }
 
 void QuantumCircuit::replace_root_node(HDDNode* new_root) {
@@ -2833,16 +4440,12 @@ void QuantumCircuit::replace_root_node(HDDNode* new_root) {
 
     HDDNode* old_root = root_node_;
     root_node_ = new_root;
+    invalidate_root_caches();
 
     if (old_root) {
         node_manager_.release_node(old_root);
     }
-
-    size_t previous_cache_size = 0;
-    do {
-        previous_cache_size = node_manager_.get_cache_size();
-        node_manager_.garbage_collect();
-    } while (node_manager_.get_cache_size() < previous_cache_size);
+    ++pending_gc_replacements_;
 
     for (int state_id : old_state_ids) {
         if (state_id == shared_zero_state_id_) {
@@ -2858,6 +4461,39 @@ void QuantumCircuit::replace_root_node(HDDNode* new_root) {
             release_symbolic_terminal(symbolic_id);
         }
     }
+
+    collect_hdd_garbage_if_needed(false);
+}
+
+void QuantumCircuit::replace_root_node_preserving_terminals(HDDNode* new_root) {
+    if (new_root == root_node_) {
+        return;
+    }
+
+    HDDNode* old_root = root_node_;
+    root_node_ = new_root;
+    invalidate_root_caches();
+
+    if (old_root) {
+        node_manager_.release_node(old_root);
+    }
+    ++pending_gc_replacements_;
+    collect_hdd_garbage_if_needed(false);
+}
+
+void QuantumCircuit::collect_hdd_garbage_if_needed(bool force) {
+    constexpr size_t kGarbageCollectReplacementInterval = 32;
+    if (!force && pending_gc_replacements_ < kGarbageCollectReplacementInterval) {
+        return;
+    }
+
+    size_t previous_cache_size = 0;
+    do {
+        previous_cache_size = node_manager_.get_cache_size();
+        node_manager_.garbage_collect();
+    } while (node_manager_.get_cache_size() < previous_cache_size);
+
+    pending_gc_replacements_ = 0;
 }
 
 /**
@@ -2877,6 +4513,7 @@ void QuantumCircuit::execute_gate(const GateParams& gate) {
         case GateType::PHASE_GATE_T:
         case GateType::CNOT:
         case GateType::CZ:
+            synchronize_async_cv_pipeline();
             execute_qubit_gate(gate);
             break;
 
@@ -2914,6 +4551,7 @@ void QuantumCircuit::execute_gate(const GateParams& gate) {
         case GateType::JAYNES_CUMMINGS:
         case GateType::ANTI_JAYNES_CUMMINGS:
         case GateType::SELECTIVE_QUBIT_ROTATION:
+            synchronize_async_cv_pipeline();
             execute_hybrid_gate(gate);
             break;
 
@@ -2927,18 +4565,30 @@ void QuantumCircuit::execute_gate(const GateParams& gate) {
  */
 void QuantumCircuit::execute_level0_gate(const GateParams& gate) {
     ScopedNvtxRange nvtx_range("qc::execute_level0_gate");
-    auto target_states = collect_target_states(gate);
+    const auto& target_states = get_cached_target_states();
 
     if (target_states.empty()) return;
 
     // 统计传输时延
     auto transfer_start = std::chrono::high_resolution_clock::now();
-    
-    // 上传状态ID到GPU (scratch buffer — no per-gate cudaMalloc)
-    const size_t ids_bytes = target_states.size() * sizeof(int);
-    int* d_target_ids = static_cast<int*>(state_pool_.scratch_target_ids.ensure(ids_bytes));
-    CHECK_CUDA(cudaMemcpy(d_target_ids, target_states.data(),
-               ids_bytes, cudaMemcpyHostToDevice));
+    const bool use_async_compute =
+        async_cv_pipeline_enabled_ &&
+        (gate.type == GateType::PHASE_ROTATION ||
+         gate.type == GateType::KERR_GATE ||
+         gate.type == GateType::CONDITIONAL_PARITY);
+    if (!use_async_compute && async_cv_pipeline_enabled_) {
+        synchronize_async_cv_pipeline();
+    }
+
+    size_t upload_slot = 0;
+    int* d_target_ids = nullptr;
+    if (use_async_compute) {
+        std::tie(d_target_ids, std::ignore) =
+            upload_target_states_for_compute(target_states, &upload_slot);
+    } else {
+        d_target_ids = state_pool_.upload_vector_to_buffer(
+            target_states, state_pool_.scratch_target_ids);
+    }
 
     auto transfer_end = std::chrono::high_resolution_clock::now();
     transfer_time_ += std::chrono::duration<double, std::milli>(transfer_end - transfer_start).count();
@@ -2952,15 +4602,21 @@ void QuantumCircuit::execute_level0_gate(const GateParams& gate) {
     switch (gate.type) {
         case GateType::PHASE_ROTATION:
             apply_phase_rotation_on_mode(&state_pool_, d_target_ids, target_states.size(), param,
-                                         target_qumode, num_qumodes_);
+                                         target_qumode, num_qumodes_,
+                                         use_async_compute ? compute_stream_ : nullptr,
+                                         !use_async_compute);
             break;
         case GateType::KERR_GATE:
             apply_kerr_gate_on_mode(&state_pool_, d_target_ids, target_states.size(), param,
-                                    target_qumode, num_qumodes_);
+                                    target_qumode, num_qumodes_,
+                                    use_async_compute ? compute_stream_ : nullptr,
+                                    !use_async_compute);
             break;
         case GateType::CONDITIONAL_PARITY:
             apply_conditional_parity_on_mode(&state_pool_, d_target_ids, target_states.size(), param,
-                                             target_qumode, num_qumodes_);
+                                             target_qumode, num_qumodes_,
+                                             use_async_compute ? compute_stream_ : nullptr,
+                                             !use_async_compute);
             break;
         case GateType::SNAP_GATE: {
             if (gate.params.size() < 2) {
@@ -2995,7 +4651,9 @@ void QuantumCircuit::execute_level0_gate(const GateParams& gate) {
 
     // 检查GPU内核执行错误
     CHECK_CUDA(cudaGetLastError());
-    CHECK_CUDA(cudaDeviceSynchronize());
+    if (use_async_compute) {
+        mark_target_upload_slot_in_use(upload_slot);
+    }
 
     auto compute_end = std::chrono::high_resolution_clock::now();
     computation_time_ += std::chrono::duration<double, std::milli>(compute_end - compute_start).count();
@@ -3006,17 +4664,21 @@ void QuantumCircuit::execute_level0_gate(const GateParams& gate) {
  */
 void QuantumCircuit::execute_level1_gate(const GateParams& gate) {
     ScopedNvtxRange nvtx_range("qc::execute_level1_gate");
-    auto target_states = collect_target_states(gate);
+    const auto& target_states = get_cached_target_states();
 
     if (target_states.empty()) return;
 
     // 统计传输时延
     auto transfer_start = std::chrono::high_resolution_clock::now();
-    
-    const size_t ids_bytes = target_states.size() * sizeof(int);
-    int* d_target_ids = static_cast<int*>(state_pool_.scratch_target_ids.ensure(ids_bytes));
-    CHECK_CUDA(cudaMemcpy(d_target_ids, target_states.data(),
-               ids_bytes, cudaMemcpyHostToDevice));
+    size_t upload_slot = 0;
+    int* d_target_ids = nullptr;
+    if (async_cv_pipeline_enabled_) {
+        std::tie(d_target_ids, std::ignore) =
+            upload_target_states_for_compute(target_states, &upload_slot);
+    } else {
+        d_target_ids = state_pool_.upload_vector_to_buffer(
+            target_states, state_pool_.scratch_target_ids);
+    }
 
     auto transfer_end = std::chrono::high_resolution_clock::now();
     transfer_time_ += std::chrono::duration<double, std::milli>(transfer_end - transfer_start).count();
@@ -3028,11 +4690,15 @@ void QuantumCircuit::execute_level1_gate(const GateParams& gate) {
     switch (gate.type) {
         case GateType::CREATION_OPERATOR:
             apply_creation_operator_on_mode(&state_pool_, d_target_ids, target_states.size(),
-                                            target_qumode, num_qumodes_);
+                                            target_qumode, num_qumodes_,
+                                            async_cv_pipeline_enabled_ ? compute_stream_ : nullptr,
+                                            !async_cv_pipeline_enabled_);
             break;
         case GateType::ANNIHILATION_OPERATOR:
             apply_annihilation_operator_on_mode(&state_pool_, d_target_ids, target_states.size(),
-                                                target_qumode, num_qumodes_);
+                                                target_qumode, num_qumodes_,
+                                                async_cv_pipeline_enabled_ ? compute_stream_ : nullptr,
+                                                !async_cv_pipeline_enabled_);
             break;
         default:
             break;
@@ -3040,7 +4706,9 @@ void QuantumCircuit::execute_level1_gate(const GateParams& gate) {
 
     // 检查GPU内核执行错误
     CHECK_CUDA(cudaGetLastError());
-    CHECK_CUDA(cudaDeviceSynchronize());
+    if (async_cv_pipeline_enabled_) {
+        mark_target_upload_slot_in_use(upload_slot);
+    }
 
     auto compute_end = std::chrono::high_resolution_clock::now();
     computation_time_ += std::chrono::duration<double, std::milli>(compute_end - compute_start).count();
@@ -3051,43 +4719,65 @@ void QuantumCircuit::execute_level1_gate(const GateParams& gate) {
  */
 void QuantumCircuit::execute_level2_gate(const GateParams& gate) {
     ScopedNvtxRange nvtx_range("qc::execute_level2_gate");
-    auto target_states = collect_target_states(gate);
+    const auto& target_states = get_cached_target_states();
 
     if (target_states.empty()) return;
 
-    // 统计传输时延
+    const int target_qumode = gate.target_qumodes.empty() ? 0 : gate.target_qumodes[0];
+    const bool displacement_uses_direct_kernel =
+        gate.type == GateType::DISPLACEMENT &&
+        num_qumodes_ == 1 &&
+        target_qumode == 0;
+    const bool use_async_compute =
+        async_cv_pipeline_enabled_ &&
+        ((gate.type == GateType::SQUEEZING && !gate.params.empty()) ||
+         (gate.type == GateType::DISPLACEMENT &&
+          !gate.params.empty() &&
+          displacement_uses_direct_kernel));
+    const bool needs_target_upload =
+        gate.type != GateType::DISPLACEMENT || displacement_uses_direct_kernel;
+    if (!use_async_compute && async_cv_pipeline_enabled_) {
+        synchronize_async_cv_pipeline();
+    }
+
     auto transfer_start = std::chrono::high_resolution_clock::now();
-    
-    const size_t ids_bytes = target_states.size() * sizeof(int);
-    int* d_target_ids = static_cast<int*>(state_pool_.scratch_target_ids.ensure(ids_bytes));
-    CHECK_CUDA(cudaMemcpy(d_target_ids, target_states.data(),
-               ids_bytes, cudaMemcpyHostToDevice));
+    size_t upload_slot = 0;
+    int* d_target_ids = nullptr;
+    if (use_async_compute) {
+        std::tie(d_target_ids, std::ignore) =
+            upload_target_states_for_compute(target_states, &upload_slot);
+    } else if (needs_target_upload) {
+        d_target_ids = state_pool_.upload_vector_to_buffer(
+            target_states, state_pool_.scratch_target_ids);
+    }
 
     auto transfer_end = std::chrono::high_resolution_clock::now();
     transfer_time_ += std::chrono::duration<double, std::milli>(transfer_end - transfer_start).count();
 
     if (gate.type == GateType::DISPLACEMENT && !gate.params.empty()) {
         cuDoubleComplex alpha = make_cuDoubleComplex(gate.params[0].real(), gate.params[0].imag());
-        const int target_qumode = gate.target_qumodes.empty() ? 0 : gate.target_qumodes[0];
-        
-        // 统计计算时延
         auto compute_start = std::chrono::high_resolution_clock::now();
 
-        if (num_qumodes_ > 1 || target_qumode != 0) {
+        if (use_async_compute) {
+            apply_displacement_gate(&state_pool_,
+                                    d_target_ids,
+                                    target_states.size(),
+                                    alpha,
+                                    compute_stream_,
+                                    false);
+        } else {
             apply_controlled_displacement_on_mode(
                 &state_pool_, target_states, alpha, target_qumode, num_qumodes_);
-        } else {
-            apply_displacement_gate(&state_pool_, d_target_ids, target_states.size(), alpha);
         }
-        
-        // 检查GPU内核执行错误
+
         CHECK_CUDA(cudaGetLastError());
-        CHECK_CUDA(cudaDeviceSynchronize());
-        
+        if (use_async_compute) {
+            mark_target_upload_slot_in_use(upload_slot);
+        }
+
         auto compute_end = std::chrono::high_resolution_clock::now();
         computation_time_ += std::chrono::duration<double, std::milli>(compute_end - compute_start).count();
     } else if (gate.type == GateType::SQUEEZING && !gate.params.empty()) {
-        const int target_qumode = gate.target_qumodes.empty() ? 0 : gate.target_qumodes[0];
         auto compute_start = std::chrono::high_resolution_clock::now();
 
         apply_squeezing_gate_gpu(&state_pool_,
@@ -3096,10 +4786,14 @@ void QuantumCircuit::execute_level2_gate(const GateParams& gate) {
                                  std::abs(gate.params[0]),
                                  std::arg(gate.params[0]),
                                  target_qumode,
-                                 num_qumodes_);
+                                 num_qumodes_,
+                                 use_async_compute ? compute_stream_ : nullptr,
+                                 !use_async_compute);
 
         CHECK_CUDA(cudaGetLastError());
-        CHECK_CUDA(cudaDeviceSynchronize());
+        if (use_async_compute) {
+            mark_target_upload_slot_in_use(upload_slot);
+        }
 
         auto compute_end = std::chrono::high_resolution_clock::now();
         computation_time_ += std::chrono::duration<double, std::milli>(compute_end - compute_start).count();
@@ -3116,7 +4810,8 @@ void QuantumCircuit::execute_level2_gate(const GateParams& gate) {
             // 统计计算时延
             auto compute_start = std::chrono::high_resolution_clock::now();
             
-            apply_single_mode_gate(&state_pool_, ell_op, d_target_ids, target_states.size());
+            apply_single_mode_gate(&state_pool_, ell_op, d_target_ids, target_states.size(),
+                                   nullptr, true);
             
             // 检查GPU内核执行错误
             cudaError_t err = cudaGetLastError();
@@ -3124,10 +4819,7 @@ void QuantumCircuit::execute_level2_gate(const GateParams& gate) {
                 delete ell_op;
                 throw std::runtime_error("GPU单模门执行失败: " + std::string(cudaGetErrorString(err)));
             }
-            
-            // 在删除ELL操作符之前，确保GPU操作完成
-            CHECK_CUDA(cudaDeviceSynchronize());
-            
+
             auto compute_end = std::chrono::high_resolution_clock::now();
             computation_time_ += std::chrono::duration<double, std::milli>(compute_end - compute_start).count();
             
@@ -3145,17 +4837,21 @@ void QuantumCircuit::execute_level2_gate(const GateParams& gate) {
  */
 void QuantumCircuit::execute_level3_gate(const GateParams& gate) {
     ScopedNvtxRange nvtx_range("qc::execute_level3_gate");
-    auto target_states = collect_target_states(gate);
+    const auto& target_states = get_cached_target_states();
 
     if (target_states.empty()) return;
 
     // 统计传输时延
     auto transfer_start = std::chrono::high_resolution_clock::now();
-    
-    const size_t ids_bytes = target_states.size() * sizeof(int);
-    int* d_target_ids = static_cast<int*>(state_pool_.scratch_target_ids.ensure(ids_bytes));
-    CHECK_CUDA(cudaMemcpy(d_target_ids, target_states.data(),
-               ids_bytes, cudaMemcpyHostToDevice));
+    size_t upload_slot = 0;
+    int* d_target_ids = nullptr;
+    if (async_cv_pipeline_enabled_) {
+        std::tie(d_target_ids, std::ignore) =
+            upload_target_states_for_compute(target_states, &upload_slot);
+    } else {
+        d_target_ids = state_pool_.upload_vector_to_buffer(
+            target_states, state_pool_.scratch_target_ids);
+    }
 
     auto transfer_end = std::chrono::high_resolution_clock::now();
     transfer_time_ += std::chrono::duration<double, std::milli>(transfer_end - transfer_start).count();
@@ -3170,11 +4866,15 @@ void QuantumCircuit::execute_level3_gate(const GateParams& gate) {
         auto compute_start = std::chrono::high_resolution_clock::now();
 
         apply_beam_splitter_recursive(&state_pool_, d_target_ids, static_cast<int>(target_states.size()),
-                                      theta, phi, target_qumode1, target_qumode2, num_qumodes_);
+                                      theta, phi, target_qumode1, target_qumode2, num_qumodes_,
+                                      async_cv_pipeline_enabled_ ? compute_stream_ : nullptr,
+                                      !async_cv_pipeline_enabled_);
 
         // 检查GPU内核执行错误
         CHECK_CUDA(cudaGetLastError());
-        CHECK_CUDA(cudaDeviceSynchronize());
+        if (async_cv_pipeline_enabled_) {
+            mark_target_upload_slot_in_use(upload_slot);
+        }
 
         auto compute_end = std::chrono::high_resolution_clock::now();
         computation_time_ += std::chrono::duration<double, std::milli>(compute_end - compute_start).count();
@@ -3202,26 +4902,134 @@ void QuantumCircuit::execute_qubit_gate(const GateParams& gate) {
         throw std::runtime_error("目标Qubit索引超出范围");
     }
 
+    auto build_single_qubit_transform =
+        [&](HDDNode* root,
+            int single_target,
+            const std::vector<std::complex<double>>& matrix) -> HDDNode* {
+            std::unordered_map<HDDNode*, HDDNode*> memo;
+            std::function<HDDNode*(HDDNode*)> transform =
+                [&](HDDNode* node) -> HDDNode* {
+                    if (!node || node->is_terminal()) {
+                        return node;
+                    }
+
+                    const auto memo_it = memo.find(node);
+                    if (memo_it != memo.end()) {
+                        return memo_it->second;
+                    }
+
+                    HDDNode* transformed = nullptr;
+                    if (node->qubit_level == single_target) {
+                        HDDNode* low = node->low;
+                        HDDNode* high = node->high;
+                        transformed = node_manager_.get_or_create_node(
+                            node->qubit_level,
+                            hdd_add(low, matrix[0] * node->w_low, high, matrix[1] * node->w_high),
+                            hdd_add(low, matrix[2] * node->w_low, high, matrix[3] * node->w_high),
+                            1.0,
+                            1.0);
+                    } else if (node->qubit_level > single_target) {
+                        transformed = node_manager_.get_or_create_node(
+                            node->qubit_level,
+                            transform(node->low),
+                            transform(node->high),
+                            node->w_low,
+                            node->w_high);
+                    } else {
+                        transformed = node;
+                    }
+
+                    memo.emplace(node, transformed);
+                    return transformed;
+                };
+            return transform(root);
+        };
+
+    auto build_monomial_single_qubit_transform =
+        [&](HDDNode* root,
+            int single_target,
+            const std::vector<std::complex<double>>& matrix) -> HDDNode* {
+            constexpr double kMatrixTolerance = 1e-14;
+            const bool diagonal =
+                std::abs(matrix[1]) < kMatrixTolerance &&
+                std::abs(matrix[2]) < kMatrixTolerance;
+            const bool anti_diagonal =
+                std::abs(matrix[0]) < kMatrixTolerance &&
+                std::abs(matrix[3]) < kMatrixTolerance;
+            if (!diagonal && !anti_diagonal) {
+                throw std::invalid_argument("monomial qubit transform requires diagonal or anti-diagonal matrix");
+            }
+
+            std::unordered_map<HDDNode*, HDDNode*> memo;
+            std::function<HDDNode*(HDDNode*)> transform =
+                [&](HDDNode* node) -> HDDNode* {
+                    if (!node || node->is_terminal()) {
+                        return node;
+                    }
+
+                    const auto memo_it = memo.find(node);
+                    if (memo_it != memo.end()) {
+                        return memo_it->second;
+                    }
+
+                    HDDNode* transformed = nullptr;
+                    if (node->qubit_level == single_target) {
+                        if (diagonal) {
+                            transformed = node_manager_.get_or_create_node(
+                                node->qubit_level,
+                                node->low,
+                                node->high,
+                                matrix[0] * node->w_low,
+                                matrix[3] * node->w_high);
+                        } else {
+                            transformed = node_manager_.get_or_create_node(
+                                node->qubit_level,
+                                node->high,
+                                node->low,
+                                matrix[1] * node->w_high,
+                                matrix[2] * node->w_low);
+                        }
+                    } else if (node->qubit_level > single_target) {
+                        transformed = node_manager_.get_or_create_node(
+                            node->qubit_level,
+                            transform(node->low),
+                            transform(node->high),
+                            node->w_low,
+                            node->w_high);
+                    } else {
+                        transformed = node;
+                    }
+
+                    memo.emplace(node, transformed);
+                    return transformed;
+                };
+            return transform(root);
+        };
+
     // 构造对应的单比特门矩阵U
     std::vector<std::complex<double>> u(4, std::complex<double>(0.0, 0.0));
+    bool use_monomial_single_qubit_transform = false;
 
     switch (gate.type) {
         case GateType::PAULI_X: {
             // X = [[0, 1], [1, 0]]
             u[1] = 1.0;  // (0,1)
             u[2] = 1.0;  // (1,0)
+            use_monomial_single_qubit_transform = true;
             break;
         }
         case GateType::PAULI_Y: {
             // Y = [[0, -i], [i, 0]]
             u[1] = std::complex<double>(0.0, -1.0);  // (0,1)
             u[2] = std::complex<double>(0.0, 1.0);   // (1,0)
+            use_monomial_single_qubit_transform = true;
             break;
         }
         case GateType::PAULI_Z: {
             // Z = [[1, 0], [0, -1]]
             u[0] = 1.0;   // (0,0)
             u[3] = -1.0;  // (1,1)
+            use_monomial_single_qubit_transform = true;
             break;
         }
         case GateType::HADAMARD: {
@@ -3272,46 +5080,133 @@ void QuantumCircuit::execute_qubit_gate(const GateParams& gate) {
             // = [[e^(-iθ/2), 0], [0, e^(iθ/2)]]
             u[0] = std::complex<double>(cos_half, -sin_half); // (0,0)
             u[3] = std::complex<double>(cos_half, sin_half);  // (1,1)
+            use_monomial_single_qubit_transform = true;
             break;
         }
         case GateType::PHASE_GATE_S: {
             // S = [[1, 0], [0, i]]
             u[0] = 1.0;  // (0,0)
             u[3] = std::complex<double>(0.0, 1.0); // (1,1)
+            use_monomial_single_qubit_transform = true;
             break;
         }
         case GateType::PHASE_GATE_T: {
             // T = [[1, 0], [0, e^(iπ/4)]]
             u[0] = 1.0;  // (0,0)
             u[3] = std::complex<double>(std::cos(M_PI/4.0), std::sin(M_PI/4.0)); // (1,1)
+            use_monomial_single_qubit_transform = true;
             break;
         }
         case GateType::CNOT: {
-            // CNOT是双比特门，需要控制位和目标位
             if (gate.target_qubits.size() < 2) {
                 throw std::runtime_error("CNOT门需要控制位和目标位");
             }
-            int control = gate.target_qubits[0];
-            int target = gate.target_qubits[1];
-            replace_root_node(apply_cnot_recursive(root_node_, control, target));
-            return;  // CNOT特殊处理，不走单比特门逻辑
+            const int control = gate.target_qubits[0];
+            const int target = gate.target_qubits[1];
+            const std::vector<std::complex<double>> px = {0.0, 1.0, 1.0, 0.0};
+
+            std::unordered_map<HDDNode*, HDDNode*> control_memo;
+            HDDNode* new_root = nullptr;
+            std::function<HDDNode*(HDDNode*)> transform =
+                [&](HDDNode* node) -> HDDNode* {
+                    if (!node || node->is_terminal()) {
+                        return node;
+                    }
+
+                    const auto memo_it = control_memo.find(node);
+                    if (memo_it != control_memo.end()) {
+                        return memo_it->second;
+                    }
+
+                    HDDNode* transformed = nullptr;
+                    if (node->qubit_level == control) {
+                        transformed = node_manager_.get_or_create_node(
+                            node->qubit_level,
+                            node->low,
+                            build_monomial_single_qubit_transform(node->high, target, px),
+                            node->w_low,
+                            node->w_high);
+                    } else if (node->qubit_level > control) {
+                        transformed = node_manager_.get_or_create_node(
+                            node->qubit_level,
+                            transform(node->low),
+                            transform(node->high),
+                            node->w_low,
+                            node->w_high);
+                    } else {
+                        transformed = node;
+                    }
+
+                    control_memo.emplace(node, transformed);
+                    return transformed;
+                };
+
+            new_root = transform(root_node_);
+            replace_root_node_preserving_terminals(new_root);
+            return;
         }
         case GateType::CZ: {
-            // CZ也是双比特门
             if (gate.target_qubits.size() < 2) {
                 throw std::runtime_error("CZ门需要控制位和目标位");
             }
-            int control = gate.target_qubits[0];
-            int target = gate.target_qubits[1];
-            replace_root_node(apply_cz_recursive(root_node_, control, target));
-            return;  // CZ特殊处理
+            const int control = gate.target_qubits[0];
+            const int target = gate.target_qubits[1];
+            const std::vector<std::complex<double>> pz = {1.0, 0.0, 0.0, -1.0};
+
+            std::unordered_map<HDDNode*, HDDNode*> control_memo;
+            HDDNode* new_root = nullptr;
+            std::function<HDDNode*(HDDNode*)> transform =
+                [&](HDDNode* node) -> HDDNode* {
+                    if (!node || node->is_terminal()) {
+                        return node;
+                    }
+
+                    const auto memo_it = control_memo.find(node);
+                    if (memo_it != control_memo.end()) {
+                        return memo_it->second;
+                    }
+
+                    HDDNode* transformed = nullptr;
+                    if (node->qubit_level == control) {
+                        transformed = node_manager_.get_or_create_node(
+                            node->qubit_level,
+                            node->low,
+                            build_monomial_single_qubit_transform(node->high, target, pz),
+                            node->w_low,
+                            node->w_high);
+                    } else if (node->qubit_level > control) {
+                        transformed = node_manager_.get_or_create_node(
+                            node->qubit_level,
+                            transform(node->low),
+                            transform(node->high),
+                            node->w_low,
+                            node->w_high);
+                    } else {
+                        transformed = node;
+                    }
+
+                    control_memo.emplace(node, transformed);
+                    return transformed;
+                };
+
+            new_root = transform(root_node_);
+            replace_root_node_preserving_terminals(new_root);
+            return;
         }
         default:
             throw std::runtime_error("不支持的Qubit门类型");
     }
 
-    // 应用单比特门到HDD
-    replace_root_node(apply_single_qubit_gate_recursive(root_node_, target_qubit, u));
+    HDDNode* new_root = use_monomial_single_qubit_transform
+        ? build_monomial_single_qubit_transform(root_node_, target_qubit, u)
+        : build_single_qubit_transform(root_node_, target_qubit, u);
+    if (use_monomial_single_qubit_transform) {
+        replace_root_node_preserving_terminals(new_root);
+        return;
+    }
+
+    CHECK_CUDA(cudaDeviceSynchronize());
+    replace_root_node(new_root);
 }
 
 /**
@@ -3405,7 +5300,52 @@ void QuantumCircuit::execute_conditional_displacement(const GateParams& gate) {
     int target_qumode = gate.target_qumodes[0];
     std::complex<double> alpha = gate.params.empty() ? std::complex<double>(0.0, 0.0) : gate.params[0];
 
-    replace_root_node(apply_conditional_displacement_recursive(root_node_, control_qubit, target_qumode, alpha));
+    std::unordered_map<NodeSignKey, HDDNode*, NodeSignKeyHash> memo;
+    std::function<HDDNode*(HDDNode*, bool)> transform =
+        [&](HDDNode* node, bool negated) -> HDDNode* {
+            if (!node) {
+                return nullptr;
+            }
+
+            const NodeSignKey key{node, negated};
+            const auto memo_it = memo.find(key);
+            if (memo_it != memo.end()) {
+                return memo_it->second;
+            }
+
+            HDDNode* result = nullptr;
+            if (node->is_terminal()) {
+                if (std::abs(alpha) < 1e-14) {
+                    result = node;
+                } else {
+                    const std::complex<double> effective_alpha = negated ? -alpha : alpha;
+                    const int duplicated_state = state_pool_.duplicate_state(node->tensor_id);
+                    if (duplicated_state < 0) {
+                        throw std::runtime_error("条件位移失败：无法复制终端状态");
+                    }
+
+                    apply_displacement_to_state(duplicated_state, effective_alpha, target_qumode);
+                    result = node_manager_.create_terminal_node(duplicated_state);
+                }
+            } else if (node->qubit_level == control_qubit) {
+                HDDNode* low_branch = transform(node->low, negated);
+                HDDNode* high_branch = transform(node->high, !negated);
+                result = node_manager_.get_or_create_node(
+                    node->qubit_level, low_branch, high_branch, node->w_low, node->w_high);
+            } else if (node->qubit_level > control_qubit) {
+                HDDNode* new_low = transform(node->low, negated);
+                HDDNode* new_high = transform(node->high, negated);
+                result = node_manager_.get_or_create_node(
+                    node->qubit_level, new_low, new_high, node->w_low, node->w_high);
+            } else {
+                result = node;
+            }
+
+            memo.emplace(key, result);
+            return result;
+        };
+
+    replace_root_node(transform(root_node_, false));
 }
 
 /**
@@ -3467,9 +5407,7 @@ void QuantumCircuit::apply_displacement_to_state(
     std::vector<int> target_states{state_id};
     apply_controlled_displacement_on_mode(
         &state_pool_, target_states, alpha_cu, target_qumode, num_qumodes_);
-    
-    CHECK_CUDA(cudaDeviceSynchronize());
-    
+
     auto compute_end = std::chrono::high_resolution_clock::now();
     computation_time_ += std::chrono::duration<double, std::milli>(compute_end - compute_start).count();
 }
@@ -3484,8 +5422,52 @@ void QuantumCircuit::execute_conditional_squeezing(const GateParams& gate) {
     int target_qumode = gate.target_qumodes[0];
     std::complex<double> xi = gate.params.empty() ? std::complex<double>(0.0, 0.0) : gate.params[0];
 
-    // 递归遍历HDD，为每个分支应用相应的挤压
-    replace_root_node(apply_conditional_squeezing_recursive(root_node_, control_qubit, target_qumode, xi));
+    std::unordered_map<NodeSignKey, HDDNode*, NodeSignKeyHash> memo;
+    std::function<HDDNode*(HDDNode*, bool)> transform =
+        [&](HDDNode* node, bool negated) -> HDDNode* {
+            if (!node) {
+                return nullptr;
+            }
+
+            const NodeSignKey key{node, negated};
+            const auto memo_it = memo.find(key);
+            if (memo_it != memo.end()) {
+                return memo_it->second;
+            }
+
+            HDDNode* result = nullptr;
+            if (node->is_terminal()) {
+                if (std::abs(xi) < 1e-14) {
+                    result = node;
+                } else {
+                    const std::complex<double> effective_xi = negated ? -xi : xi;
+                    const int duplicated_state = state_pool_.duplicate_state(node->tensor_id);
+                    if (duplicated_state < 0) {
+                        throw std::runtime_error("条件挤压失败：无法复制终端状态");
+                    }
+
+                    apply_squeezing_to_state(duplicated_state, effective_xi, target_qumode);
+                    result = node_manager_.create_terminal_node(duplicated_state);
+                }
+            } else if (node->qubit_level == control_qubit) {
+                HDDNode* low_branch = transform(node->low, negated);
+                HDDNode* high_branch = transform(node->high, !negated);
+                result = node_manager_.get_or_create_node(
+                    node->qubit_level, low_branch, high_branch, node->w_low, node->w_high);
+            } else if (node->qubit_level > control_qubit) {
+                HDDNode* new_low = transform(node->low, negated);
+                HDDNode* new_high = transform(node->high, negated);
+                result = node_manager_.get_or_create_node(
+                    node->qubit_level, new_low, new_high, node->w_low, node->w_high);
+            } else {
+                result = node;
+            }
+
+            memo.emplace(key, result);
+            return result;
+        };
+
+    replace_root_node(transform(root_node_, false));
 }
 
 /**
@@ -3537,9 +5519,8 @@ HDDNode* QuantumCircuit::apply_conditional_squeezing_recursive(
 void QuantumCircuit::apply_squeezing_to_state(int state_id, std::complex<double> xi, int target_qumode) {
     auto transfer_start = std::chrono::high_resolution_clock::now();
 
-    int* d_state_id = nullptr;
-    CHECK_CUDA(cudaMalloc(&d_state_id, sizeof(int)));
-    CHECK_CUDA(cudaMemcpy(d_state_id, &state_id, sizeof(int), cudaMemcpyHostToDevice));
+    int* d_state_id = state_pool_.upload_values_to_buffer(
+        &state_id, 1, state_pool_.scratch_target_ids);
 
     auto transfer_end = std::chrono::high_resolution_clock::now();
     transfer_time_ += std::chrono::duration<double, std::milli>(transfer_end - transfer_start).count();
@@ -3552,16 +5533,11 @@ void QuantumCircuit::apply_squeezing_to_state(int state_id, std::complex<double>
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        cudaFree(d_state_id);
         throw std::runtime_error("GPU挤压门执行失败: " + std::string(cudaGetErrorString(err)));
     }
 
-    CHECK_CUDA(cudaDeviceSynchronize());
-
     auto compute_end = std::chrono::high_resolution_clock::now();
     computation_time_ += std::chrono::duration<double, std::milli>(compute_end - compute_start).count();
-
-    CHECK_CUDA(cudaFree(d_state_id));
 }
 
 /**
@@ -3576,8 +5552,53 @@ void QuantumCircuit::execute_conditional_beam_splitter(const GateParams& gate) {
     double theta = gate.params.size() > 0 ? gate.params[0].real() : 0.0;
     double phi = gate.params.size() > 1 ? gate.params[1].real() : 0.0;
 
-    // 递归遍历HDD，为每个分支应用相应的光束分裂器
-    replace_root_node(apply_conditional_beam_splitter_recursive(root_node_, control_qubit, target_qumode1, target_qumode2, theta, phi));
+    std::unordered_map<NodeSignKey, HDDNode*, NodeSignKeyHash> memo;
+    std::function<HDDNode*(HDDNode*, bool)> transform =
+        [&](HDDNode* node, bool negated) -> HDDNode* {
+            if (!node) {
+                return nullptr;
+            }
+
+            const NodeSignKey key{node, negated};
+            const auto memo_it = memo.find(key);
+            if (memo_it != memo.end()) {
+                return memo_it->second;
+            }
+
+            HDDNode* result = nullptr;
+            if (node->is_terminal()) {
+                if (std::abs(theta) < 1e-14) {
+                    result = node;
+                } else {
+                    const double effective_theta = negated ? -theta : theta;
+                    const int duplicated_state = state_pool_.duplicate_state(node->tensor_id);
+                    if (duplicated_state < 0) {
+                        throw std::runtime_error("条件光束分裂失败：无法复制终端状态");
+                    }
+
+                    apply_beam_splitter_to_state(
+                        duplicated_state, effective_theta, phi, target_qumode1, target_qumode2);
+                    result = node_manager_.create_terminal_node(duplicated_state);
+                }
+            } else if (node->qubit_level == control_qubit) {
+                HDDNode* low_branch = transform(node->low, negated);
+                HDDNode* high_branch = transform(node->high, !negated);
+                result = node_manager_.get_or_create_node(
+                    node->qubit_level, low_branch, high_branch, node->w_low, node->w_high);
+            } else if (node->qubit_level > control_qubit) {
+                HDDNode* new_low = transform(node->low, negated);
+                HDDNode* new_high = transform(node->high, negated);
+                result = node_manager_.get_or_create_node(
+                    node->qubit_level, new_low, new_high, node->w_low, node->w_high);
+            } else {
+                result = node;
+            }
+
+            memo.emplace(key, result);
+            return result;
+        };
+
+    replace_root_node(transform(root_node_, false));
 }
 
 /**
@@ -3629,14 +5650,11 @@ HDDNode* QuantumCircuit::apply_conditional_beam_splitter_recursive(
 void QuantumCircuit::apply_beam_splitter_to_state(int state_id, double theta, double phi,
                                                   int qumode1, int qumode2) {
     // 调用GPU光束分裂器内核
-    int* d_state_id = nullptr;
-    CHECK_CUDA(cudaMalloc(&d_state_id, sizeof(int)));
-    CHECK_CUDA(cudaMemcpy(d_state_id, &state_id, sizeof(int), cudaMemcpyHostToDevice));
+    int* d_state_id = state_pool_.upload_values_to_buffer(
+        &state_id, 1, state_pool_.scratch_target_ids);
 
     apply_beam_splitter_recursive(&state_pool_, d_state_id, 1, theta, phi,
                                   qumode1, qumode2, num_qumodes_);
-
-    CHECK_CUDA(cudaFree(d_state_id));
 }
 
 /**
@@ -3650,8 +5668,53 @@ void QuantumCircuit::execute_conditional_two_mode_squeezing(const GateParams& ga
     int target_qumode2 = gate.target_qumodes[1];
     std::complex<double> xi = gate.params.empty() ? std::complex<double>(0.0, 0.0) : gate.params[0];
 
-    // 递归遍历HDD
-    replace_root_node(apply_conditional_two_mode_squeezing_recursive(root_node_, control_qubit, target_qumode1, target_qumode2, xi));
+    std::unordered_map<NodeSignKey, HDDNode*, NodeSignKeyHash> memo;
+    std::function<HDDNode*(HDDNode*, bool)> transform =
+        [&](HDDNode* node, bool negated) -> HDDNode* {
+            if (!node) {
+                return nullptr;
+            }
+
+            const NodeSignKey key{node, negated};
+            const auto memo_it = memo.find(key);
+            if (memo_it != memo.end()) {
+                return memo_it->second;
+            }
+
+            HDDNode* result = nullptr;
+            if (node->is_terminal()) {
+                if (std::abs(xi) < 1e-14) {
+                    result = node;
+                } else {
+                    const std::complex<double> effective_xi = negated ? -xi : xi;
+                    const int duplicated_state = state_pool_.duplicate_state(node->tensor_id);
+                    if (duplicated_state < 0) {
+                        throw std::runtime_error("条件双模挤压失败：无法复制终端状态");
+                    }
+
+                    apply_two_mode_squeezing_to_state(
+                        duplicated_state, target_qumode1, target_qumode2, effective_xi);
+                    result = node_manager_.create_terminal_node(duplicated_state);
+                }
+            } else if (node->qubit_level == control_qubit) {
+                HDDNode* low_branch = transform(node->low, negated);
+                HDDNode* high_branch = transform(node->high, !negated);
+                result = node_manager_.get_or_create_node(
+                    node->qubit_level, low_branch, high_branch, node->w_low, node->w_high);
+            } else if (node->qubit_level > control_qubit) {
+                HDDNode* new_low = transform(node->low, negated);
+                HDDNode* new_high = transform(node->high, negated);
+                result = node_manager_.get_or_create_node(
+                    node->qubit_level, new_low, new_high, node->w_low, node->w_high);
+            } else {
+                result = node;
+            }
+
+            memo.emplace(key, result);
+            return result;
+        };
+
+    replace_root_node(transform(root_node_, false));
 }
 
 /**
@@ -3707,9 +5770,8 @@ void QuantumCircuit::apply_two_mode_squeezing_to_state(
 
     auto transfer_start = std::chrono::high_resolution_clock::now();
 
-    int* d_state_id = nullptr;
-    CHECK_CUDA(cudaMalloc(&d_state_id, sizeof(int)));
-    CHECK_CUDA(cudaMemcpy(d_state_id, &state_id, sizeof(int), cudaMemcpyHostToDevice));
+    int* d_state_id = state_pool_.upload_values_to_buffer(
+        &state_id, 1, state_pool_.scratch_target_ids);
 
     auto transfer_end = std::chrono::high_resolution_clock::now();
     transfer_time_ += std::chrono::duration<double, std::milli>(transfer_end - transfer_start).count();
@@ -3718,12 +5780,9 @@ void QuantumCircuit::apply_two_mode_squeezing_to_state(
 
     apply_two_mode_squeezing_recursive(&state_pool_, d_state_id, 1, std::abs(xi), std::arg(xi),
                                        qumode1, qumode2, num_qumodes_);
-    CHECK_CUDA(cudaDeviceSynchronize());
 
     auto compute_end = std::chrono::high_resolution_clock::now();
     computation_time_ += std::chrono::duration<double, std::milli>(compute_end - compute_start).count();
-
-    CHECK_CUDA(cudaFree(d_state_id));
 }
 
 /**
@@ -3736,7 +5795,53 @@ void QuantumCircuit::execute_conditional_sum(const GateParams& gate) {
     double theta = gate.params.size() > 0 ? gate.params[0].real() : 0.0;
     double phi = gate.params.size() > 1 ? gate.params[1].real() : 0.0;
 
-    replace_root_node(apply_conditional_sum_recursive(root_node_, control_qubit, target_qumode1, target_qumode2, theta, phi));
+    std::unordered_map<NodeSignKey, HDDNode*, NodeSignKeyHash> memo;
+    std::function<HDDNode*(HDDNode*, bool)> transform =
+        [&](HDDNode* node, bool negated) -> HDDNode* {
+            if (!node) {
+                return nullptr;
+            }
+
+            const NodeSignKey key{node, negated};
+            const auto memo_it = memo.find(key);
+            if (memo_it != memo.end()) {
+                return memo_it->second;
+            }
+
+            HDDNode* result = nullptr;
+            if (node->is_terminal()) {
+                if (std::abs(theta) < 1e-14) {
+                    result = node;
+                } else {
+                    const double effective_theta = negated ? -theta : theta;
+                    const int duplicated_state = state_pool_.duplicate_state(node->tensor_id);
+                    if (duplicated_state < 0) {
+                        throw std::runtime_error("条件SUM失败：无法复制终端状态");
+                    }
+
+                    apply_sum_to_state(
+                        duplicated_state, target_qumode1, target_qumode2, effective_theta, phi);
+                    result = node_manager_.create_terminal_node(duplicated_state);
+                }
+            } else if (node->qubit_level == control_qubit) {
+                HDDNode* low_branch = transform(node->low, negated);
+                HDDNode* high_branch = transform(node->high, !negated);
+                result = node_manager_.get_or_create_node(
+                    node->qubit_level, low_branch, high_branch, node->w_low, node->w_high);
+            } else if (node->qubit_level > control_qubit) {
+                HDDNode* new_low = transform(node->low, negated);
+                HDDNode* new_high = transform(node->high, negated);
+                result = node_manager_.get_or_create_node(
+                    node->qubit_level, new_low, new_high, node->w_low, node->w_high);
+            } else {
+                result = node;
+            }
+
+            memo.emplace(key, result);
+            return result;
+        };
+
+    replace_root_node(transform(root_node_, false));
 }
 
 /**
@@ -3796,9 +5901,8 @@ void QuantumCircuit::apply_sum_to_state(
 
     auto transfer_start = std::chrono::high_resolution_clock::now();
 
-    int* d_state_id = nullptr;
-    CHECK_CUDA(cudaMalloc(&d_state_id, sizeof(int)));
-    CHECK_CUDA(cudaMemcpy(d_state_id, &state_id, sizeof(int), cudaMemcpyHostToDevice));
+    int* d_state_id = state_pool_.upload_values_to_buffer(
+        &state_id, 1, state_pool_.scratch_target_ids);
 
     auto transfer_end = std::chrono::high_resolution_clock::now();
     transfer_time_ += std::chrono::duration<double, std::milli>(transfer_end - transfer_start).count();
@@ -3807,12 +5911,9 @@ void QuantumCircuit::apply_sum_to_state(
 
     apply_sum_gate(&state_pool_, d_state_id, 1, theta, cv_truncation_, cv_truncation_,
                    qumode1, qumode2, num_qumodes_);
-    CHECK_CUDA(cudaDeviceSynchronize());
 
     auto compute_end = std::chrono::high_resolution_clock::now();
     computation_time_ += std::chrono::duration<double, std::milli>(compute_end - compute_start).count();
-
-    CHECK_CUDA(cudaFree(d_state_id));
 }
 
 // ===== 混合型相互作用门实现 =====
@@ -3823,13 +5924,161 @@ void QuantumCircuit::apply_sum_to_state(
  * 混合型：Qubit和Qumode相互作用
  */
 void QuantumCircuit::execute_rabi_interaction(const GateParams& gate) {
-    int control_qubit = gate.target_qubits[0];
-    int target_qumode = gate.target_qumodes[0];
-    double theta = gate.params.empty() ? 0.0 : gate.params[0].real();
+    const int control_qubit = gate.target_qubits[0];
+    const int target_qumode = gate.target_qumodes[0];
+    const double theta = gate.params.empty() ? 0.0 : gate.params[0].real();
+    reserve_pairwise_hybrid_headroom("Rabi", root_node_, control_qubit, state_pool_);
 
-    // Rabi相互作用需要同时处理qubit和qumode状态
-    // 这是一个复杂的混合操作，需要扩展HDD处理逻辑
-    replace_root_node(apply_rabi_interaction_recursive(root_node_, control_qubit, target_qumode, theta));
+    std::vector<int> low_ids;
+    std::vector<int> high_ids;
+    std::unordered_set<int> replaced_state_ids;
+    std::unordered_map<WeightedNodePairKey, std::pair<HDDNode*, HDDNode*>, WeightedNodePairKeyHash>
+        pair_memo;
+    std::unordered_map<HDDNode*, HDDNode*> node_memo;
+    auto remaining_replaced_state_uses =
+        collect_pairwise_replaced_state_use_counts(root_node_, control_qubit);
+    const bool allow_early_replaced_state_release =
+        collect_retained_state_ids_outside_pairwise_region(root_node_, control_qubit).empty();
+
+    std::function<std::pair<HDDNode*, HDDNode*>(HDDNode*, std::complex<double>, HDDNode*, std::complex<double>)>
+        build_pairs =
+            [&](HDDNode* low_node,
+                std::complex<double> low_weight,
+                HDDNode* high_node,
+                std::complex<double> high_weight) -> std::pair<HDDNode*, HDDNode*> {
+                if (!low_node || !high_node) {
+                    throw std::runtime_error("Rabi分支配对失败：存在空的HDD分支");
+                }
+
+                const WeightedNodePairKey key{low_node, high_node, low_weight, high_weight};
+                const auto memo_it = pair_memo.find(key);
+                if (memo_it != pair_memo.end()) {
+                    return memo_it->second;
+                }
+
+                std::pair<HDDNode*, HDDNode*> result;
+                if (low_node->is_terminal() && high_node->is_terminal()) {
+                    HDDNode* low_copy = nullptr;
+                    HDDNode* high_copy = nullptr;
+                    try {
+                        low_copy = duplicate_scaled_terminal_node(low_node, low_weight);
+                        low_ids.push_back(low_copy->tensor_id);
+                        high_copy = duplicate_scaled_terminal_node(high_node, high_weight);
+                        high_ids.push_back(high_copy->tensor_id);
+                        if (low_node->tensor_id >= 0 && low_node->tensor_id != shared_zero_state_id_) {
+                            replaced_state_ids.insert(low_node->tensor_id);
+                        }
+                        if (high_node->tensor_id >= 0 && high_node->tensor_id != shared_zero_state_id_) {
+                            replaced_state_ids.insert(high_node->tensor_id);
+                        }
+                        release_pairwise_replaced_state_if_safe(
+                            low_node->tensor_id,
+                            allow_early_replaced_state_release,
+                            remaining_replaced_state_uses,
+                            state_pool_,
+                            shared_zero_state_id_);
+                        release_pairwise_replaced_state_if_safe(
+                            high_node->tensor_id,
+                            allow_early_replaced_state_release,
+                            remaining_replaced_state_uses,
+                            state_pool_,
+                            shared_zero_state_id_);
+                        result = {low_copy, high_copy};
+                    } catch (...) {
+                        if (high_copy) {
+                            release_transient_pairwise_node(
+                                node_manager_, state_pool_, high_copy, low_ids, high_ids);
+                        }
+                        if (low_copy) {
+                            release_transient_pairwise_node(
+                                node_manager_, state_pool_, low_copy, low_ids, high_ids);
+                        }
+                        throw;
+                    }
+                } else {
+                    if (low_node->is_terminal() || high_node->is_terminal()) {
+                        throw std::runtime_error("Rabi分支配对失败：低/高分支HDD结构不一致");
+                    }
+                    if (low_node->qubit_level != high_node->qubit_level) {
+                        throw std::runtime_error("Rabi分支配对失败：低/高分支层级不一致");
+                    }
+
+                    const auto low_pair = build_pairs(
+                        low_node->low,
+                        low_weight * low_node->w_low,
+                        high_node->low,
+                        high_weight * high_node->w_low);
+                    const auto high_pair = build_pairs(
+                        low_node->high,
+                        low_weight * low_node->w_high,
+                        high_node->high,
+                        high_weight * high_node->w_high);
+                    result = {
+                        node_manager_.get_or_create_node(
+                            low_node->qubit_level, low_pair.first, high_pair.first, 1.0, 1.0),
+                        node_manager_.get_or_create_node(
+                            high_node->qubit_level, low_pair.second, high_pair.second, 1.0, 1.0)};
+                }
+
+                pair_memo.emplace(key, result);
+                return result;
+            };
+
+    std::function<HDDNode*(HDDNode*)> transform =
+        [&](HDDNode* node) -> HDDNode* {
+            if (!node || node->is_terminal()) {
+                return node;
+            }
+
+            const auto memo_it = node_memo.find(node);
+            if (memo_it != node_memo.end()) {
+                return memo_it->second;
+            }
+
+            HDDNode* transformed = nullptr;
+            if (node->qubit_level == control_qubit) {
+                const auto coupled = build_pairs(node->low, node->w_low, node->high, node->w_high);
+                transformed = node_manager_.get_or_create_node(
+                    node->qubit_level, coupled.first, coupled.second, 1.0, 1.0);
+            } else if (node->qubit_level > control_qubit) {
+                transformed = node_manager_.get_or_create_node(
+                    node->qubit_level,
+                    transform(node->low),
+                    transform(node->high),
+                    node->w_low,
+                    node->w_high);
+            } else {
+                transformed = node;
+            }
+
+            node_memo.emplace(node, transformed);
+            return transformed;
+        };
+
+    HDDNode* new_root = nullptr;
+    std::unordered_set<int> retained_state_ids;
+    try {
+        new_root = transform(root_node_);
+        const std::vector<int> retained_state_ids_vec = collect_terminal_state_ids(new_root);
+        retained_state_ids.insert(retained_state_ids_vec.begin(), retained_state_ids_vec.end());
+        if (!low_ids.empty()) {
+            apply_rabi_interaction_on_mode(
+                &state_pool_, low_ids, high_ids, theta, target_qumode, num_qumodes_);
+            CHECK_CUDA(cudaGetLastError());
+        }
+        CHECK_CUDA(cudaDeviceSynchronize());
+    } catch (...) {
+        cleanup_pairwise_build_failure(
+            node_manager_, state_pool_, pair_memo, node_memo, low_ids, high_ids);
+        throw;
+    }
+    replace_root_node_preserving_terminals(new_root);
+    for (int state_id : replaced_state_ids) {
+        if (retained_state_ids.find(state_id) == retained_state_ids.end() &&
+            state_pool_.is_valid_state(state_id)) {
+            state_pool_.free_state(state_id);
+        }
+    }
 }
 
 /**
@@ -3881,15 +6130,32 @@ std::pair<HDDNode*, HDDNode*> QuantumCircuit::apply_rabi_pair_recursive(
     }
 
     if (low_node->is_terminal() && high_node->is_terminal()) {
-        HDDNode* low_copy = duplicate_scaled_terminal_node(low_node, low_weight);
-        HDDNode* high_copy = duplicate_scaled_terminal_node(high_node, high_weight);
+        std::vector<int> low_ids;
+        std::vector<int> high_ids;
+        HDDNode* low_copy = nullptr;
+        HDDNode* high_copy = nullptr;
+        try {
+            low_copy = duplicate_scaled_terminal_node(low_node, low_weight);
+            low_ids.push_back(low_copy->tensor_id);
+            high_copy = duplicate_scaled_terminal_node(high_node, high_weight);
+            high_ids.push_back(high_copy->tensor_id);
 
-        std::vector<int> low_ids{low_copy->tensor_id};
-        std::vector<int> high_ids{high_copy->tensor_id};
-        apply_rabi_interaction_on_mode(
-            &state_pool_, low_ids, high_ids, theta, target_qumode, num_qumodes_);
-        CHECK_CUDA(cudaDeviceSynchronize());
-        return {low_copy, high_copy};
+            apply_rabi_interaction_on_mode(
+                &state_pool_, low_ids, high_ids, theta, target_qumode, num_qumodes_);
+            CHECK_CUDA(cudaDeviceSynchronize());
+            return {low_copy, high_copy};
+        } catch (...) {
+            if (high_copy) {
+                release_transient_pairwise_node(
+                    node_manager_, state_pool_, high_copy, low_ids, high_ids);
+            }
+            if (low_copy) {
+                release_transient_pairwise_node(
+                    node_manager_, state_pool_, low_copy, low_ids, high_ids);
+            }
+            cleanup_duplicated_pairwise_states(state_pool_, low_ids, high_ids);
+            throw;
+        }
     }
 
     if (low_node->is_terminal() || high_node->is_terminal()) {
@@ -3938,20 +6204,37 @@ std::pair<HDDNode*, HDDNode*> QuantumCircuit::apply_jc_like_pair_recursive(
     }
 
     if (low_node->is_terminal() && high_node->is_terminal()) {
-        HDDNode* low_copy = duplicate_scaled_terminal_node(low_node, low_weight);
-        HDDNode* high_copy = duplicate_scaled_terminal_node(high_node, high_weight);
+        std::vector<int> low_ids;
+        std::vector<int> high_ids;
+        HDDNode* low_copy = nullptr;
+        HDDNode* high_copy = nullptr;
+        try {
+            low_copy = duplicate_scaled_terminal_node(low_node, low_weight);
+            low_ids.push_back(low_copy->tensor_id);
+            high_copy = duplicate_scaled_terminal_node(high_node, high_weight);
+            high_ids.push_back(high_copy->tensor_id);
 
-        std::vector<int> low_ids{low_copy->tensor_id};
-        std::vector<int> high_ids{high_copy->tensor_id};
-        if (anti_jaynes_cummings) {
-            apply_anti_jaynes_cummings_on_mode(
-                &state_pool_, low_ids, high_ids, theta, phi, target_qumode, num_qumodes_);
-        } else {
-            apply_jaynes_cummings_on_mode(
-                &state_pool_, low_ids, high_ids, theta, phi, target_qumode, num_qumodes_);
+            if (anti_jaynes_cummings) {
+                apply_anti_jaynes_cummings_on_mode(
+                    &state_pool_, low_ids, high_ids, theta, phi, target_qumode, num_qumodes_);
+            } else {
+                apply_jaynes_cummings_on_mode(
+                    &state_pool_, low_ids, high_ids, theta, phi, target_qumode, num_qumodes_);
+            }
+            CHECK_CUDA(cudaDeviceSynchronize());
+            return {low_copy, high_copy};
+        } catch (...) {
+            if (high_copy) {
+                release_transient_pairwise_node(
+                    node_manager_, state_pool_, high_copy, low_ids, high_ids);
+            }
+            if (low_copy) {
+                release_transient_pairwise_node(
+                    node_manager_, state_pool_, low_copy, low_ids, high_ids);
+            }
+            cleanup_duplicated_pairwise_states(state_pool_, low_ids, high_ids);
+            throw;
         }
-        CHECK_CUDA(cudaDeviceSynchronize());
-        return {low_copy, high_copy};
     }
 
     if (low_node->is_terminal() || high_node->is_terminal()) {
@@ -3994,12 +6277,166 @@ std::pair<HDDNode*, HDDNode*> QuantumCircuit::apply_jc_like_pair_recursive(
  * JC(θ,φ) = exp[-iθ(e^{iφ} σ- a† + e^{-iφ} σ+ a)]
  */
 void QuantumCircuit::execute_jaynes_cummings(const GateParams& gate) {
-    int control_qubit = gate.target_qubits[0];
-    int target_qumode = gate.target_qumodes[0];
-    double theta = gate.params.size() > 0 ? gate.params[0].real() : 0.0;
-    double phi = gate.params.size() > 1 ? gate.params[1].real() : 0.0;
+    const int control_qubit = gate.target_qubits[0];
+    const int target_qumode = gate.target_qumodes[0];
+    const double theta = gate.params.size() > 0 ? gate.params[0].real() : 0.0;
+    const double phi = gate.params.size() > 1 ? gate.params[1].real() : 0.0;
+    reserve_pairwise_hybrid_headroom("JC", root_node_, control_qubit, state_pool_);
 
-    replace_root_node(apply_jaynes_cummings_recursive(root_node_, control_qubit, target_qumode, theta, phi));
+    std::vector<int> low_ids;
+    std::vector<int> high_ids;
+    std::unordered_set<int> replaced_state_ids;
+    std::unordered_map<WeightedNodePairKey, std::pair<HDDNode*, HDDNode*>, WeightedNodePairKeyHash>
+        pair_memo;
+    std::unordered_map<HDDNode*, HDDNode*> node_memo;
+    auto remaining_replaced_state_uses =
+        collect_pairwise_replaced_state_use_counts(root_node_, control_qubit);
+    const bool allow_early_replaced_state_release =
+        collect_retained_state_ids_outside_pairwise_region(root_node_, control_qubit).empty();
+
+    std::function<std::pair<HDDNode*, HDDNode*>(HDDNode*, std::complex<double>, HDDNode*, std::complex<double>)>
+        build_pairs =
+            [&](HDDNode* low_node,
+                std::complex<double> low_weight,
+                HDDNode* high_node,
+                std::complex<double> high_weight) -> std::pair<HDDNode*, HDDNode*> {
+                if (!low_node || !high_node) {
+                    throw std::runtime_error("JC分支配对失败：存在空的HDD分支");
+                }
+
+                const WeightedNodePairKey key{low_node, high_node, low_weight, high_weight};
+                const auto memo_it = pair_memo.find(key);
+                if (memo_it != pair_memo.end()) {
+                    return memo_it->second;
+                }
+
+                std::pair<HDDNode*, HDDNode*> result;
+                if (low_node->is_terminal() && high_node->is_terminal()) {
+                    HDDNode* low_copy = nullptr;
+                    HDDNode* high_copy = nullptr;
+                    try {
+                        low_copy = duplicate_scaled_terminal_node(low_node, low_weight);
+                        low_ids.push_back(low_copy->tensor_id);
+                        high_copy = duplicate_scaled_terminal_node(high_node, high_weight);
+                        high_ids.push_back(high_copy->tensor_id);
+                        if (low_node->tensor_id >= 0 && low_node->tensor_id != shared_zero_state_id_) {
+                            replaced_state_ids.insert(low_node->tensor_id);
+                        }
+                        if (high_node->tensor_id >= 0 && high_node->tensor_id != shared_zero_state_id_) {
+                            replaced_state_ids.insert(high_node->tensor_id);
+                        }
+                        release_pairwise_replaced_state_if_safe(
+                            low_node->tensor_id,
+                            allow_early_replaced_state_release,
+                            remaining_replaced_state_uses,
+                            state_pool_,
+                            shared_zero_state_id_);
+                        release_pairwise_replaced_state_if_safe(
+                            high_node->tensor_id,
+                            allow_early_replaced_state_release,
+                            remaining_replaced_state_uses,
+                            state_pool_,
+                            shared_zero_state_id_);
+                        result = {low_copy, high_copy};
+                    } catch (...) {
+                        if (high_copy) {
+                            release_transient_pairwise_node(
+                                node_manager_, state_pool_, high_copy, low_ids, high_ids);
+                        }
+                        if (low_copy) {
+                            release_transient_pairwise_node(
+                                node_manager_, state_pool_, low_copy, low_ids, high_ids);
+                        }
+                        throw;
+                    }
+                } else {
+                    if (low_node->is_terminal() || high_node->is_terminal()) {
+                        throw std::runtime_error("JC分支配对失败：低/高分支HDD结构不一致");
+                    }
+                    if (low_node->qubit_level != high_node->qubit_level) {
+                        throw std::runtime_error("JC分支配对失败：低/高分支层级不一致");
+                    }
+
+                    const auto low_pair = build_pairs(
+                        low_node->low,
+                        low_weight * low_node->w_low,
+                        high_node->low,
+                        high_weight * high_node->w_low);
+                    const auto high_pair = build_pairs(
+                        low_node->high,
+                        low_weight * low_node->w_high,
+                        high_node->high,
+                        high_weight * high_node->w_high);
+                    result = {
+                        node_manager_.get_or_create_node(
+                            low_node->qubit_level, low_pair.first, high_pair.first, 1.0, 1.0),
+                        node_manager_.get_or_create_node(
+                            high_node->qubit_level, low_pair.second, high_pair.second, 1.0, 1.0)};
+                }
+
+                pair_memo.emplace(key, result);
+                return result;
+            };
+
+    std::function<HDDNode*(HDDNode*)> transform =
+        [&](HDDNode* node) -> HDDNode* {
+            if (!node || node->is_terminal()) {
+                return node;
+            }
+
+            const auto memo_it = node_memo.find(node);
+            if (memo_it != node_memo.end()) {
+                return memo_it->second;
+            }
+
+            HDDNode* transformed = nullptr;
+            if (node->qubit_level == control_qubit) {
+                const auto coupled = build_pairs(node->low, node->w_low, node->high, node->w_high);
+                transformed = node_manager_.get_or_create_node(
+                    node->qubit_level, coupled.first, coupled.second, 1.0, 1.0);
+            } else if (node->qubit_level > control_qubit) {
+                transformed = node_manager_.get_or_create_node(
+                    node->qubit_level,
+                    transform(node->low),
+                    transform(node->high),
+                    node->w_low,
+                    node->w_high);
+            } else {
+                transformed = node;
+            }
+
+            node_memo.emplace(node, transformed);
+            return transformed;
+        };
+
+    HDDNode* new_root = nullptr;
+    std::unordered_set<int> retained_state_ids;
+    try {
+        new_root = transform(root_node_);
+        const std::vector<int> retained_state_ids_vec = collect_terminal_state_ids(new_root);
+        retained_state_ids.insert(retained_state_ids_vec.begin(), retained_state_ids_vec.end());
+        FALLBACK_DEBUG_LOG << "[fallback] JC prepared pairs=" << low_ids.size()
+                           << " replaced_state_ids=" << replaced_state_ids.size() << std::endl;
+        if (!low_ids.empty()) {
+            FALLBACK_DEBUG_LOG << "[fallback] JC launching paired kernel" << std::endl;
+            apply_jaynes_cummings_on_mode(
+                &state_pool_, low_ids, high_ids, theta, phi, target_qumode, num_qumodes_);
+            CHECK_CUDA(cudaGetLastError());
+        }
+        CHECK_CUDA(cudaDeviceSynchronize());
+    } catch (...) {
+        cleanup_pairwise_build_failure(
+            node_manager_, state_pool_, pair_memo, node_memo, low_ids, high_ids);
+        throw;
+    }
+    replace_root_node_preserving_terminals(new_root);
+    for (int state_id : replaced_state_ids) {
+        if (retained_state_ids.find(state_id) == retained_state_ids.end() &&
+            state_pool_.is_valid_state(state_id)) {
+            state_pool_.free_state(state_id);
+        }
+    }
+    FALLBACK_DEBUG_LOG << "[fallback] JC old states released" << std::endl;
 }
 
 /**
@@ -4041,12 +6478,162 @@ void QuantumCircuit::apply_jaynes_cummings_to_state(int state_id, double theta, 
  * 执行Anti-Jaynes-Cummings相互作用 AJC(θ,φ)
  */
 void QuantumCircuit::execute_anti_jaynes_cummings(const GateParams& gate) {
-    int control_qubit = gate.target_qubits[0];
-    int target_qumode = gate.target_qumodes[0];
-    double theta = gate.params.size() > 0 ? gate.params[0].real() : 0.0;
-    double phi = gate.params.size() > 1 ? gate.params[1].real() : 0.0;
+    const int control_qubit = gate.target_qubits[0];
+    const int target_qumode = gate.target_qumodes[0];
+    const double theta = gate.params.size() > 0 ? gate.params[0].real() : 0.0;
+    const double phi = gate.params.size() > 1 ? gate.params[1].real() : 0.0;
+    reserve_pairwise_hybrid_headroom("AJC", root_node_, control_qubit, state_pool_);
 
-    replace_root_node(apply_anti_jaynes_cummings_recursive(root_node_, control_qubit, target_qumode, theta, phi));
+    std::vector<int> low_ids;
+    std::vector<int> high_ids;
+    std::unordered_set<int> replaced_state_ids;
+    std::unordered_map<WeightedNodePairKey, std::pair<HDDNode*, HDDNode*>, WeightedNodePairKeyHash>
+        pair_memo;
+    std::unordered_map<HDDNode*, HDDNode*> node_memo;
+    auto remaining_replaced_state_uses =
+        collect_pairwise_replaced_state_use_counts(root_node_, control_qubit);
+    const bool allow_early_replaced_state_release =
+        collect_retained_state_ids_outside_pairwise_region(root_node_, control_qubit).empty();
+
+    std::function<std::pair<HDDNode*, HDDNode*>(HDDNode*, std::complex<double>, HDDNode*, std::complex<double>)>
+        build_pairs =
+            [&](HDDNode* low_node,
+                std::complex<double> low_weight,
+                HDDNode* high_node,
+                std::complex<double> high_weight) -> std::pair<HDDNode*, HDDNode*> {
+                if (!low_node || !high_node) {
+                    throw std::runtime_error("AJC分支配对失败：存在空的HDD分支");
+                }
+
+                const WeightedNodePairKey key{low_node, high_node, low_weight, high_weight};
+                const auto memo_it = pair_memo.find(key);
+                if (memo_it != pair_memo.end()) {
+                    return memo_it->second;
+                }
+
+                std::pair<HDDNode*, HDDNode*> result;
+                if (low_node->is_terminal() && high_node->is_terminal()) {
+                    HDDNode* low_copy = nullptr;
+                    HDDNode* high_copy = nullptr;
+                    try {
+                        low_copy = duplicate_scaled_terminal_node(low_node, low_weight);
+                        low_ids.push_back(low_copy->tensor_id);
+                        high_copy = duplicate_scaled_terminal_node(high_node, high_weight);
+                        high_ids.push_back(high_copy->tensor_id);
+                        if (low_node->tensor_id >= 0 && low_node->tensor_id != shared_zero_state_id_) {
+                            replaced_state_ids.insert(low_node->tensor_id);
+                        }
+                        if (high_node->tensor_id >= 0 && high_node->tensor_id != shared_zero_state_id_) {
+                            replaced_state_ids.insert(high_node->tensor_id);
+                        }
+                        release_pairwise_replaced_state_if_safe(
+                            low_node->tensor_id,
+                            allow_early_replaced_state_release,
+                            remaining_replaced_state_uses,
+                            state_pool_,
+                            shared_zero_state_id_);
+                        release_pairwise_replaced_state_if_safe(
+                            high_node->tensor_id,
+                            allow_early_replaced_state_release,
+                            remaining_replaced_state_uses,
+                            state_pool_,
+                            shared_zero_state_id_);
+                        result = {low_copy, high_copy};
+                    } catch (...) {
+                        if (high_copy) {
+                            release_transient_pairwise_node(
+                                node_manager_, state_pool_, high_copy, low_ids, high_ids);
+                        }
+                        if (low_copy) {
+                            release_transient_pairwise_node(
+                                node_manager_, state_pool_, low_copy, low_ids, high_ids);
+                        }
+                        throw;
+                    }
+                } else {
+                    if (low_node->is_terminal() || high_node->is_terminal()) {
+                        throw std::runtime_error("AJC分支配对失败：低/高分支HDD结构不一致");
+                    }
+                    if (low_node->qubit_level != high_node->qubit_level) {
+                        throw std::runtime_error("AJC分支配对失败：低/高分支层级不一致");
+                    }
+
+                    const auto low_pair = build_pairs(
+                        low_node->low,
+                        low_weight * low_node->w_low,
+                        high_node->low,
+                        high_weight * high_node->w_low);
+                    const auto high_pair = build_pairs(
+                        low_node->high,
+                        low_weight * low_node->w_high,
+                        high_node->high,
+                        high_weight * high_node->w_high);
+                    result = {
+                        node_manager_.get_or_create_node(
+                            low_node->qubit_level, low_pair.first, high_pair.first, 1.0, 1.0),
+                        node_manager_.get_or_create_node(
+                            high_node->qubit_level, low_pair.second, high_pair.second, 1.0, 1.0)};
+                }
+
+                pair_memo.emplace(key, result);
+                return result;
+            };
+
+    std::function<HDDNode*(HDDNode*)> transform =
+        [&](HDDNode* node) -> HDDNode* {
+            if (!node || node->is_terminal()) {
+                return node;
+            }
+
+            const auto memo_it = node_memo.find(node);
+            if (memo_it != node_memo.end()) {
+                return memo_it->second;
+            }
+
+            HDDNode* transformed = nullptr;
+            if (node->qubit_level == control_qubit) {
+                const auto coupled = build_pairs(node->low, node->w_low, node->high, node->w_high);
+                transformed = node_manager_.get_or_create_node(
+                    node->qubit_level, coupled.first, coupled.second, 1.0, 1.0);
+            } else if (node->qubit_level > control_qubit) {
+                transformed = node_manager_.get_or_create_node(
+                    node->qubit_level,
+                    transform(node->low),
+                    transform(node->high),
+                    node->w_low,
+                    node->w_high);
+            } else {
+                transformed = node;
+            }
+
+            node_memo.emplace(node, transformed);
+            return transformed;
+        };
+
+    HDDNode* new_root = nullptr;
+    std::unordered_set<int> retained_state_ids;
+    try {
+        new_root = transform(root_node_);
+        const std::vector<int> retained_state_ids_vec = collect_terminal_state_ids(new_root);
+        retained_state_ids.insert(retained_state_ids_vec.begin(), retained_state_ids_vec.end());
+        if (!low_ids.empty()) {
+            apply_anti_jaynes_cummings_on_mode(
+                &state_pool_, low_ids, high_ids, theta, phi, target_qumode, num_qumodes_);
+            CHECK_CUDA(cudaGetLastError());
+        }
+        CHECK_CUDA(cudaDeviceSynchronize());
+    } catch (...) {
+        cleanup_pairwise_build_failure(
+            node_manager_, state_pool_, pair_memo, node_memo, low_ids, high_ids);
+        throw;
+    }
+    replace_root_node_preserving_terminals(new_root);
+    for (int state_id : replaced_state_ids) {
+        if (retained_state_ids.find(state_id) == retained_state_ids.end() &&
+            state_pool_.is_valid_state(state_id)) {
+            state_pool_.free_state(state_id);
+        }
+    }
 }
 
 /**
@@ -4088,8 +6675,8 @@ void QuantumCircuit::apply_anti_jaynes_cummings_to_state(int state_id, double th
  * 执行选择性Qubit旋转 SQR(θ,φ)
  */
 void QuantumCircuit::execute_selective_qubit_rotation(const GateParams& gate) {
-    int target_qubit = gate.target_qubits[0];
-    int control_qumode = gate.target_qumodes[0];
+    const int target_qubit = gate.target_qubits[0];
+    const int control_qumode = gate.target_qumodes[0];
     std::vector<double> theta_vec, phi_vec;
 
     // 从参数中提取θ和φ向量
@@ -4103,7 +6690,171 @@ void QuantumCircuit::execute_selective_qubit_rotation(const GateParams& gate) {
         throw std::runtime_error("SQR需要成对提供每个Fock层级的(theta, phi)参数");
     }
 
-    replace_root_node(apply_selective_qubit_rotation_recursive(root_node_, target_qubit, control_qumode, theta_vec, phi_vec));
+    const std::vector<double> expanded_thetas =
+        expand_selective_rotation_profile(
+            theta_vec,
+            state_pool_.d_trunc,
+            control_qumode,
+            num_qumodes_,
+            state_pool_.max_total_dim);
+    const std::vector<double> expanded_phis =
+        expand_selective_rotation_profile(
+            phi_vec,
+            state_pool_.d_trunc,
+            control_qumode,
+            num_qumodes_,
+            state_pool_.max_total_dim);
+    reserve_pairwise_hybrid_headroom("SQR", root_node_, target_qubit, state_pool_);
+
+    std::vector<int> low_ids;
+    std::vector<int> high_ids;
+    std::unordered_set<int> replaced_state_ids;
+    std::unordered_map<WeightedNodePairKey, std::pair<HDDNode*, HDDNode*>, WeightedNodePairKeyHash>
+        pair_memo;
+    std::unordered_map<HDDNode*, HDDNode*> node_memo;
+    auto remaining_replaced_state_uses =
+        collect_pairwise_replaced_state_use_counts(root_node_, target_qubit);
+    const bool allow_early_replaced_state_release =
+        collect_retained_state_ids_outside_pairwise_region(root_node_, target_qubit).empty();
+
+    std::function<std::pair<HDDNode*, HDDNode*>(HDDNode*, std::complex<double>, HDDNode*, std::complex<double>)>
+        build_pairs =
+            [&](HDDNode* low_node,
+                std::complex<double> low_weight,
+                HDDNode* high_node,
+                std::complex<double> high_weight) -> std::pair<HDDNode*, HDDNode*> {
+                if (!low_node || !high_node) {
+                    throw std::runtime_error("SQR分支配对失败：存在空的HDD分支");
+                }
+
+                const WeightedNodePairKey key{low_node, high_node, low_weight, high_weight};
+                const auto memo_it = pair_memo.find(key);
+                if (memo_it != pair_memo.end()) {
+                    return memo_it->second;
+                }
+
+                std::pair<HDDNode*, HDDNode*> result;
+                if (low_node->is_terminal() && high_node->is_terminal()) {
+                    HDDNode* low_copy = nullptr;
+                    HDDNode* high_copy = nullptr;
+                    try {
+                        low_copy = duplicate_scaled_terminal_node(low_node, low_weight);
+                        low_ids.push_back(low_copy->tensor_id);
+                        high_copy = duplicate_scaled_terminal_node(high_node, high_weight);
+                        high_ids.push_back(high_copy->tensor_id);
+                        if (low_node->tensor_id >= 0 && low_node->tensor_id != shared_zero_state_id_) {
+                            replaced_state_ids.insert(low_node->tensor_id);
+                        }
+                        if (high_node->tensor_id >= 0 && high_node->tensor_id != shared_zero_state_id_) {
+                            replaced_state_ids.insert(high_node->tensor_id);
+                        }
+                        release_pairwise_replaced_state_if_safe(
+                            low_node->tensor_id,
+                            allow_early_replaced_state_release,
+                            remaining_replaced_state_uses,
+                            state_pool_,
+                            shared_zero_state_id_);
+                        release_pairwise_replaced_state_if_safe(
+                            high_node->tensor_id,
+                            allow_early_replaced_state_release,
+                            remaining_replaced_state_uses,
+                            state_pool_,
+                            shared_zero_state_id_);
+                        result = {low_copy, high_copy};
+                    } catch (...) {
+                        if (high_copy) {
+                            release_transient_pairwise_node(
+                                node_manager_, state_pool_, high_copy, low_ids, high_ids);
+                        }
+                        if (low_copy) {
+                            release_transient_pairwise_node(
+                                node_manager_, state_pool_, low_copy, low_ids, high_ids);
+                        }
+                        throw;
+                    }
+                } else {
+                    if (low_node->is_terminal() || high_node->is_terminal()) {
+                        throw std::runtime_error("SQR分支配对失败：低/高分支HDD结构不一致");
+                    }
+                    if (low_node->qubit_level != high_node->qubit_level) {
+                        throw std::runtime_error("SQR分支配对失败：低/高分支层级不一致");
+                    }
+
+                    const auto low_pair = build_pairs(
+                        low_node->low,
+                        low_weight * low_node->w_low,
+                        high_node->low,
+                        high_weight * high_node->w_low);
+                    const auto high_pair = build_pairs(
+                        low_node->high,
+                        low_weight * low_node->w_high,
+                        high_node->high,
+                        high_weight * high_node->w_high);
+                    result = {
+                        node_manager_.get_or_create_node(
+                            low_node->qubit_level, low_pair.first, high_pair.first, 1.0, 1.0),
+                        node_manager_.get_or_create_node(
+                            high_node->qubit_level, low_pair.second, high_pair.second, 1.0, 1.0)};
+                }
+
+                pair_memo.emplace(key, result);
+                return result;
+            };
+
+    std::function<HDDNode*(HDDNode*)> transform =
+        [&](HDDNode* node) -> HDDNode* {
+            if (!node || node->is_terminal()) {
+                return node;
+            }
+
+            const auto memo_it = node_memo.find(node);
+            if (memo_it != node_memo.end()) {
+                return memo_it->second;
+            }
+
+            HDDNode* transformed = nullptr;
+            if (node->qubit_level == target_qubit) {
+                const auto rotated = build_pairs(node->low, node->w_low, node->high, node->w_high);
+                transformed = node_manager_.get_or_create_node(
+                    node->qubit_level, rotated.first, rotated.second, 1.0, 1.0);
+            } else if (node->qubit_level > target_qubit) {
+                transformed = node_manager_.get_or_create_node(
+                    node->qubit_level,
+                    transform(node->low),
+                    transform(node->high),
+                    node->w_low,
+                    node->w_high);
+            } else {
+                transformed = node;
+            }
+
+            node_memo.emplace(node, transformed);
+            return transformed;
+        };
+
+    HDDNode* new_root = nullptr;
+    std::unordered_set<int> retained_state_ids;
+    try {
+        new_root = transform(root_node_);
+        const std::vector<int> retained_state_ids_vec = collect_terminal_state_ids(new_root);
+        retained_state_ids.insert(retained_state_ids_vec.begin(), retained_state_ids_vec.end());
+        if (!low_ids.empty()) {
+            apply_sqr(&state_pool_, low_ids, high_ids, expanded_thetas, expanded_phis);
+            CHECK_CUDA(cudaGetLastError());
+        }
+        CHECK_CUDA(cudaDeviceSynchronize());
+    } catch (...) {
+        cleanup_pairwise_build_failure(
+            node_manager_, state_pool_, pair_memo, node_memo, low_ids, high_ids);
+        throw;
+    }
+    replace_root_node_preserving_terminals(new_root);
+    for (int state_id : replaced_state_ids) {
+        if (retained_state_ids.find(state_id) == retained_state_ids.end() &&
+            state_pool_.is_valid_state(state_id)) {
+            state_pool_.free_state(state_id);
+        }
+    }
 }
 
 /**
@@ -4152,33 +6903,52 @@ std::pair<HDDNode*, HDDNode*> QuantumCircuit::apply_selective_qubit_rotation_pai
     }
 
     if (low_node->is_terminal() && high_node->is_terminal()) {
-        HDDNode* low_copy = duplicate_scaled_terminal_node(low_node, low_weight);
-        HDDNode* high_copy = duplicate_scaled_terminal_node(high_node, high_weight);
+        std::vector<int> low_ids;
+        std::vector<int> high_ids;
+        HDDNode* low_copy = nullptr;
+        HDDNode* high_copy = nullptr;
+        try {
+            low_copy = duplicate_scaled_terminal_node(low_node, low_weight);
+            low_ids.push_back(low_copy->tensor_id);
+            high_copy = duplicate_scaled_terminal_node(high_node, high_weight);
+            high_ids.push_back(high_copy->tensor_id);
 
-        const std::vector<double> expanded_thetas =
-            expand_selective_rotation_profile(
-                theta_vec,
-                state_pool_.d_trunc,
-                control_qumode,
-                num_qumodes_,
-                state_pool_.max_total_dim);
-        const std::vector<double> expanded_phis =
-            expand_selective_rotation_profile(
-                phi_vec,
-                state_pool_.d_trunc,
-                control_qumode,
-                num_qumodes_,
-                state_pool_.max_total_dim);
+            const std::vector<double> expanded_thetas =
+                expand_selective_rotation_profile(
+                    theta_vec,
+                    state_pool_.d_trunc,
+                    control_qumode,
+                    num_qumodes_,
+                    state_pool_.max_total_dim);
+            const std::vector<double> expanded_phis =
+                expand_selective_rotation_profile(
+                    phi_vec,
+                    state_pool_.d_trunc,
+                    control_qumode,
+                    num_qumodes_,
+                    state_pool_.max_total_dim);
 
-        apply_sqr(
-            &state_pool_,
-            std::vector<int>{low_copy->tensor_id},
-            std::vector<int>{high_copy->tensor_id},
-            expanded_thetas,
-            expanded_phis);
-        CHECK_CUDA(cudaGetLastError());
-        CHECK_CUDA(cudaDeviceSynchronize());
-        return {low_copy, high_copy};
+            apply_sqr(
+                &state_pool_,
+                low_ids,
+                high_ids,
+                expanded_thetas,
+                expanded_phis);
+            CHECK_CUDA(cudaGetLastError());
+            CHECK_CUDA(cudaDeviceSynchronize());
+            return {low_copy, high_copy};
+        } catch (...) {
+            if (high_copy) {
+                release_transient_pairwise_node(
+                    node_manager_, state_pool_, high_copy, low_ids, high_ids);
+            }
+            if (low_copy) {
+                release_transient_pairwise_node(
+                    node_manager_, state_pool_, low_copy, low_ids, high_ids);
+            }
+            cleanup_duplicated_pairwise_states(state_pool_, low_ids, high_ids);
+            throw;
+        }
     }
 
     if (low_node->is_terminal() || high_node->is_terminal()) {
@@ -4220,11 +6990,7 @@ std::pair<HDDNode*, HDDNode*> QuantumCircuit::apply_selective_qubit_rotation_pai
 std::vector<int> QuantumCircuit::collect_target_states(const GateParams& gate) {
     ScopedNvtxRange nvtx_range("qc::collect_target_states");
     (void)gate;
-    std::vector<int> state_ids = collect_terminal_state_ids(root_node_);
-    state_ids.erase(
-        std::remove(state_ids.begin(), state_ids.end(), shared_zero_state_id_),
-        state_ids.end());
-    return state_ids;
+    return get_cached_target_states();
 }
 
 /**
@@ -4331,11 +7097,8 @@ std::complex<double> QuantumCircuit::get_amplitude(
  * 获取线路统计信息
  */
 QuantumCircuit::CircuitStats QuantumCircuit::get_stats() const {
-    std::vector<int> reachable_states = collect_terminal_state_ids(root_node_);
-    reachable_states.erase(
-        std::remove(reachable_states.begin(), reachable_states.end(), shared_zero_state_id_),
-        reachable_states.end());
-    const std::vector<int> reachable_symbolic_states = collect_symbolic_terminal_ids(root_node_);
+    const std::vector<int>& reachable_states = get_cached_target_states();
+    const std::vector<int>& reachable_symbolic_states = get_cached_symbolic_terminal_ids();
     return {
         num_qubits_,
         num_qumodes_,

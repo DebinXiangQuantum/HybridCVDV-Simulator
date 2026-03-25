@@ -1,7 +1,9 @@
 #include <cuda_runtime.h>
 #include <cuComplex.h>
+#include <algorithm>
 #include <cmath>
 #include <complex>
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -28,6 +30,85 @@ namespace {
 
 using HostComplex = std::complex<double>;
 using HostMatrix = std::vector<HostComplex>;
+
+struct TensorMatrixCacheEntry {
+    int cutoff = 0;
+    double param1 = 0.0;
+    double param2 = 0.0;
+    cuDoubleComplex* device_matrix = nullptr;
+    uint64_t last_use = 0;
+};
+
+constexpr int kTwoModeTensorCacheCapacity = 8;
+constexpr double kTwoModeTensorCacheTolerance = 1e-10;
+
+bool cache_entry_matches(const TensorMatrixCacheEntry& entry,
+                         int cutoff,
+                         double param1,
+                         double param2) {
+    return entry.device_matrix != nullptr &&
+           entry.cutoff == cutoff &&
+           std::abs(entry.param1 - param1) < kTwoModeTensorCacheTolerance &&
+           std::abs(entry.param2 - param2) < kTwoModeTensorCacheTolerance;
+}
+
+template <typename Builder>
+cuDoubleComplex* get_or_build_two_mode_tensor_cache(
+    std::vector<TensorMatrixCacheEntry>* cache_entries,
+    uint64_t* use_counter,
+    int cutoff,
+    double param1,
+    double param2,
+    const char* allocation_error_prefix,
+    const char* upload_error_prefix,
+    Builder&& builder) {
+    for (auto& entry : *cache_entries) {
+        if (cache_entry_matches(entry, cutoff, param1, param2)) {
+            entry.last_use = ++(*use_counter);
+            return entry.device_matrix;
+        }
+    }
+
+    const std::vector<cuDoubleComplex> host_matrix = builder();
+    cuDoubleComplex* device_matrix = nullptr;
+    cudaError_t err = cudaMalloc(&device_matrix, host_matrix.size() * sizeof(cuDoubleComplex));
+    if (err != cudaSuccess) {
+        throw std::runtime_error(std::string(allocation_error_prefix) + cudaGetErrorString(err));
+    }
+
+    err = cudaMemcpy(device_matrix,
+                     host_matrix.data(),
+                     host_matrix.size() * sizeof(cuDoubleComplex),
+                     cudaMemcpyHostToDevice);
+    if (err != cudaSuccess) {
+        cudaFree(device_matrix);
+        throw std::runtime_error(std::string(upload_error_prefix) + cudaGetErrorString(err));
+    }
+
+    TensorMatrixCacheEntry new_entry;
+    new_entry.cutoff = cutoff;
+    new_entry.param1 = param1;
+    new_entry.param2 = param2;
+    new_entry.device_matrix = device_matrix;
+    new_entry.last_use = ++(*use_counter);
+
+    if (cache_entries->size() < static_cast<size_t>(kTwoModeTensorCacheCapacity)) {
+        cache_entries->push_back(new_entry);
+        return device_matrix;
+    }
+
+    auto lru_it = std::min_element(
+        cache_entries->begin(),
+        cache_entries->end(),
+        [](const TensorMatrixCacheEntry& lhs, const TensorMatrixCacheEntry& rhs) {
+            return lhs.last_use < rhs.last_use;
+        });
+    if (lru_it != cache_entries->end() && lru_it->device_matrix != nullptr) {
+        cudaFree(lru_it->device_matrix);
+    }
+    *lru_it = new_entry;
+    return device_matrix;
+}
 
 HostComplex to_host_complex(cuDoubleComplex value) {
     return HostComplex(cuCreal(value), cuCimag(value));
@@ -61,6 +142,20 @@ HostMatrix create_identity_matrix(int dim) {
         identity[static_cast<size_t>(i) * dim + i] = HostComplex(1.0, 0.0);
     }
     return identity;
+}
+
+void synchronize_if_requested(cudaStream_t stream,
+                              bool synchronize,
+                              const char* error_prefix) {
+    if (!synchronize) {
+        return;
+    }
+
+    const cudaError_t err =
+        stream != nullptr ? cudaStreamSynchronize(stream) : cudaDeviceSynchronize();
+    if (err != cudaSuccess) {
+        throw std::runtime_error(std::string(error_prefix) + cudaGetErrorString(err));
+    }
 }
 
 double matrix_max_abs(const HostMatrix& matrix) {
@@ -265,7 +360,7 @@ int infer_single_mode_cutoff(const CVStatePool* state_pool, int num_qumodes) {
 __global__ void apply_two_mode_tensor_gate_on_modes_kernel(
     const cuDoubleComplex* state_data,
     const size_t* state_offsets,
-    const int* state_dims,
+    const int64_t* state_dims,
     const int* target_indices,
     int batch_size,
     const cuDoubleComplex* tensor_matrix,
@@ -280,7 +375,7 @@ __global__ void apply_two_mode_tensor_gate_on_modes_kernel(
 
     int state_idx = target_indices[batch_id];
     size_t flat_index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-    int current_dim = state_dims[state_idx];
+    int64_t current_dim = state_dims[state_idx];
     if (flat_index >= static_cast<size_t>(current_dim)) return;
 
     const size_t offset = state_offsets[state_idx];
@@ -311,10 +406,59 @@ __global__ void apply_two_mode_tensor_gate_on_modes_kernel(
     psi_out[flat_index] = sum;
 }
 
+__global__ void apply_two_mode_tensor_gate_to_output_kernel(
+    const cuDoubleComplex* state_data,
+    const size_t* state_offsets,
+    const int64_t* state_dims,
+    const int* target_indices,
+    const size_t* output_offsets,
+    int batch_size,
+    const cuDoubleComplex* tensor_matrix,
+    int single_mode_cutoff,
+    int mode1_stride,
+    int mode2_stride
+) {
+    int batch_id = blockIdx.y;
+    if (batch_id >= batch_size) return;
+
+    const int state_idx = target_indices[batch_id];
+    const size_t flat_index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const int64_t current_dim = state_dims[state_idx];
+    if (flat_index >= static_cast<size_t>(current_dim)) return;
+
+    const size_t input_offset = state_offsets[state_idx];
+    const size_t output_offset = output_offsets[batch_id];
+    const cuDoubleComplex* psi_in = &state_data[input_offset];
+    cuDoubleComplex* psi_out = const_cast<cuDoubleComplex*>(&state_data[output_offset]);
+
+    const size_t stride1 = static_cast<size_t>(mode1_stride);
+    const size_t stride2 = static_cast<size_t>(mode2_stride);
+    const int out_mode1 = static_cast<int>((flat_index / stride1) % single_mode_cutoff);
+    const int out_mode2 = static_cast<int>((flat_index / stride2) % single_mode_cutoff);
+    const size_t base_index =
+        flat_index - static_cast<size_t>(out_mode1) * stride1 - static_cast<size_t>(out_mode2) * stride2;
+
+    cuDoubleComplex sum = make_cuDoubleComplex(0.0, 0.0);
+    for (int in_mode1 = 0; in_mode1 < single_mode_cutoff; ++in_mode1) {
+        for (int in_mode2 = 0; in_mode2 < single_mode_cutoff; ++in_mode2) {
+            const size_t matrix_index =
+                static_cast<size_t>(out_mode1) * single_mode_cutoff * single_mode_cutoff * single_mode_cutoff +
+                static_cast<size_t>(out_mode2) * single_mode_cutoff * single_mode_cutoff +
+                static_cast<size_t>(in_mode1) * single_mode_cutoff +
+                static_cast<size_t>(in_mode2);
+            const size_t source_index =
+                base_index + static_cast<size_t>(in_mode1) * stride1 + static_cast<size_t>(in_mode2) * stride2;
+            sum = cuCadd(sum, cuCmul(tensor_matrix[matrix_index], psi_in[source_index]));
+        }
+    }
+
+    psi_out[flat_index] = sum;
+}
+
 __global__ void copy_back_two_mode_tensor_gate_kernel(
     cuDoubleComplex* state_data,
     const size_t* state_offsets,
-    const int* state_dims,
+    const int64_t* state_dims,
     const int* target_indices,
     int batch_size,
     const cuDoubleComplex* temp_buffer,
@@ -325,7 +469,7 @@ __global__ void copy_back_two_mode_tensor_gate_kernel(
 
     int state_idx = target_indices[batch_id];
     size_t flat_index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-    int current_dim = state_dims[state_idx];
+    int64_t current_dim = state_dims[state_idx];
     if (flat_index >= static_cast<size_t>(current_dim)) return;
 
     const size_t offset = state_offsets[state_idx];
@@ -339,7 +483,9 @@ void apply_cached_two_mode_tensor_gate(CVStatePool* state_pool,
                                        const cuDoubleComplex* tensor_matrix,
                                        int target_qumode1,
                                        int target_qumode2,
-                                       int num_qumodes) {
+                                       int num_qumodes,
+                                       cudaStream_t stream,
+                                       bool synchronize) {
     if (batch_size <= 0) {
         return;
     }
@@ -351,59 +497,111 @@ void apply_cached_two_mode_tensor_gate(CVStatePool* state_pool,
         compute_mode_right_stride(single_mode_cutoff, target_qumode1, num_qumodes);
     const int mode2_stride =
         compute_mode_right_stride(single_mode_cutoff, target_qumode2, num_qumodes);
-    const size_t buffer_stride = state_pool->max_total_dim;
-
-    const size_t temp_bytes = static_cast<size_t>(batch_size) * buffer_stride * sizeof(cuDoubleComplex);
-    cuDoubleComplex* temp_state = static_cast<cuDoubleComplex*>(
-        state_pool->scratch_temp.ensure(temp_bytes));
-
     dim3 block_dim(256);
     dim3 grid_dim((state_pool->max_total_dim + block_dim.x - 1) / block_dim.x, batch_size);
 
-    apply_two_mode_tensor_gate_on_modes_kernel<<<grid_dim, block_dim>>>(
-        state_pool->data,
-        state_pool->state_offsets,
-        state_pool->state_dims,
-        target_indices,
-        batch_size,
-        tensor_matrix,
-        single_mode_cutoff,
-        mode1_stride,
-        mode2_stride,
-        temp_state,
-        buffer_stride
-    );
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Two-mode tensor kernel launch failed: " +
-                                 std::string(cudaGetErrorString(err)));
+    if (!synchronize) {
+        const size_t buffer_stride = state_pool->max_total_dim;
+        const size_t temp_bytes = static_cast<size_t>(batch_size) * buffer_stride * sizeof(cuDoubleComplex);
+        cuDoubleComplex* temp_state = static_cast<cuDoubleComplex*>(
+            state_pool->scratch_temp.ensure(temp_bytes));
+
+        apply_two_mode_tensor_gate_on_modes_kernel<<<grid_dim, block_dim, 0, stream>>>(
+            state_pool->data,
+            state_pool->state_offsets,
+            state_pool->state_dims,
+            target_indices,
+            batch_size,
+            tensor_matrix,
+            single_mode_cutoff,
+            mode1_stride,
+            mode2_stride,
+            temp_state,
+            buffer_stride
+        );
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            throw std::runtime_error("Two-mode tensor kernel launch failed: " +
+                                     std::string(cudaGetErrorString(err)));
+        }
+
+        copy_back_two_mode_tensor_gate_kernel<<<grid_dim, block_dim, 0, stream>>>(
+            state_pool->data,
+            state_pool->state_offsets,
+            state_pool->state_dims,
+            target_indices,
+            batch_size,
+            temp_state,
+            buffer_stride
+        );
+        err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            throw std::runtime_error("Two-mode tensor write-back failed: " +
+                                     std::string(cudaGetErrorString(err)));
+        }
+        return;
     }
 
-    err = cudaDeviceSynchronize();
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Two-mode tensor kernel synchronization failed: " +
-                                 std::string(cudaGetErrorString(err)));
-    }
+    const std::vector<int> host_targets = copy_target_indices_to_host(target_indices, batch_size);
+    std::vector<int> state_dims(batch_size, 0);
+    std::vector<size_t> output_offsets(batch_size, 0);
+    std::vector<bool> output_owned(batch_size, false);
 
-    copy_back_two_mode_tensor_gate_kernel<<<grid_dim, block_dim>>>(
-        state_pool->data,
-        state_pool->state_offsets,
-        state_pool->state_dims,
-        target_indices,
-        batch_size,
-        temp_state,
-        buffer_stride
-    );
-    err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Two-mode tensor write-back failed: " +
-                                 std::string(cudaGetErrorString(err)));
-    }
+    try {
+        for (int batch_id = 0; batch_id < batch_size; ++batch_id) {
+            const int state_id = host_targets[batch_id];
+            if (!state_pool->is_valid_state(state_id)) {
+                throw std::invalid_argument("Two-mode tensor target state is invalid");
+            }
 
-    err = cudaDeviceSynchronize();
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Two-mode tensor write-back synchronization failed: " +
-                                 std::string(cudaGetErrorString(err)));
+            const int64_t state_dim = state_pool->get_state_dim(state_id);
+            state_dims[batch_id] = state_dim;
+            output_offsets[batch_id] =
+                state_pool->allocate_detached_storage(static_cast<size_t>(state_dim));
+            output_owned[batch_id] = true;
+        }
+
+        const size_t* d_output_offsets =
+            state_pool->upload_values_to_buffer(output_offsets.data(),
+                                                output_offsets.size(),
+                                                state_pool->scratch_aux);
+
+        apply_two_mode_tensor_gate_to_output_kernel<<<grid_dim, block_dim, 0, stream>>>(
+            state_pool->data,
+            state_pool->state_offsets,
+            state_pool->state_dims,
+            target_indices,
+            d_output_offsets,
+            batch_size,
+            tensor_matrix,
+            single_mode_cutoff,
+            mode1_stride,
+            mode2_stride
+        );
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            throw std::runtime_error("Two-mode tensor direct-write launch failed: " +
+                                     std::string(cudaGetErrorString(err)));
+        }
+
+        synchronize_if_requested(stream, true, "Two-mode tensor direct-write sync failed: ");
+
+        for (int batch_id = 0; batch_id < batch_size; ++batch_id) {
+            state_pool->replace_state_storage(host_targets[batch_id],
+                                              output_offsets[batch_id],
+                                              static_cast<size_t>(state_dims[batch_id]),
+                                              state_dims[batch_id]);
+            output_owned[batch_id] = false;
+        }
+    } catch (...) {
+        for (int batch_id = 0; batch_id < batch_size; ++batch_id) {
+            if (!output_owned[batch_id]) {
+                continue;
+            }
+            state_pool->release_detached_storage(output_offsets[batch_id],
+                                                static_cast<size_t>(state_dims[batch_id]));
+        }
+        throw;
     }
 }
 
@@ -513,7 +711,7 @@ __global__ void apply_bs_tensor_kernel(
     const cuDoubleComplex* bs_matrix,
     int cutoff) {
     
-    int m = blockIdx.x * blockDim.x + threadIdx.x;
+    int64_t m = (int64_t)blockIdx.x * blockDim.x + threadIdx.x;
     int n = blockIdx.y * blockDim.y + threadIdx.y;
     
     if (m >= cutoff || n >= cutoff) return;
@@ -538,22 +736,13 @@ __global__ void apply_bs_tensor_kernel(
     output_state[output_idx] = amplitude;
 }
 
-// 全局缓存：存储预计算的BS矩阵
-static cuDoubleComplex* d_bs_matrix_cache = nullptr;
-static int cached_cutoff = 0;
-static double cached_theta = -999.0;
-static double cached_phi = -999.0;
-
-// 全局缓存：存储预计算的Two-Mode Squeezing矩阵
-static cuDoubleComplex* d_tms_matrix_cache = nullptr;
-static int cached_tms_cutoff = 0;
-static double cached_tms_r = -999.0;
-static double cached_tms_theta = -999.0;
-
-// 全局缓存：存储预计算的SUM矩阵
-static cuDoubleComplex* d_sum_matrix_cache = nullptr;
-static int cached_sum_cutoff = 0;
-static double cached_sum_scale = -999.0;
+// 全局缓存：存储预计算的双模tensor矩阵，避免条件门/重放路径在正负参数间反复重建。
+static std::vector<TensorMatrixCacheEntry> g_bs_matrix_cache_entries;
+static uint64_t g_bs_matrix_cache_use_counter = 0;
+static std::vector<TensorMatrixCacheEntry> g_tms_matrix_cache_entries;
+static uint64_t g_tms_matrix_cache_use_counter = 0;
+static std::vector<TensorMatrixCacheEntry> g_sum_matrix_cache_entries;
+static uint64_t g_sum_matrix_cache_use_counter = 0;
 
 /**
  * Helper: 计算 log(n!)
@@ -734,7 +923,7 @@ __constant__ cuDoubleComplex bs_matrix_const[MAX_SUBSPACE_DIM * MAX_SUBSPACE_DIM
 
 __global__ void apply_two_mode_gate_fast_kernel(
     cuDoubleComplex* state_data,
-    int d_trunc,
+    int64_t d_trunc,
     const int* target_indices,
     int batch_size,
     int max_photon_number
@@ -745,7 +934,7 @@ __global__ void apply_two_mode_gate_fast_kernel(
     if (batch_id >= batch_size) return;
 
     int state_idx = target_indices[batch_id];
-    cuDoubleComplex* psi = &state_data[state_idx * d_trunc];
+    cuDoubleComplex* psi = &state_data[static_cast<size_t>(state_idx) * d_trunc];
 
     int subspace_k = blockIdx.x;
     if (subspace_k >= max_photon_number) return;
@@ -950,7 +1139,7 @@ void apply_two_mode_gate(CVStatePool* state_pool, const int* target_indices,
 __global__ void apply_eswap_kernel(
     cuDoubleComplex* state_data,
     const size_t* state_offsets,
-    const int* state_dims,
+    const int64_t* state_dims,
     const int* target_indices,
     int batch_size,
     double theta,
@@ -961,7 +1150,7 @@ __global__ void apply_eswap_kernel(
     if (batch_id >= batch_size) return;
 
     int state_idx = target_indices[batch_id];
-    int m = blockIdx.x * blockDim.x + threadIdx.x;
+    int64_t m = (int64_t)blockIdx.x * blockDim.x + threadIdx.x;
     int n = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (m >= cutoff_a || n >= cutoff_b) return;
@@ -1042,7 +1231,7 @@ void apply_exponential_swap(CVStatePool* state_pool, const int* target_indices,
 __global__ void apply_sum_gate_kernel(
     cuDoubleComplex* state_data,
     const size_t* state_offsets,
-    const int* state_dims,
+    const int64_t* state_dims,
     const int* target_indices,
     int batch_size,
     double scale,
@@ -1055,7 +1244,7 @@ __global__ void apply_sum_gate_kernel(
     if (batch_id >= batch_size) return;
 
     int state_idx = target_indices[batch_id];
-    int m = blockIdx.x * blockDim.x + threadIdx.x;
+    int64_t m = (int64_t)blockIdx.x * blockDim.x + threadIdx.x;
     int n = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (m >= cutoff_a || n >= cutoff_b) return;
@@ -1091,7 +1280,8 @@ __global__ void apply_sum_gate_kernel(
 
 void apply_sum_gate(CVStatePool* state_pool, const int* target_indices,
                    int batch_size, double scale, int cutoff_a, int cutoff_b,
-                   int target_qumode1, int target_qumode2, int num_qumodes) {
+                   int target_qumode1, int target_qumode2, int num_qumodes,
+                   cudaStream_t stream, bool synchronize) {
     if (batch_size <= 0) {
         return;
     }
@@ -1101,47 +1291,29 @@ void apply_sum_gate(CVStatePool* state_pool, const int* target_indices,
     }
 
     const int single_mode_cutoff = cutoff_a;
-    const bool cache_valid = (d_sum_matrix_cache != nullptr &&
-                              cached_sum_cutoff == single_mode_cutoff &&
-                              std::abs(cached_sum_scale - scale) < 1e-10);
-
-    if (!cache_valid) {
-        if (d_sum_matrix_cache != nullptr) {
-            cudaFree(d_sum_matrix_cache);
-            d_sum_matrix_cache = nullptr;
-        }
-
-        const std::vector<cuDoubleComplex> h_sum_matrix = build_sum_tensor_dense(single_mode_cutoff, scale);
-        cudaError_t err = cudaMalloc(&d_sum_matrix_cache,
-                                     h_sum_matrix.size() * sizeof(cuDoubleComplex));
-        if (err != cudaSuccess) {
-            throw std::runtime_error("SUM gate matrix allocation failed: " +
-                                     std::string(cudaGetErrorString(err)));
-        }
-
-        err = cudaMemcpy(d_sum_matrix_cache, h_sum_matrix.data(),
-                         h_sum_matrix.size() * sizeof(cuDoubleComplex),
-                         cudaMemcpyHostToDevice);
-        if (err != cudaSuccess) {
-            cudaFree(d_sum_matrix_cache);
-            d_sum_matrix_cache = nullptr;
-            throw std::runtime_error("SUM gate matrix upload failed: " +
-                                     std::string(cudaGetErrorString(err)));
-        }
-
-        cached_sum_cutoff = single_mode_cutoff;
-        cached_sum_scale = scale;
-    }
+    const cuDoubleComplex* sum_matrix = get_or_build_two_mode_tensor_cache(
+        &g_sum_matrix_cache_entries,
+        &g_sum_matrix_cache_use_counter,
+        single_mode_cutoff,
+        scale,
+        0.0,
+        "SUM gate matrix allocation failed: ",
+        "SUM gate matrix upload failed: ",
+        [&]() {
+            return build_sum_tensor_dense(single_mode_cutoff, scale);
+        });
 
     apply_cached_two_mode_tensor_gate(
         state_pool,
         target_indices,
         batch_size,
         single_mode_cutoff,
-        d_sum_matrix_cache,
+        sum_matrix,
         target_qumode1,
         target_qumode2,
-        num_qumodes);
+        num_qumodes,
+        stream,
+        synchronize);
 }
 
 // ==========================================
@@ -1157,7 +1329,7 @@ void apply_sum_gate(CVStatePool* state_pool, const int* target_indices,
 __global__ void apply_three_mode_squeezing_kernel(
     cuDoubleComplex* state_data,
     const size_t* state_offsets,
-    const int* state_dims,
+    const int64_t* state_dims,
     const int* target_indices,
     int batch_size,
     cuDoubleComplex theta,
@@ -1172,7 +1344,7 @@ __global__ void apply_three_mode_squeezing_kernel(
 
     int state_idx = target_indices[batch_id];
     
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int64_t i = (int64_t)blockIdx.x * blockDim.x + threadIdx.x;
     int j = blockIdx.y * blockDim.y + threadIdx.y;
     int k = threadIdx.z;
 
@@ -1386,61 +1558,36 @@ void build_tms_matrix_recursive(
  */
 void apply_two_mode_squeezing_recursive(CVStatePool* state_pool, const int* target_indices,
                                        int batch_size, double r, double theta,
-                                       int target_qumode1, int target_qumode2, int num_qumodes) {
+                                       int target_qumode1, int target_qumode2, int num_qumodes,
+                                       cudaStream_t stream, bool synchronize) {
     if (batch_size <= 0) {
         return;
     }
 
     const int single_mode_cutoff = infer_single_mode_cutoff(state_pool, num_qumodes);
-    
-    // 检查缓存是否有效
-    const bool cache_valid = (d_tms_matrix_cache != nullptr &&
-                              cached_tms_cutoff == single_mode_cutoff &&
-                              std::abs(cached_tms_r - r) < 1e-10 &&
-                              std::abs(cached_tms_theta - theta) < 1e-10);
-    
-    if (!cache_valid) {
-        // 释放旧缓存
-        if (d_tms_matrix_cache != nullptr) {
-            cudaFree(d_tms_matrix_cache);
-            d_tms_matrix_cache = nullptr;
-        }
-        
-        // 在CPU上构建TMS矩阵
-        const std::vector<cuDoubleComplex> h_tms_matrix =
-            build_tms_tensor_dense(single_mode_cutoff, r, theta);
-        
-        // 分配GPU内存并上传
-        const size_t matrix_size = h_tms_matrix.size() * sizeof(cuDoubleComplex);
-        cudaError_t err = cudaMalloc(&d_tms_matrix_cache, matrix_size);
-        if (err != cudaSuccess) {
-            throw std::runtime_error("Two-Mode Squeezing matrix allocation failed: " +
-                                     std::string(cudaGetErrorString(err)));
-        }
-
-        err = cudaMemcpy(d_tms_matrix_cache, h_tms_matrix.data(), matrix_size, cudaMemcpyHostToDevice);
-        if (err != cudaSuccess) {
-            cudaFree(d_tms_matrix_cache);
-            d_tms_matrix_cache = nullptr;
-            throw std::runtime_error("Two-Mode Squeezing matrix upload failed: " +
-                                     std::string(cudaGetErrorString(err)));
-        }
-        
-        // 更新缓存参数
-        cached_tms_cutoff = single_mode_cutoff;
-        cached_tms_r = r;
-        cached_tms_theta = theta;
-    }
+    const cuDoubleComplex* tms_matrix = get_or_build_two_mode_tensor_cache(
+        &g_tms_matrix_cache_entries,
+        &g_tms_matrix_cache_use_counter,
+        single_mode_cutoff,
+        r,
+        theta,
+        "Two-Mode Squeezing matrix allocation failed: ",
+        "Two-Mode Squeezing matrix upload failed: ",
+        [&]() {
+            return build_tms_tensor_dense(single_mode_cutoff, r, theta);
+        });
     
     apply_cached_two_mode_tensor_gate(
         state_pool,
         target_indices,
         batch_size,
         single_mode_cutoff,
-        d_tms_matrix_cache,
+        tms_matrix,
         target_qumode1,
         target_qumode2,
-        num_qumodes);
+        num_qumodes,
+        stream,
+        synchronize);
 }
 
 /**
@@ -1462,50 +1609,38 @@ void apply_two_mode_squeezing_recursive(CVStatePool* state_pool, const int* targ
  */
 void apply_beam_splitter_recursive(CVStatePool* state_pool, const int* target_indices,
                                    int batch_size, double theta, double phi,
-                                   int target_qumode1, int target_qumode2, int num_qumodes) {
+                                   int target_qumode1, int target_qumode2, int num_qumodes,
+                                   cudaStream_t stream, bool synchronize) {
     if (batch_size <= 0) {
         return;
     }
 
     int single_mode_cutoff = infer_single_mode_cutoff(state_pool, num_qumodes);
-    
-    // 检查缓存是否有效
-    bool cache_valid = (d_bs_matrix_cache != nullptr &&
-                       cached_cutoff == single_mode_cutoff &&
-                       std::abs(cached_theta - theta) < 1e-10 &&
-                       std::abs(cached_phi - phi) < 1e-10);
-    
-    if (!cache_valid) {
-        // 释放旧缓存
-        if (d_bs_matrix_cache != nullptr) {
-            cudaFree(d_bs_matrix_cache);
-            d_bs_matrix_cache = nullptr;
-        }
-        
-        // 在CPU上构建BS矩阵（使用递推方法）
-        std::vector<cuDoubleComplex> h_bs_matrix;
-        build_bs_matrix_recursive(h_bs_matrix, single_mode_cutoff, theta, phi);
-        
-        // 分配GPU内存并上传
-        size_t matrix_size = h_bs_matrix.size() * sizeof(cuDoubleComplex);
-        cudaMalloc(&d_bs_matrix_cache, matrix_size);
-        cudaMemcpy(d_bs_matrix_cache, h_bs_matrix.data(), matrix_size, cudaMemcpyHostToDevice);
-        
-        // 更新缓存参数
-        cached_cutoff = single_mode_cutoff;
-        cached_theta = theta;
-        cached_phi = phi;
-    }
+    const cuDoubleComplex* bs_matrix = get_or_build_two_mode_tensor_cache(
+        &g_bs_matrix_cache_entries,
+        &g_bs_matrix_cache_use_counter,
+        single_mode_cutoff,
+        theta,
+        phi,
+        "Beam Splitter matrix allocation failed: ",
+        "Beam Splitter matrix upload failed: ",
+        [&]() {
+            std::vector<cuDoubleComplex> h_bs_matrix;
+            build_bs_matrix_recursive(h_bs_matrix, single_mode_cutoff, theta, phi);
+            return h_bs_matrix;
+        });
     
     apply_cached_two_mode_tensor_gate(
         state_pool,
         target_indices,
         batch_size,
         single_mode_cutoff,
-        d_bs_matrix_cache,
+        bs_matrix,
         target_qumode1,
         target_qumode2,
-        num_qumodes);
+        num_qumodes,
+        stream,
+        synchronize);
 }
 
 
@@ -1520,9 +1655,11 @@ void apply_beam_splitter_recursive(CVStatePool* state_pool, const int* target_in
 void apply_mzgate(CVStatePool* state_pool, const int* target_indices,
                  int batch_size, double phi_in, double phi_ex, int cutoff_a, int cutoff_b) {
     // MZ 门分解为：BS(π/4) -> R(φ) -> BS(π/4)
-    apply_beam_splitter_recursive(state_pool, target_indices, batch_size, M_PI / 4, 0.0, 0, 1, 2);
+    apply_beam_splitter_recursive(
+        state_pool, target_indices, batch_size, M_PI / 4, 0.0, 0, 1, 2, nullptr, true);
     // 中间的相位旋转需要单独实现
-    apply_beam_splitter_recursive(state_pool, target_indices, batch_size, M_PI / 4, 0.0, 0, 1, 2);
+    apply_beam_splitter_recursive(
+        state_pool, target_indices, batch_size, M_PI / 4, 0.0, 0, 1, 2, nullptr, true);
 }
 
 /**
@@ -1532,7 +1669,7 @@ void apply_mzgate(CVStatePool* state_pool, const int* target_indices,
 __global__ void apply_czgate_kernel(
     cuDoubleComplex* state_data,
     const size_t* state_offsets,
-    const int* state_dims,
+    const int64_t* state_dims,
     const int* target_indices,
     int batch_size,
     double s,
@@ -1543,7 +1680,7 @@ __global__ void apply_czgate_kernel(
     if (batch_id >= batch_size) return;
 
     int state_idx = target_indices[batch_id];
-    int m = blockIdx.x * blockDim.x + threadIdx.x;
+    int64_t m = (int64_t)blockIdx.x * blockDim.x + threadIdx.x;
     int n = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (m >= cutoff_a || n >= cutoff_b) return;
@@ -1593,7 +1730,7 @@ void apply_czgate(CVStatePool* state_pool, const int* target_indices,
 __global__ void apply_ckgate_kernel(
     cuDoubleComplex* state_data,
     const size_t* state_offsets,
-    const int* state_dims,
+    const int64_t* state_dims,
     const int* target_indices,
     int batch_size,
     double kappa,
@@ -1604,7 +1741,7 @@ __global__ void apply_ckgate_kernel(
     if (batch_id >= batch_size) return;
 
     int state_idx = target_indices[batch_id];
-    int m = blockIdx.x * blockDim.x + threadIdx.x;
+    int64_t m = (int64_t)blockIdx.x * blockDim.x + threadIdx.x;
     int n = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (m >= cutoff_a || n >= cutoff_b) return;
@@ -1624,7 +1761,7 @@ __global__ void apply_ckgate_kernel(
 __global__ void apply_ckgate_multimode_kernel(
     cuDoubleComplex* state_data,
     const size_t* state_offsets,
-    const int* state_dims,
+    const int64_t* state_dims,
     const int* target_indices,
     int batch_size,
     double kappa,
@@ -1638,7 +1775,7 @@ __global__ void apply_ckgate_multimode_kernel(
 
     const int state_idx = target_indices[batch_id];
     const size_t flat_index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-    const int current_dim = state_dims[state_idx];
+    const int64_t current_dim = state_dims[state_idx];
     if (flat_index >= static_cast<size_t>(current_dim)) return;
 
     cuDoubleComplex* psi = &state_data[state_offsets[state_idx]];
