@@ -128,29 +128,37 @@ TEST_F(ValidationTest, CommutationRelation) {
     EXPECT_NEAR(commutator.imag(), 0.0, 1e-10);
 }
 
-// 测试混合控制门
+// 测试混合控制门 (σ_z 语义: control=0 → +param, control=1 → -param)
 TEST_F(ValidationTest, HybridControlGates) {
     Reference::Complex alpha_cd(0.1, 0.05);
     Reference::Complex xi_cs(0.1, 0.0);
     
-    // 测试控制状态为0时，状态不应改变
+    // 测试控制状态为0时：应用 D(+α) / S(+ξ)
     for (const auto& state : test_states) {
         auto cd_result = Reference::HybridControlGates::apply_controlled_displacement(0, state, alpha_cd);
-        double cd_fidelity = Reference::fidelity(state, cd_result);
+        auto cd_expected = Reference::SingleModeGates::apply_displacement_gate(state, alpha_cd);
+        double cd_fidelity = Reference::fidelity(cd_expected, cd_result);
         EXPECT_NEAR(cd_fidelity, 1.0, 1e-10);
         
         auto cs_result = Reference::HybridControlGates::apply_controlled_squeezing(0, state, xi_cs);
-        double cs_fidelity = Reference::fidelity(state, cs_result);
+        auto cs_expected = Reference::SingleModeGates::apply_squeezing_gate(state, xi_cs);
+        double cs_fidelity = Reference::fidelity(cs_expected, cs_result);
         EXPECT_NEAR(cs_fidelity, 1.0, 1e-10);
     }
     
-    // 测试控制状态为1时，状态应该改变
+    // 测试控制状态为1时：应用 D(-α) / S(-ξ)，结果保持归一化
     for (const auto& state : test_states) {
         auto cd_result = Reference::HybridControlGates::apply_controlled_displacement(1, state, alpha_cd);
+        auto cd_expected = Reference::SingleModeGates::apply_displacement_gate(state, -alpha_cd);
+        double cd_fidelity = Reference::fidelity(cd_expected, cd_result);
+        EXPECT_NEAR(cd_fidelity, 1.0, 1e-10);
         double cd_norm = Reference::vector_norm(cd_result);
         EXPECT_NEAR(cd_norm, 1.0, 1e-7);
         
         auto cs_result = Reference::HybridControlGates::apply_controlled_squeezing(1, state, xi_cs);
+        auto cs_expected = Reference::SingleModeGates::apply_squeezing_gate(state, -xi_cs);
+        double cs_fidelity = Reference::fidelity(cs_expected, cs_result);
+        EXPECT_NEAR(cs_fidelity, 1.0, 1e-10);
         double cs_norm = Reference::vector_norm(cs_result);
         EXPECT_NEAR(cs_norm, 1.0, 1e-7);
     }
