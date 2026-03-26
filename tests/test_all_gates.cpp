@@ -14,7 +14,7 @@ extern void apply_phase_rotation(CVStatePool* pool, const int* targets, int batc
 extern void apply_kerr_gate(CVStatePool* pool, const int* targets, int batch_size, double chi);
 extern void apply_creation_operator(CVStatePool* pool, const int* targets, int batch_size);
 extern void apply_annihilation_operator(CVStatePool* pool, const int* targets, int batch_size);
-extern void apply_displacement_gate(CVStatePool* pool, const int* targets, int batch_size, cuDoubleComplex alpha);
+extern void apply_displacement_gate(CVStatePool* pool, const int* targets, int batch_size, cuDoubleComplex alpha, cudaStream_t stream = nullptr, bool synchronize = true);
 
 namespace {
 

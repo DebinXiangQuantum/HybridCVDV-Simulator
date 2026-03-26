@@ -149,11 +149,23 @@ endif()
 
 set(CPU_SOURCES
     src/cpu/quantum_circuit.cpp
+    src/cpu/circuit_hdd_gaussian.cpp
+    src/cpu/circuit_compilation.cpp
+    src/cpu/circuit_execution.cpp
+    src/cpu/circuit_checkpoint.cpp
+    src/cpu/circuit_gate_dispatch.cpp
+    src/cpu/circuit_cv_gates.cpp
+    src/cpu/circuit_interaction.cpp
+    src/cpu/circuit_selective_rotation.cpp
+    src/cpu/circuit_pairwise_helpers.cpp
+    src/cpu/circuit_utilities.cpp
 )
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release" AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     set_source_files_properties(
         src/cpu/quantum_circuit.cpp
+        src/cpu/circuit_compilation.cpp
+        src/cpu/circuit_execution.cpp
         PROPERTIES COMPILE_OPTIONS "-O1"
     )
 endif()
