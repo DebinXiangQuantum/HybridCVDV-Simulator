@@ -56,26 +56,28 @@ HDDNode* QuantumCircuit::scale_hdd_node(HDDNode* node, std::complex<double> weig
             return node_manager_.create_terminal_node(shared_zero_state_id_);
         }
         if (is_symbolic_terminal_id(node->tensor_id)) {
-            const SymbolicTerminalState& symbolic_state =
+            const MixtureGaussianState& mixture =
                 symbolic_terminal_states_.at(node->tensor_id);
-            std::vector<SymbolicGaussianBranch> scaled_branches;
-            scaled_branches.reserve(symbolic_state.branches.size());
-            for (const SymbolicGaussianBranch& existing_branch : symbolic_state.branches) {
-                SymbolicGaussianBranch scaled_branch = existing_branch;
-                scaled_branch.gaussian_state_id =
-                    duplicate_gaussian_state(existing_branch.gaussian_state_id);
-                scaled_branch.weight *= weight;
-                scaled_branches.push_back(std::move(scaled_branch));
+            // Zero-GPU-copy: share state via refcount, only scale weights
+            std::vector<GaussianComponent> scaled_components;
+            scaled_components.reserve(mixture.components.size());
+            for (const GaussianComponent& comp : mixture.components) {
+                GaussianComponent scaled = comp;
+                scaled.weight *= weight;
+                if (comp.gaussian_state_id >= 0 && gaussian_state_pool_) {
+                    gaussian_state_pool_->add_ref(comp.gaussian_state_id);
+                }
+                scaled_components.push_back(std::move(scaled));
             }
 
-            if (scaled_branches.empty()) {
+            if (scaled_components.empty()) {
                 return node_manager_.create_terminal_node(shared_zero_state_id_);
             }
 
             const int scaled_terminal_id = allocate_symbolic_terminal_id();
             symbolic_terminal_states_.emplace(
                 scaled_terminal_id,
-                SymbolicTerminalState{std::move(scaled_branches)});
+                MixtureGaussianState{std::move(scaled_components)});
             return node_manager_.create_terminal_node(scaled_terminal_id);
         }
 
@@ -173,18 +175,18 @@ HDDNode* QuantumCircuit::hdd_add(HDDNode* n1, std::complex<double> w1, HDDNode* 
             return projected_id;
         };
 
-    const auto free_temporary_symbolic_branches =
-        [&](std::vector<SymbolicGaussianBranch>* branches) {
+    const auto free_temporary_components =
+        [&](std::vector<GaussianComponent>* comps) {
             if (!gaussian_state_pool_) {
-                branches->clear();
+                comps->clear();
                 return;
             }
-            for (const SymbolicGaussianBranch& branch : *branches) {
-                if (branch.gaussian_state_id >= 0) {
-                    gaussian_state_pool_->free_state(branch.gaussian_state_id);
+            for (const GaussianComponent& comp : *comps) {
+                if (comp.gaussian_state_id >= 0) {
+                    gaussian_state_pool_->release_ref(comp.gaussian_state_id);
                 }
             }
-            branches->clear();
+            comps->clear();
         };
 
     std::function<HDDNode*(HDDNode*, std::complex<double>, HDDNode*, std::complex<double>)>
@@ -236,39 +238,41 @@ HDDNode* QuantumCircuit::hdd_add(HDDNode* n1, std::complex<double> w1, HDDNode* 
                     bool force_project_symbolic_sum = false;
 
                     if ((symbolic1 || zero1) && (symbolic2 || zero2)) {
-                        std::vector<SymbolicGaussianBranch> combined_branches;
+                        // Zero-GPU-copy: concat component lists, share states via refcount
+                        std::vector<GaussianComponent> combined;
 
-                        auto append_scaled_branches =
+                        auto append_scaled_components =
                             [&](int terminal_id, std::complex<double> scale) {
                                 if (std::abs(scale) < 1e-14 || !is_symbolic_terminal_id(terminal_id)) {
                                     return;
                                 }
-                                const SymbolicTerminalState& symbolic_state =
+                                const MixtureGaussianState& mixture =
                                     symbolic_terminal_states_.at(terminal_id);
-                                for (const SymbolicGaussianBranch& existing_branch : symbolic_state.branches) {
-                                    SymbolicGaussianBranch new_branch = existing_branch;
-                                    new_branch.gaussian_state_id =
-                                        duplicate_gaussian_state(existing_branch.gaussian_state_id);
-                                    new_branch.weight *= scale;
-                                    combined_branches.push_back(std::move(new_branch));
+                                for (const GaussianComponent& comp : mixture.components) {
+                                    GaussianComponent new_comp = comp;
+                                    new_comp.weight *= scale;
+                                    if (comp.gaussian_state_id >= 0 && gaussian_state_pool_) {
+                                        gaussian_state_pool_->add_ref(comp.gaussian_state_id);
+                                    }
+                                    combined.push_back(std::move(new_comp));
                                 }
                             };
 
-                        append_scaled_branches(id1, lhs_weight);
-                        append_scaled_branches(id2, rhs_weight);
+                        append_scaled_components(id1, lhs_weight);
+                        append_scaled_components(id2, rhs_weight);
 
-                        if (combined_branches.empty()) {
+                        if (combined.empty()) {
                             result = node_manager_.create_terminal_node(shared_zero_state_id_);
                             add_memo.emplace(key, result);
                             return result;
                         }
 
-                        if (combined_branches.size() <=
+                        if (combined.size() <=
                             static_cast<size_t>(symbolic_branch_limit_)) {
                             const int symbolic_terminal_id = allocate_symbolic_terminal_id();
                             symbolic_terminal_states_.emplace(
                                 symbolic_terminal_id,
-                                SymbolicTerminalState{std::move(combined_branches)});
+                                MixtureGaussianState{std::move(combined)});
                             result = node_manager_.create_terminal_node(symbolic_terminal_id);
                             add_memo.emplace(key, result);
                             return result;
@@ -276,8 +280,8 @@ HDDNode* QuantumCircuit::hdd_add(HDDNode* n1, std::complex<double> w1, HDDNode* 
 
                         FALLBACK_DEBUG_LOG
                             << "[fallback] hdd_add materializing symbolic sum because combined branches would grow to "
-                            << combined_branches.size() << std::endl;
-                        free_temporary_symbolic_branches(&combined_branches);
+                            << combined.size() << std::endl;
+                        free_temporary_components(&combined);
                         force_project_symbolic_sum = true;
                     }
 

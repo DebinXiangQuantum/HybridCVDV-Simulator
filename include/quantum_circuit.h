@@ -293,14 +293,24 @@ private:
         std::string compile_error;
     };
 
-    struct SymbolicGaussianBranch {
-        int gaussian_state_id = -1;
-        std::complex<double> weight{1.0, 0.0};
-        std::vector<GateParams> replay_gates;
+    /**
+     * GaussianComponent — 混合高斯态的单个分量。
+     * 持有 GaussianStatePool 中的 state_id（引用计数共享），
+     * 以及复数权重和需要重放的门序列。
+     */
+    struct GaussianComponent {
+        int gaussian_state_id = -1;           // GaussianStatePool 中的索引（引用计数）
+        std::complex<double> weight{1.0, 0.0}; // c_k
+        std::vector<GateParams> replay_gates;  // Fock 物化时需要重放的门
     };
 
-    struct SymbolicTerminalState {
-        std::vector<SymbolicGaussianBranch> branches;
+    /**
+     * MixtureGaussianState — CV 层的一等混合高斯态。
+     * HDD terminal 指向一个 MixtureGaussianState，而非拆分为多个 HDD 分支。
+     * scale/DD_Add 操作仅修改 component weights，不复制 GPU 状态。
+     */
+    struct MixtureGaussianState {
+        std::vector<GaussianComponent> components;
     };
 
     struct GaussianFrame {
@@ -318,7 +328,7 @@ private:
         bool reusable_recorded = false;
     };
 
-    std::unordered_map<int, SymbolicTerminalState> symbolic_terminal_states_;
+    std::unordered_map<int, MixtureGaussianState> symbolic_terminal_states_;
     cudaStream_t compute_stream_ = nullptr;
     cudaStream_t upload_stream_ = nullptr;
     std::array<TargetUploadSlot, 2> target_upload_slots_{};

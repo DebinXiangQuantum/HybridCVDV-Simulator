@@ -85,17 +85,18 @@ bool QuantumCircuit::try_execute_gaussian_block_with_ede(
                         return unchanged_terminal;
                     }
 
-                    std::vector<SymbolicGaussianBranch> transformed_branches;
+                    std::vector<GaussianComponent> transformed_comps;
 
                     if (is_symbolic_terminal_id(node->tensor_id)) {
-                        const SymbolicTerminalState& symbolic_state =
+                        const MixtureGaussianState& mixture =
                             symbolic_terminal_states_.at(node->tensor_id);
-                        transformed_branches.reserve(symbolic_state.branches.size());
-                        for (const SymbolicGaussianBranch& existing_branch : symbolic_state.branches) {
-                            SymbolicGaussianBranch transformed_branch = existing_branch;
-                            transformed_branch.gaussian_state_id =
-                                duplicate_gaussian_state(existing_branch.gaussian_state_id);
-                            transformed_branches.push_back(std::move(transformed_branch));
+                        transformed_comps.reserve(mixture.components.size());
+                        for (const GaussianComponent& comp : mixture.components) {
+                            GaussianComponent t = comp;
+                            // Always copy: we will mutate via symplectic update
+                            t.gaussian_state_id =
+                                duplicate_gaussian_state(comp.gaussian_state_id);
+                            transformed_comps.push_back(std::move(t));
                         }
                     } else {
                         auto cache_it = terminal_state_cache.find(node->tensor_id);
@@ -122,13 +123,13 @@ bool QuantumCircuit::try_execute_gaussian_block_with_ede(
                             throw std::runtime_error("Gaussian状态池已满，无法创建symbolic branch");
                         }
                         initialize_gaussian_vacuum_state(gaussian_state_id);
-                        transformed_branches.push_back(
+                        transformed_comps.push_back(
                             {gaussian_state_id, info.scale, {}});
                     }
 
                     std::vector<int> gaussian_state_ids;
-                    gaussian_state_ids.reserve(transformed_branches.size());
-                    for (const SymbolicGaussianBranch& branch : transformed_branches) {
+                    gaussian_state_ids.reserve(transformed_comps.size());
+                    for (const GaussianComponent& branch : transformed_comps) {
                         gaussian_state_ids.push_back(branch.gaussian_state_id);
                     }
 
@@ -137,7 +138,7 @@ bool QuantumCircuit::try_execute_gaussian_block_with_ede(
                         apply_symplectic_update_to_gaussian_states(
                             gaussian_state_ids,
                             gate_to_symplectic(gate, num_qumodes_));
-                        for (SymbolicGaussianBranch& branch : transformed_branches) {
+                        for (GaussianComponent& branch : transformed_comps) {
                             branch.replay_gates.push_back(gate);
                         }
                     }
@@ -148,7 +149,7 @@ bool QuantumCircuit::try_execute_gaussian_block_with_ede(
                     int symbolic_terminal_id = allocate_symbolic_terminal_id();
                     symbolic_terminal_states_.emplace(
                         symbolic_terminal_id,
-                        SymbolicTerminalState{std::move(transformed_branches)});
+                        MixtureGaussianState{std::move(transformed_comps)});
                     HDDNode* transformed_terminal =
                         node_manager_.create_terminal_node(symbolic_terminal_id);
                     transformed_terminal_cache.emplace(cache_key, transformed_terminal);
@@ -346,18 +347,18 @@ int QuantumCircuit::project_symbolic_terminal_to_fock_state(int terminal_id) {
         throw std::runtime_error("symbolic terminal sidecar missing during Fock materialization");
     }
 
-    if (gaussian_state_pool_ && it->second.branches.size() > 1) {
+    if (gaussian_state_pool_ && it->second.components.size() > 1) {
         std::unordered_map<std::string, size_t> unique_branch_index;
-        std::vector<SymbolicGaussianBranch> coalesced_branches;
-        coalesced_branches.reserve(it->second.branches.size());
+        std::vector<GaussianComponent> coalesced_branches;
+        coalesced_branches.reserve(it->second.components.size());
 
         std::vector<double> displacement;
         std::vector<double> covariance;
-        for (SymbolicGaussianBranch& branch : it->second.branches) {
+        for (GaussianComponent& branch : it->second.components) {
             if (branch.gaussian_state_id < 0 ||
                 std::abs(branch.weight) < kSymbolicBranchPruneTolerance) {
                 if (branch.gaussian_state_id >= 0) {
-                    gaussian_state_pool_->free_state(branch.gaussian_state_id);
+                    gaussian_state_pool_->release_ref(branch.gaussian_state_id);
                 }
                 continue;
             }
@@ -381,32 +382,32 @@ int QuantumCircuit::project_symbolic_terminal_to_fock_state(int terminal_id) {
                 continue;
             }
 
-            SymbolicGaussianBranch& canonical_branch = coalesced_branches[dedup_it->second];
+            GaussianComponent& canonical_branch = coalesced_branches[dedup_it->second];
             canonical_branch.weight += branch.weight;
-            gaussian_state_pool_->free_state(branch.gaussian_state_id);
+            gaussian_state_pool_->release_ref(branch.gaussian_state_id);
         }
 
-        std::vector<SymbolicGaussianBranch> pruned_branches;
+        std::vector<GaussianComponent> pruned_branches;
         pruned_branches.reserve(coalesced_branches.size());
-        for (SymbolicGaussianBranch& branch : coalesced_branches) {
+        for (GaussianComponent& branch : coalesced_branches) {
             if (std::abs(branch.weight) < kSymbolicBranchPruneTolerance) {
                 if (branch.gaussian_state_id >= 0) {
-                    gaussian_state_pool_->free_state(branch.gaussian_state_id);
+                    gaussian_state_pool_->release_ref(branch.gaussian_state_id);
                 }
                 continue;
             }
             pruned_branches.push_back(std::move(branch));
         }
 
-        if (pruned_branches.size() != it->second.branches.size()) {
+        if (pruned_branches.size() != it->second.components.size()) {
             FALLBACK_DEBUG_LOG << "[fallback] coalesced symbolic terminal " << terminal_id
-                               << " branches: " << it->second.branches.size()
+                               << " branches: " << it->second.components.size()
                                << " -> " << pruned_branches.size() << std::endl;
         }
-        it->second.branches = std::move(pruned_branches);
+        it->second.components = std::move(pruned_branches);
     }
 
-    if (it->second.branches.empty()) {
+    if (it->second.components.empty()) {
         return shared_zero_state_id_;
     }
 
@@ -422,25 +423,25 @@ int QuantumCircuit::project_symbolic_terminal_to_fock_state(int terminal_id) {
     }
 
     FALLBACK_DEBUG_LOG << "[fallback] projecting symbolic terminal " << terminal_id
-                       << " to Fock, branches=" << it->second.branches.size() << std::endl;
+                       << " to Fock, branches=" << it->second.components.size() << std::endl;
 
     try {
         state_pool_.reserve_state_storage(accum_state_id, state_dim);
         zero_state_device(&state_pool_, accum_state_id, nullptr, false);
         state_pool_.reserve_state_storage(scratch_state_id, state_dim);
 
-        for (size_t branch_index = 0; branch_index < it->second.branches.size(); ++branch_index) {
-            const SymbolicGaussianBranch& branch = it->second.branches[branch_index];
+        for (size_t branch_index = 0; branch_index < it->second.components.size(); ++branch_index) {
+            const GaussianComponent& branch = it->second.components[branch_index];
             if (std::abs(branch.weight) < kSymbolicBranchPruneTolerance) {
                 continue;
             }
 
             if (branch_index == 0 ||
-                branch_index + 1 == it->second.branches.size() ||
+                branch_index + 1 == it->second.components.size() ||
                 ((branch_index + 1) % 32 == 0)) {
                 FALLBACK_DEBUG_LOG << "[fallback] terminal " << terminal_id
                                    << " replay branch " << (branch_index + 1)
-                                   << "/" << it->second.branches.size() << std::endl;
+                                   << "/" << it->second.components.size() << std::endl;
             }
 
             FALLBACK_DEBUG_LOG << "[fallback] terminal " << terminal_id
@@ -611,16 +612,16 @@ bool QuantumCircuit::try_execute_diagonal_non_gaussian_block_with_mixture(
     std::vector<HDDNode*> created_nodes;
     const int saved_next_symbolic_terminal_id = next_symbolic_terminal_id_;
 
-    auto free_branch_states = [&](std::vector<SymbolicGaussianBranch>* branches) {
+    auto free_component_refs = [&](std::vector<GaussianComponent>* comps) {
         if (!gaussian_state_pool_) {
             return;
         }
-        for (const SymbolicGaussianBranch& branch : *branches) {
-            if (branch.gaussian_state_id >= 0) {
-                gaussian_state_pool_->free_state(branch.gaussian_state_id);
+        for (const GaussianComponent& comp : *comps) {
+            if (comp.gaussian_state_id >= 0) {
+                gaussian_state_pool_->release_ref(comp.gaussian_state_id);
             }
         }
-        branches->clear();
+        comps->clear();
     };
 
     auto make_terminal_node = [&](int tensor_id) -> HDDNode* {
@@ -655,18 +656,18 @@ bool QuantumCircuit::try_execute_diagonal_non_gaussian_block_with_mixture(
                         return transformed_it->second;
                     }
 
-                    std::vector<SymbolicGaussianBranch> current_branches;
+                    std::vector<GaussianComponent> current_branches;
 
                     if (is_symbolic_terminal_id(node->tensor_id)) {
-                        const SymbolicTerminalState& symbolic_state =
+                        const MixtureGaussianState& symbolic_state =
                             symbolic_terminal_states_.at(node->tensor_id);
                         std::vector<std::complex<double>> initial_branch_weights;
-                        initial_branch_weights.reserve(symbolic_state.branches.size());
-                        for (const SymbolicGaussianBranch& existing_branch : symbolic_state.branches) {
+                        initial_branch_weights.reserve(symbolic_state.components.size());
+                        for (const GaussianComponent& existing_branch : symbolic_state.components) {
                             initial_branch_weights.push_back(existing_branch.weight);
                         }
 
-                        size_t projected_branch_count = symbolic_state.branches.size();
+                        size_t projected_branch_count = symbolic_state.components.size();
                         size_t failing_update_index = compiled_block.diagonal_mixture_updates.size();
                         if (symbolic_mixture_would_exceed_branch_limit(
                                 initial_branch_weights,
@@ -682,12 +683,14 @@ bool QuantumCircuit::try_execute_diagonal_non_gaussian_block_with_mixture(
                                 "), switching block to exact Fock");
                         }
 
-                        current_branches.reserve(symbolic_state.branches.size());
-                        for (const SymbolicGaussianBranch& existing_branch : symbolic_state.branches) {
-                            SymbolicGaussianBranch duplicated_branch = existing_branch;
-                            duplicated_branch.gaussian_state_id =
-                                duplicate_gaussian_state(existing_branch.gaussian_state_id);
-                            current_branches.push_back(std::move(duplicated_branch));
+                        // Share existing components via refcount (no GPU copy)
+                        current_branches.reserve(symbolic_state.components.size());
+                        for (const GaussianComponent& comp : symbolic_state.components) {
+                            GaussianComponent shared = comp;
+                            if (comp.gaussian_state_id >= 0 && gaussian_state_pool_) {
+                                gaussian_state_pool_->add_ref(comp.gaussian_state_id);
+                            }
+                            current_branches.push_back(std::move(shared));
                         }
                     } else {
                         auto cache_it = terminal_state_cache.find(node->tensor_id);
@@ -737,22 +740,23 @@ bool QuantumCircuit::try_execute_diagonal_non_gaussian_block_with_mixture(
                         auto compute_start = std::chrono::high_resolution_clock::now();
                         for (const GaussianMixtureApproximation& approximation :
                              compiled_block.diagonal_mixture_updates) {
-                            std::vector<SymbolicGaussianBranch> expanded_branches;
+                            std::vector<GaussianComponent> expanded_branches;
                             expanded_branches.reserve(std::min(
                                 current_branches.size() * std::max<size_t>(size_t{1}, approximation.branches.size()),
                                 static_cast<size_t>(symbolic_branch_limit_)));
-                            for (const SymbolicGaussianBranch& base_branch : current_branches) {
+                            for (const GaussianComponent& base_comp : current_branches) {
                                 for (const GaussianMixtureBranch& mixture_branch : approximation.branches) {
                                     const std::complex<double> new_weight =
-                                        base_branch.weight * mixture_branch.weight;
+                                        base_comp.weight * mixture_branch.weight;
                                     if (std::abs(new_weight) < kSymbolicBranchPruneTolerance) {
                                         continue;
                                     }
 
-                                    SymbolicGaussianBranch expanded_branch = base_branch;
-                                    expanded_branch.weight = new_weight;
-                                    expanded_branch.gaussian_state_id =
-                                        duplicate_gaussian_state(base_branch.gaussian_state_id);
+                                    GaussianComponent expanded = base_comp;
+                                    expanded.weight = new_weight;
+                                    // Copy GPU state: we'll mutate it with phase rotations
+                                    expanded.gaussian_state_id =
+                                        duplicate_gaussian_state(base_comp.gaussian_state_id);
 
                                     for (size_t idx = 0; idx < mixture_branch.target_qumodes.size(); ++idx) {
                                         const double theta = mixture_branch.phase_rotation_thetas[idx];
@@ -765,19 +769,19 @@ bool QuantumCircuit::try_execute_diagonal_non_gaussian_block_with_mixture(
                                             {mixture_branch.target_qumodes[idx]},
                                             {std::complex<double>(theta, 0.0)});
                                         apply_symplectic_update_to_gaussian_states(
-                                            {expanded_branch.gaussian_state_id},
+                                            {expanded.gaussian_state_id},
                                             gate_to_symplectic(phase_gate, num_qumodes_));
-                                        expanded_branch.replay_gates.push_back(phase_gate);
+                                        expanded.replay_gates.push_back(phase_gate);
                                     }
-                                    expanded_branches.push_back(std::move(expanded_branch));
+                                    expanded_branches.push_back(std::move(expanded));
                                 }
                             }
 
-                            free_branch_states(&current_branches);
+                            free_component_refs(&current_branches);
                             current_branches = std::move(expanded_branches);
                             if (current_branches.size() >
                                 static_cast<size_t>(symbolic_branch_limit_)) {
-                                free_branch_states(&current_branches);
+                                free_component_refs(&current_branches);
                                 throw std::runtime_error("symbolic mixture branch count exceeded limit");
                             }
                         }
@@ -785,7 +789,7 @@ bool QuantumCircuit::try_execute_diagonal_non_gaussian_block_with_mixture(
                         computation_time_ +=
                             std::chrono::duration<double, std::milli>(compute_end - compute_start).count();
                     } catch (...) {
-                        free_branch_states(&current_branches);
+                        free_component_refs(&current_branches);
                         throw;
                     }
 
@@ -799,7 +803,7 @@ bool QuantumCircuit::try_execute_diagonal_non_gaussian_block_with_mixture(
                     created_symbolic_terminal_ids.push_back(symbolic_terminal_id);
                     symbolic_terminal_states_.emplace(
                         symbolic_terminal_id,
-                        SymbolicTerminalState{std::move(current_branches)});
+                        MixtureGaussianState{std::move(current_branches)});
                     HDDNode* transformed_terminal = make_terminal_node(symbolic_terminal_id);
                     transformed_terminal_cache.emplace(node->tensor_id, transformed_terminal);
                     return transformed_terminal;

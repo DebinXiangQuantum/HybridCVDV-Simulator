@@ -351,9 +351,9 @@ void QuantumCircuit::release_symbolic_terminal(int terminal_id) {
         return;
     }
     if (gaussian_state_pool_) {
-        for (const SymbolicGaussianBranch& branch : it->second.branches) {
-            if (branch.gaussian_state_id >= 0) {
-                gaussian_state_pool_->free_state(branch.gaussian_state_id);
+        for (const GaussianComponent& comp : it->second.components) {
+            if (comp.gaussian_state_id >= 0) {
+                gaussian_state_pool_->release_ref(comp.gaussian_state_id);
             }
         }
     }
