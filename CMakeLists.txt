@@ -30,9 +30,20 @@ if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES OR "${CMAKE_CUDA_ARCHITECTURES}" STREQUA
     endif()
 endif()
 
-# 指定CUDA主机编译器为GCC 9 (兼容CUDA 12.0)
-set(CMAKE_CUDA_HOST_COMPILER "/usr/bin/gcc-9")
-set(CUDA_HOST_COMPILER "/usr/bin/gcc-9")
+# 指定CUDA主机编译器 (默认gcc-9, 可通过命令行覆盖)
+if(NOT DEFINED CMAKE_CUDA_HOST_COMPILER)
+    if(EXISTS "/usr/bin/gcc-9")
+        set(CMAKE_CUDA_HOST_COMPILER "/usr/bin/gcc-9")
+        set(CUDA_HOST_COMPILER "/usr/bin/gcc-9")
+    else()
+        # 回退到系统默认gcc
+        find_program(_GCC_PATH gcc)
+        if(_GCC_PATH)
+            set(CMAKE_CUDA_HOST_COMPILER "${_GCC_PATH}")
+            set(CUDA_HOST_COMPILER "${_GCC_PATH}")
+        endif()
+    endif()
+endif()
 
 project(HybridCVDV-Simulator VERSION 1.5 LANGUAGES CXX)
 
@@ -95,7 +106,11 @@ endif()
 
 # 包含目录
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src/include)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src/reference)
+if(CUDA_FOUND)
+    include_directories(${CUDAToolkit_INCLUDE_DIRS})
+endif()
 # 源文件列表
 set(CORE_SOURCES
     src/core/cv_state_pool.cpp
@@ -105,6 +120,7 @@ set(CORE_SOURCES
     src/core/gaussian_mixture.cpp
     src/core/symplectic_math.cpp
     src/core/gaussian_circuit.cpp
+    src/core/gaussian_projection.cpp
 )
 
 if(CUDA_FOUND)
@@ -112,12 +128,18 @@ if(CUDA_FOUND)
         src/gpu/diagonal_gates.cu
         src/gpu/ladder_gates.cu
         src/gpu/single_mode_gates.cu
+        src/gpu/single_mode_xzpv_gates.cu
         src/gpu/two_mode_gates.cu
+        src/gpu/two_mode_special_gates.cu
         src/gpu/hybrid_gates.cu
+        src/gpu/hybrid_interaction_gates.cu
         src/gpu/squeezing_gate.cu
         src/gpu/qubit_gates.cu
         src/gpu/snap_gates.cu
         src/gpu/gaussian_kernels.cu
+        src/gpu/gpu_context.cu
+        src/gpu/stream_pool.cu
+        src/gpu/peer_transfer.cu
     )
 else()
     set(GPU_SOURCES
@@ -306,6 +328,23 @@ if(HYBRIDCVDV_BUILD_TESTS)
     target_link_libraries(${PROJECT_NAME}_tests ${PROJECT_NAME} GTest::gtest_main)
     include(GoogleTest)
     gtest_discover_tests(${PROJECT_NAME}_tests)
+
+    # Multi-GPU unit tests
+    if(CUDA_FOUND)
+        set(MULTI_GPU_TEST_SOURCES
+            src/test/test_gpu_context.cpp
+            src/test/test_stream_pool.cpp
+            src/test/test_peer_transfer.cpp
+            src/test/test_multi_gpu_state.cpp
+            src/test/test_multi_gpu_scheduler.cpp
+            src/test/test_multi_gpu_integration.cpp
+        )
+
+        add_executable(${PROJECT_NAME}_multi_gpu_tests ${MULTI_GPU_TEST_SOURCES})
+        target_link_libraries(${PROJECT_NAME}_multi_gpu_tests
+            ${PROJECT_NAME} GTest::gtest_main ${CUDA_LIBRARIES} CUDA::cublas)
+        gtest_discover_tests(${PROJECT_NAME}_multi_gpu_tests)
+    endif()
 endif()
 
 # 安装目标
