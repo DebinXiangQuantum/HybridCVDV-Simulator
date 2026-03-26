@@ -62,7 +62,8 @@ protected:
             
             // 创建状态池
             state_pool = new CVStatePool(dim, max_states);
-            cuda_available = (state_pool->data != nullptr);
+            // data is lazily allocated — check that metadata was initialized
+            cuda_available = (state_pool->free_list != nullptr);
         }
     }
     
