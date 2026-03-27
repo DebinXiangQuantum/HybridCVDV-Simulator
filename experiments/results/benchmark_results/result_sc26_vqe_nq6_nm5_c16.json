@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0",
+  "generated_at_utc": "2026-03-24T04:35:36Z",
+  "simulator": "HybridCVDV-Simulator",
+  "single_gpu_only": true,
+  "requested_suite": "scaling",
+  "gaussian_symbolic_mode_limit": 4,
+  "use_interaction_picture": false,
+  "device": {
+    "available": true,
+    "device_index": 0,
+    "name": "NVIDIA A100 80GB PCIe",
+    "compute_capability": "8.0",
+    "multiprocessor_count": 108,
+    "total_global_mem_bytes": 85095874560,
+    "shared_mem_per_block_bytes": 49152
+  },
+  "results": [
+    {
+      "name": "sc26_vqe_nq6_nm5_c16",
+      "category": "scaling",
+      "status": "error",
+      "note": "终端节点复制失败：无法分配状态",
+      "params": {
+        "source_circuit": "circuit/src/vqe_circuit.cpp"
+      },
+      "metrics": {
+      }
+    }
+  ]
+}

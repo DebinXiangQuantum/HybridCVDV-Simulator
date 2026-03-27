@@ -334,6 +334,7 @@ if(HYBRIDCVDV_BUILD_TESTS)
         tests/test_gpu_validation.cpp
         tests/test_gaussian_symplectic.cpp
         tests/test_gaussian_mixture.cpp
+        tests/test_sf_precision.cpp
     )
 
     add_executable(${PROJECT_NAME}_tests ${TEST_SOURCES})

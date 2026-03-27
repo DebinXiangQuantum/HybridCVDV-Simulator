@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0",
+  "generated_at_utc": "2026-03-24T04:57:56Z",
+  "simulator": "HybridCVDV-Simulator",
+  "single_gpu_only": true,
+  "requested_suite": "scaling",
+  "gaussian_symbolic_mode_limit": 4,
+  "use_interaction_picture": false,
+  "device": {
+    "available": true,
+    "device_index": 0,
+    "name": "NVIDIA A100 80GB PCIe",
+    "compute_capability": "8.0",
+    "multiprocessor_count": 108,
+    "total_global_mem_bytes": 85095874560,
+    "shared_mem_per_block_bytes": 49152
+  },
+  "results": [
+    {
+      "name": "sc26_vqe_nq3_nm7_c16",
+      "category": "scaling",
+      "status": "error",
+      "note": "无法扩展GPU状态池: out of memory (required_elements=2952790016, previous_capacity=2684354560, live_elements=2684354560, scratch_target_bytes=4, scratch_temp_bytes=4294967296, scratch_aux_bytes=0)",
+      "params": {
+        "source_circuit": "circuit/src/vqe_circuit.cpp"
+      },
+      "metrics": {
+      }
+    }
+  ]
+}
