@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0",
+  "generated_at_utc": "2026-03-25T13:08:08Z",
+  "simulator": "HybridCVDV-Simulator",
+  "single_gpu_only": true,
+  "requested_suite": "scaling",
+  "gaussian_symbolic_mode_limit": 16,
+  "use_interaction_picture": false,
+  "device": {
+    "available": true,
+    "device_index": 0,
+    "name": "NVIDIA L20",
+    "compute_capability": "8.9",
+    "multiprocessor_count": 92,
+    "total_global_mem_bytes": 47676129280,
+    "shared_mem_per_block_bytes": 49152
+  },
+  "results": [
+    {
+      "name": "sc26_vqe_nq8_nm7_c16",
+      "category": "scaling",
+      "status": "error",
+      "note": "无法扩展GPU状态池: out of memory (required_elements=69524783104, previous_capacity=1610612736, live_elements=268435456, scratch_target_bytes=40, scratch_temp_bytes=0, scratch_aux_bytes=3368)",
+      "params": {
+        "source_circuit": "circuit/src/vqe_circuit.cpp"
+      },
+      "metrics": {
+      }
+    }
+  ]
+}

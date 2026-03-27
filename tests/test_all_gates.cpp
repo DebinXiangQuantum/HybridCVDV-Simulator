@@ -14,7 +14,7 @@ extern void apply_phase_rotation(CVStatePool* pool, const int* targets, int batc
 extern void apply_kerr_gate(CVStatePool* pool, const int* targets, int batch_size, double chi);
 extern void apply_creation_operator(CVStatePool* pool, const int* targets, int batch_size);
 extern void apply_annihilation_operator(CVStatePool* pool, const int* targets, int batch_size);
-extern void apply_displacement_gate(CVStatePool* pool, const int* targets, int batch_size, cuDoubleComplex alpha);
+extern void apply_displacement_gate(CVStatePool* pool, const int* targets, int batch_size, cuDoubleComplex alpha, cudaStream_t stream = nullptr, bool synchronize = true);
 
 namespace {
 
@@ -503,23 +503,25 @@ TEST_F(GPUGateTest, TestGPUAnnihilationOperator) {
 // ===== 测试混合门 =====
 
 TEST_F(GateTest, TestControlledDisplacement) {
-    // 测试受控位移门
+    // 测试受控位移门 CD(α): σ_z 语义
+    // control_state=0 → D(+α), control_state=1 → D(-α)
     const int dim = 4;
     Reference::Vector target_state(dim, Reference::Complex(0.0, 0.0));
     target_state[0] = Reference::Complex(1.0, 0.0);  // 真空态
 
     Reference::Complex alpha(0.1, 0.0);
 
-    // 控制位为0：不应用位移
+    // 控制位为0：应用 D(+α)
     Reference::Vector result0 = Reference::HybridControlGates::apply_controlled_displacement(0, target_state, alpha);
-    double error0 = compute_error(result0, target_state);
-    EXPECT_LT(error0, 1e-10) << "控制位为0时CD门应保持不变";
+    Reference::Vector expected0 = Reference::SingleModeGates::apply_displacement_gate(target_state, alpha);
+    double error0 = compute_error(result0, expected0);
+    EXPECT_LT(error0, 1e-10) << "控制位为0时CD门应等于D(+α)";
 
-    // 控制位为1：应用位移
+    // 控制位为1：应用 D(-α)
     Reference::Vector result1 = Reference::HybridControlGates::apply_controlled_displacement(1, target_state, alpha);
-    Reference::Vector expected1 = Reference::SingleModeGates::apply_displacement_gate(target_state, alpha);
+    Reference::Vector expected1 = Reference::SingleModeGates::apply_displacement_gate(target_state, -alpha);
     double error1 = compute_error(result1, expected1);
-    EXPECT_LT(error1, 1e-6) << "控制位为1时CD门误差过大";
+    EXPECT_LT(error1, 1e-10) << "控制位为1时CD门应等于D(-α)";
 }
 
 TEST_F(GateTest, TestControlledTwoModeSqueezing) {

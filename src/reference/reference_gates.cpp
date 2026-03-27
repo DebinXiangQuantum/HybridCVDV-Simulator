@@ -535,25 +535,25 @@ Vector TwoModeGates::apply_beam_splitter(const Vector& input, double theta, doub
 
 // ===== 矩阵创建函数 =====
 
-// 广义Laguerre多项式计算
+// 广义Laguerre多项式计算 — 标准三项递推关系
+// L_0^α(x) = 1
+// L_1^α(x) = α + 1 - x
+// n·L_n^α(x) = (2n + α - 1 - x)·L_{n-1}^α(x) - (n + α - 1)·L_{n-2}^α(x)
 double generalized_laguerre(int n, int alpha, double x) {
-    if (n < 0 || alpha < 0) return 0.0;
+    if (n < 0) return 0.0;
     if (n == 0) return 1.0;
 
-    // 对于测试目的，使用简化的实现
-    // L_n^alpha(x) 的近似值
-    if (n == 1) return alpha + 1.0 - x;
+    double L_prev2 = 1.0;                              // L_0^α(x)
+    double L_prev1 = static_cast<double>(alpha) + 1.0 - x;  // L_1^α(x)
+    if (n == 1) return L_prev1;
 
-    // 使用级数展开或近似
-    // 对于小的x，我们可以使用前几项
-    if (std::abs(x) < 1.0) {
-        if (n == 0) return 1.0;
-        if (n == 1) return alpha + 1.0 - x;
-        if (n == 2) return (alpha + 1.0) * (alpha + 2.0) / 2.0 - (alpha + 3.0) * x / 2.0 + x * x / 2.0;
+    for (int k = 2; k <= n; ++k) {
+        double L_curr = ((2.0 * k + alpha - 1.0 - x) * L_prev1
+                         - (k + alpha - 1.0) * L_prev2) / static_cast<double>(k);
+        L_prev2 = L_prev1;
+        L_prev1 = L_curr;
     }
-
-    // 对于更大的x，使用渐进行为
-    return std::exp(x / 2.0) * std::pow(-x, n) / std::tgamma(n + alpha + 1) * std::tgamma(alpha + n + 1);
+    return L_prev1;
 }
 
 Matrix create_displacement_matrix(int dim, Complex alpha) {

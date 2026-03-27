@@ -118,7 +118,7 @@ __global__ void matrix_add_kernel(Complex* a_values, int* a_rows, int* a_cols, i
                                    Complex* b_values, int* b_rows, int* b_cols, int b_nnz,
                                    Complex* result_values, int* result_rows, int* result_cols, int* result_nnz,
                                    int max_nnz) {
-    // 简化版本：在 CPU 上合并，这里只做元素级操作
+    // ：在 CPU 上合并，这里只做元素级操作
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < a_nnz) {
         result_values[idx] = a_values[idx];

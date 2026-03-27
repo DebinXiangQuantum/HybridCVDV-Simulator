@@ -1,0 +1,43 @@
+{
+  "schema_version": "1.0",
+  "generated_at_utc": "2026-03-24T04:55:53Z",
+  "simulator": "HybridCVDV-Simulator",
+  "single_gpu_only": true,
+  "requested_suite": "scaling",
+  "gaussian_symbolic_mode_limit": 4,
+  "use_interaction_picture": false,
+  "device": {
+    "available": true,
+    "device_index": 0,
+    "name": "NVIDIA A100 80GB PCIe",
+    "compute_capability": "8.0",
+    "multiprocessor_count": 108,
+    "total_global_mem_bytes": 85095874560,
+    "shared_mem_per_block_bytes": 49152
+  },
+  "results": [
+    {
+      "name": "sc26_vqe_nq4_nm6_c16",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "depth": "2",
+        "num_qubits": "4",
+        "num_qumodes": "6",
+        "source_circuit": "circuit/src/vqe_circuit.cpp",
+        "workload": "vqe_circuit"
+      },
+      "metrics": {
+        "median_active_states": 16,
+        "median_compute_ms": 2905.073904,
+        "median_hdd_nodes": 31,
+        "median_memory_bytes": 8858372096,
+        "median_total_ms": 4880.561285,
+        "median_transfer_ms": 0.00438,
+        "throughput_ops_per_sec": 0.204894466354396
+      }
+    }
+  ]
+}

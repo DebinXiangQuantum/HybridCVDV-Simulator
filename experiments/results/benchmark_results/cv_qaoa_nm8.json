@@ -1,0 +1,45 @@
+{
+  "schema_version": "1.0",
+  "generated_at_utc": "2026-03-24T12:21:34Z",
+  "simulator": "HybridCVDV-Simulator",
+  "single_gpu_only": true,
+  "requested_suite": "scaling",
+  "gaussian_symbolic_mode_limit": 4,
+  "use_interaction_picture": false,
+  "device": {
+    "available": true,
+    "device_index": 0,
+    "name": "NVIDIA H100 PCIe",
+    "compute_capability": "9.0",
+    "multiprocessor_count": 114,
+    "total_global_mem_bytes": 85017493504,
+    "shared_mem_per_block_bytes": 49152
+  },
+  "results": [
+    {
+      "name": "sc26_cv_qaoa_nm8_c16",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "depth": "2",
+        "measured_runs": "10",
+        "num_qubits": "0",
+        "num_qumodes": "8",
+        "pure_cv": "true",
+        "warmup_runs": "2",
+        "workload": "cv_qaoa_circuit"
+      },
+      "metrics": {
+        "median_active_states": 1,
+        "median_compute_ms": 1.652127,
+        "median_hdd_nodes": 1,
+        "median_memory_bytes": 68719476752,
+        "median_total_ms": 36.837489,
+        "median_transfer_ms": 0,
+        "throughput_ops_per_sec": 27.1462585302706
+      }
+    }
+  ]
+}

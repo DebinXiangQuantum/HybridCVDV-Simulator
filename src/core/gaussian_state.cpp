@@ -20,6 +20,7 @@ GaussianStatePool::GaussianStatePool(int num_qumodes, int capacity)
     h_d_ptrs_.resize(capacity_, nullptr);
     h_sig_ptrs_.resize(capacity_, nullptr);
     active_flags_.assign(capacity_, false);
+    ref_counts_.assign(capacity_, 0);
     for (int i = capacity_ - 1; i >= 0; --i) {
         free_list_.push_back(i);
     }
@@ -31,7 +32,7 @@ GaussianStatePool::GaussianStatePool(int num_qumodes, int capacity)
     CHECK_CUDA(cudaMemset(sig_ptrs_dev_, 0, capacity_ * sizeof(double*)));
 
     std::cout << "GaussianStatePool initialized: " << num_qumodes_ << " qumodes, " 
-              << capacity_ << " capacity (Pointer Array Fix)." << std::endl;
+              << capacity_ << " capacity (refcount-enabled)." << std::endl;
 }
 
 GaussianStatePool::~GaussianStatePool() {
@@ -49,6 +50,7 @@ int GaussianStatePool::allocate_state() {
     int id = free_list_.back();
     free_list_.pop_back();
     active_flags_[id] = true;
+    ref_counts_[id] = 1;
     
     size_t d_size = dim_phase_space_ * sizeof(double);
     size_t sig_size = dim_phase_space_ * dim_phase_space_ * sizeof(double);
@@ -59,16 +61,13 @@ int GaussianStatePool::allocate_state() {
     CHECK_CUDA(cudaMemset(h_d_ptrs_[id], 0, d_size));
     CHECK_CUDA(cudaMemset(h_sig_ptrs_[id], 0, sig_size));
 
-    // Update device array of pointers
     CHECK_CUDA(cudaMemcpy(d_ptrs_dev_ + id, &h_d_ptrs_[id], sizeof(double*), cudaMemcpyHostToDevice));
     CHECK_CUDA(cudaMemcpy(sig_ptrs_dev_ + id, &h_sig_ptrs_[id], sizeof(double*), cudaMemcpyHostToDevice));
     
     return id;
 }
 
-void GaussianStatePool::free_state(int state_id) {
-    if (state_id < 0 || state_id >= capacity_ || !active_flags_[state_id]) return;
-    
+void GaussianStatePool::deallocate_gpu_memory(int state_id) {
     if (h_d_ptrs_[state_id]) cudaFree(h_d_ptrs_[state_id]);
     if (h_sig_ptrs_[state_id]) cudaFree(h_sig_ptrs_[state_id]);
     h_d_ptrs_[state_id] = nullptr;
@@ -79,7 +78,49 @@ void GaussianStatePool::free_state(int state_id) {
     cudaMemcpy(sig_ptrs_dev_ + state_id, &null_ptr, sizeof(double*), cudaMemcpyHostToDevice);
 
     active_flags_[state_id] = false;
+    ref_counts_[state_id] = 0;
     free_list_.push_back(state_id);
+}
+
+void GaussianStatePool::free_state(int state_id) {
+    release_ref(state_id);
+}
+
+void GaussianStatePool::add_ref(int state_id) {
+    if (state_id < 0 || state_id >= capacity_ || !active_flags_[state_id]) return;
+    ++ref_counts_[state_id];
+}
+
+void GaussianStatePool::release_ref(int state_id) {
+    if (state_id < 0 || state_id >= capacity_ || !active_flags_[state_id]) return;
+    if (--ref_counts_[state_id] <= 0) {
+        deallocate_gpu_memory(state_id);
+    }
+}
+
+int GaussianStatePool::get_ref_count(int state_id) const {
+    if (state_id < 0 || state_id >= capacity_ || !active_flags_[state_id]) return 0;
+    return ref_counts_[state_id];
+}
+
+int GaussianStatePool::cow_copy(int state_id) {
+    if (state_id < 0 || state_id >= capacity_ || !active_flags_[state_id]) return -1;
+    if (ref_counts_[state_id] <= 1) {
+        return state_id;  // sole owner — no copy needed
+    }
+
+    // Allocate a new state and copy GPU data
+    int new_id = allocate_state();
+    if (new_id < 0) return -1;
+
+    size_t d_bytes = static_cast<size_t>(dim_phase_space_) * sizeof(double);
+    size_t sig_bytes = static_cast<size_t>(dim_phase_space_) * dim_phase_space_ * sizeof(double);
+    CHECK_CUDA(cudaMemcpy(h_d_ptrs_[new_id], h_d_ptrs_[state_id], d_bytes, cudaMemcpyDeviceToDevice));
+    CHECK_CUDA(cudaMemcpy(h_sig_ptrs_[new_id], h_sig_ptrs_[state_id], sig_bytes, cudaMemcpyDeviceToDevice));
+
+    // Release the shared reference
+    release_ref(state_id);
+    return new_id;
 }
 
 double* GaussianStatePool::get_displacement_ptr(int state_id) {

@@ -380,24 +380,31 @@ void BatchScheduler::execute_prepared_level0_batch(const std::vector<CapturedGra
 
 /**
  * 检查是否可以添加到当前批次
+ * 条件：相同门类型、相同目标 qubit/qumode 布局、相同参数、
+ * 合并后 state 数不超过 max_batch_size_。
  */
 bool BatchScheduler::can_add_to_batch(const BatchTask& task) const {
     if (pending_batch_.empty()) return true;
 
-    // 检查门类型是否相同 (简化版本)
-    if (task.gate_type != pending_batch_.front().gate_type) return false;
-    if (task.target_qubits != pending_batch_.front().target_qubits) return false;
-    if (task.target_qumodes != pending_batch_.front().target_qumodes) return false;
+    const BatchTask& front = pending_batch_.front();
 
-    // 检查参数是否相同
-    if (task.params.size() != pending_batch_.front().params.size()) return false;
+    // 门类型与目标布局必须一致才能合并执行
+    if (task.gate_type != front.gate_type) return false;
+    if (task.target_qubits != front.target_qubits) return false;
+    if (task.target_qumodes != front.target_qumodes) return false;
+
+    // 参数必须完全匹配（同一门参数才能共享内核 launch）
+    if (task.params.size() != front.params.size()) return false;
     for (size_t i = 0; i < task.params.size(); ++i) {
-        if (std::abs(task.params[i] - pending_batch_.front().params[i]) > 1e-10) return false;
+        if (std::abs(task.params[i] - front.params[i]) > 1e-10) return false;
     }
 
-    // 检查内存限制
-    size_t new_memory = current_batch_memory_ + task.target_state_ids.size();
-    if (new_memory > max_batch_size_ * 10) return false;  // 经验值
+    // 批次中总 state 数不超过 max_batch_size_
+    size_t total_states = task.target_state_ids.size();
+    for (const auto& existing : pending_batch_) {
+        total_states += existing.target_state_ids.size();
+    }
+    if (total_states > max_batch_size_) return false;
 
     return true;
 }

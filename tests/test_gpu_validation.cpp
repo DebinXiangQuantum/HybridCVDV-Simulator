@@ -11,7 +11,12 @@ extern void apply_phase_rotation(CVStatePool* pool, const int* targets, int batc
 extern void apply_kerr_gate(CVStatePool* pool, const int* targets, int batch_size, double chi);
 extern void apply_creation_operator(CVStatePool* pool, const int* targets, int batch_size);
 extern void apply_annihilation_operator(CVStatePool* pool, const int* targets, int batch_size);
-extern void apply_displacement_gate(CVStatePool* pool, const int* targets, int batch_size, cuDoubleComplex alpha);
+extern void apply_displacement_gate(CVStatePool* pool, const int* targets, int batch_size, cuDoubleComplex alpha, cudaStream_t stream = nullptr, bool synchronize = true);
+
+// Wrapper for use with call_gpu_function template (defaults don't apply to function pointers)
+inline void apply_displacement_gate_default(CVStatePool* pool, const int* targets, int batch_size, cuDoubleComplex alpha) {
+    apply_displacement_gate(pool, targets, batch_size, alpha, nullptr, true);
+}
 
 // 辅助函数：调用GPU函数（处理target_indices的GPU内存分配）
 template<typename Func, typename... Args>
@@ -57,7 +62,8 @@ protected:
             
             // 创建状态池
             state_pool = new CVStatePool(dim, max_states);
-            cuda_available = (state_pool->data != nullptr);
+            // data is lazily allocated — check that metadata was initialized
+            cuda_available = (state_pool->free_list != nullptr);
         }
     }
     
@@ -298,7 +304,7 @@ TEST_F(GpuValidationTest, GpuDisplacementGate) {
     
     // 调用GPU函数
     cuDoubleComplex cuda_alpha = make_cuDoubleComplex(alpha.real(), alpha.imag());
-    call_gpu_function(apply_displacement_gate, state_pool, gpu_state_id, cuda_alpha);
+    call_gpu_function(apply_displacement_gate_default, state_pool, gpu_state_id, cuda_alpha);
     
     // 下载GPU结果
     std::vector<cuDoubleComplex> gpu_result(dim);

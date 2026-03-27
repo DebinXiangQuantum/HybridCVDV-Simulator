@@ -1,0 +1,45 @@
+{
+  "schema_version": "1.0",
+  "generated_at_utc": "2026-03-25T12:48:19Z",
+  "simulator": "HybridCVDV-Simulator",
+  "single_gpu_only": true,
+  "requested_suite": "scaling",
+  "gaussian_symbolic_mode_limit": 16,
+  "use_interaction_picture": false,
+  "device": {
+    "available": true,
+    "device_index": 0,
+    "name": "NVIDIA L20",
+    "compute_capability": "8.9",
+    "multiprocessor_count": 92,
+    "total_global_mem_bytes": 47676129280,
+    "shared_mem_per_block_bytes": 49152
+  },
+  "results": [
+    {
+      "name": "sc26_jch_nq3_nm3_c16",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "depth": "5",
+        "measured_runs": "10",
+        "num_qubits": "3",
+        "num_qumodes": "3",
+        "source_circuit": "circuit/src/jch_simulation_circuit.cpp",
+        "warmup_runs": "2",
+        "workload": "jch_simulation_circuit"
+      },
+      "metrics": {
+        "median_active_states": 1,
+        "median_compute_ms": 0.475983,
+        "median_hdd_nodes": 7,
+        "median_memory_bytes": 721920,
+        "median_total_ms": 7.544639,
+        "median_transfer_ms": 0,
+        "throughput_ops_per_sec": 132.544446460593
+      }
+    }
+  ]
+}
