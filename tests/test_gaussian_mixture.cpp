@@ -249,6 +249,25 @@ TEST(GaussianMixtureTest, KerrMixtureIsExactAtFullCutoffRank) {
     EXPECT_LT(l2_error(exact_state, approx_state), 1e-10);
 }
 
+TEST(GaussianMixtureTest, KerrMixtureRemainsExactAtFullCutoffRankForHighChi) {
+    constexpr int cutoff = 16;
+    const double chi = 0.3;
+
+    const GaussianMixtureApproximation approximation =
+        GaussianMixtureDecomposer::approximate_kerr_gate(1, 0, chi, cutoff, cutoff);
+
+    EXPECT_LT(approximation.l2_diagonal_error, 1e-10);
+    EXPECT_LT(approximation.max_diagonal_error, 1e-10);
+    EXPECT_GT(approximation.conservative_fidelity_lower_bound, 1.0 - 1e-10);
+
+    const std::vector<Complex> input_state = build_coherent_state(cutoff, Complex(0.5, 0.0));
+    const std::vector<Complex> exact_state = exact_kerr_on_mode(input_state, cutoff, 1, 0, chi);
+    const std::vector<Complex> approx_state =
+        GaussianMixtureDecomposer::apply_to_fock_state(input_state, cutoff, 1, approximation);
+
+    EXPECT_LT(l2_error(exact_state, approx_state), 1e-10);
+}
+
 TEST(GaussianMixtureTest, SnapMixtureIsExactAtFullCutoffRank) {
     constexpr int cutoff = 12;
     const std::vector<Complex> input_state = build_coherent_state(cutoff, Complex(0.6, 0.3));

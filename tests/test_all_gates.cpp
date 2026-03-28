@@ -1444,6 +1444,42 @@ TEST_F(GateTest, TestGaussianMixtureFallsBackToFockForUnsupportedFollowingBlock)
     }
 }
 
+TEST_F(GateTest, TestStrongKerrAfterDisplacementMatchesExactReference) {
+    try {
+        constexpr int cutoff = 16;
+        QuantumCircuit circuit(1, 1, cutoff, 1024);
+
+        const std::complex<double> alpha(0.5, 0.0);
+        const double chi = 0.3;
+
+        circuit.add_gate(Gates::Displacement(0, alpha));
+        circuit.add_gate(Gates::KerrGate(0, chi));
+
+        circuit.build();
+        circuit.execute();
+
+        Reference::Vector vacuum(cutoff, {0.0, 0.0});
+        vacuum[0] = {1.0, 0.0};
+
+        Reference::Vector expected =
+            Reference::SingleModeGates::apply_displacement_gate(vacuum, alpha);
+        expected = Reference::DiagonalGates::apply_kerr_gate(expected, chi);
+
+        Reference::Vector actual(static_cast<size_t>(cutoff), {0.0, 0.0});
+        for (int n = 0; n < cutoff; ++n) {
+            std::vector<std::complex<double>> basis(cutoff, {0.0, 0.0});
+            basis[n] = {1.0, 0.0};
+            actual[static_cast<size_t>(n)] = circuit.get_amplitude({0}, {basis});
+        }
+
+        const Reference::ErrorMetrics metrics = Reference::compute_error_metrics(expected, actual);
+        EXPECT_LT(metrics.fidelity_deviation, 1e-8);
+        EXPECT_LT(metrics.l2_error, 2e-6);
+    } catch (const std::exception& e) {
+        FAIL() << "高chi位移后Kerr精度回归测试失败: " << e.what();
+    }
+}
+
 TEST_F(GateTest, TestLargeCrossKerrBlockFallsBackToExactFockForFidelityTarget) {
     try {
         constexpr int cutoff = 16;

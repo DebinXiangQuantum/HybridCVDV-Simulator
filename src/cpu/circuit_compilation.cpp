@@ -556,6 +556,16 @@ int choose_kerr_mixture_branch_cap(int cutoff) {
     return std::min(cutoff, kMaxKerrMixtureBranches);
 }
 
+bool should_force_exact_fock_for_kerr(double chi) {
+    // Strong Kerr phases on top of symbolic Gaussian branches were observed to
+    // drift noticeably against the Strawberry Fields reference despite the
+    // diagonal DFT itself being exact at full cutoff rank. Keep the symbolic
+    // mixture path for weak Kerr gates, and conservatively route stronger
+    // nonlinearities to exact Fock execution to preserve precision.
+    constexpr double kStrongKerrExactFockThreshold = 0.2;
+    return std::abs(chi) >= kStrongKerrExactFockThreshold;
+}
+
 int required_exact_branch_count_for_gate(const GateParams& gate, int cutoff) {
     switch (gate.type) {
         case GateType::KERR_GATE:
@@ -582,6 +592,13 @@ bool compile_diagonal_gate_mixture_approximation(
         int max_branch_cap = 0;
         switch (gate.type) {
             case GateType::KERR_GATE:
+                if (should_force_exact_fock_for_kerr(gate.params[0].real())) {
+                    if (error_message) {
+                        *error_message =
+                            "高chi Kerr gate为避免强非高斯区symbolic mixture精度退化，回退到精确Fock执行";
+                    }
+                    return false;
+                }
                 max_branch_cap = choose_kerr_mixture_branch_cap(cutoff);
                 break;
             case GateType::SNAP_GATE:
@@ -1132,4 +1149,3 @@ QuantumCircuit::CompiledExecutionBlock QuantumCircuit::compile_execution_block(
         std::chrono::duration<double, std::milli>(compile_end - compile_start).count();
     return compiled_block;
 }
-

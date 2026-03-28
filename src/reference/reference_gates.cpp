@@ -466,7 +466,7 @@ Vector DiagonalGates::apply_phase_rotation(const Vector& input, double theta) {
 Vector DiagonalGates::apply_kerr_gate(const Vector& input, double chi) {
     Vector result = input;
     for (size_t n = 0; n < result.size(); ++n) {
-        double phase = -chi * static_cast<double>(n * n);  // 注意负号
+        double phase = chi * static_cast<double>(n * n);
         Complex phase_factor(std::cos(phase), std::sin(phase));
         result[n] *= phase_factor;
     }

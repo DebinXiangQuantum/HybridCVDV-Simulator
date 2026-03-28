@@ -102,7 +102,7 @@ __global__ void apply_phase_rotation_kernel(
 }
 
 /**
- * Kerr门内核 K(χ) = exp(-i χ n²)
+ * Kerr门内核 K(χ) = exp(+i χ n²)
  * 支持动态维度
  */
 __global__ void apply_kerr_kernel(
@@ -132,9 +132,8 @@ __global__ void apply_kerr_kernel(
     const size_t right_stride = static_cast<size_t>(target_mode_right_stride);
     const int target_n = static_cast<int>((flat_index / right_stride) % target_mode_dim);
 
-    // f(n, chi) = -chi * n * n
-    // Kerr gate: exp(-i * chi * n^2)  (与参考实现一致，使用负号)
-    double phase = -chi * static_cast<double>(target_n * target_n);
+    // Kerr gate follows the Strawberry Fields convention: exp(+i * chi * n^2)
+    double phase = chi * static_cast<double>(target_n * target_n);
     cuDoubleComplex phase_factor = make_cuDoubleComplex(cos(phase), sin(phase)); // e^(i * phase)
 
     cuDoubleComplex current_val = psi[flat_index];

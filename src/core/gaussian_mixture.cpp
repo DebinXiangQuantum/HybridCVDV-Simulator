@@ -111,7 +111,7 @@ GaussianMixtureBranch build_phase_rotation_branch(Complex weight,
 std::vector<Complex> build_exact_kerr_diagonal(double chi, int cutoff) {
     std::vector<Complex> diagonal(static_cast<size_t>(cutoff), Complex(0.0, 0.0));
     for (int n = 0; n < cutoff; ++n) {
-        diagonal[static_cast<size_t>(n)] = std::exp(Complex(0.0, -chi * n * n));
+        diagonal[static_cast<size_t>(n)] = std::exp(Complex(0.0, chi * n * n));
     }
     return diagonal;
 }
