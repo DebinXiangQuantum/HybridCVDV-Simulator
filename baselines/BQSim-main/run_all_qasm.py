@@ -184,6 +184,8 @@ def main():
         if stats:
             circuit_type = get_circuit_type(circuit_name)
             write_result(circuit_name, circuit_type, stats)
+            # 更新已运行的电路集合，避免重复运行
+            existing_circuits.add(circuit_name)
             run_files += 1
         else:
             print(f"[ERROR] Failed to run {qasm_file}")

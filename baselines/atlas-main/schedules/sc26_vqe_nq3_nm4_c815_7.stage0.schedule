@@ -1,0 +1,67 @@
+7
+[15, 0, 1, 2, 6, 9, 12, 13, 3, 8, 4, 5, 7, 10, 11, 14]
+3
+12.8
+2
+// fusion
+// [5, 1, 2, 6, 9, 12]
+OPENQASM 2.0;
+include "qelib1.inc";
+qreg q[15];
+p(0) q[3];
+p(0) q[9];
+p(0) q[6];
+cx q[3],q[6];
+cx q[6],q[9];
+p(0) q[6];
+cx q[3],q[6];
+p(0) q[12];
+cx q[9],q[12];
+p(0) q[3];
+p(0) q[9];
+cx q[6],q[9];
+p(0) q[12];
+cx q[9],q[12];
+h q[1];
+rz(0) q[1];
+h q[1];
+rz(0) q[1];
+h q[1];
+rz(0) q[1];
+h q[1];
+rz(0) q[1];
+h q[2];
+rz(0) q[2];
+h q[2];
+rz(0) q[2];
+h q[2];
+rz(0) q[2];
+h q[2];
+rz(0) q[2];
+@
+// fusion
+// [1, 0]
+OPENQASM 2.0;
+include "qelib1.inc";
+qreg q[15];
+h q[0];
+rz(0) q[0];
+h q[0];
+rz(0) q[0];
+h q[0];
+rz(0) q[0];
+h q[0];
+rz(0) q[0];
+@
+OPENQASM 2.0;
+include "qelib1.inc";
+qreg q[15];
+p(0) q[3];
+cx q[6],q[9];
+cx q[9],q[12];
+p(0) q[3];
+cx q[6],q[9];
+cx q[9],q[12];
+h q[0];
+h q[1];
+h q[2];
