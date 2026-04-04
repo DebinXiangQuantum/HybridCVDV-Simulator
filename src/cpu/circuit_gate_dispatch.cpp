@@ -12,8 +12,16 @@
 using namespace circuit_internal;
 
 void QuantumCircuit::execute_level0_gate(const GateParams& gate) {
+    execute_level0_gate(gate, nullptr);
+}
+
+void QuantumCircuit::execute_level0_gate(const GateParams& gate,
+                                         const ExactGateBatchContext* batch_context) {
     ScopedNvtxRange nvtx_range("qc::execute_level0_gate");
-    const auto& target_states = get_cached_target_states();
+    const auto& target_states =
+        batch_context && batch_context->target_states
+            ? *batch_context->target_states
+            : get_cached_target_states();
 
     if (target_states.empty()) return;
 
@@ -30,7 +38,9 @@ void QuantumCircuit::execute_level0_gate(const GateParams& gate) {
 
     size_t upload_slot = 0;
     int* d_target_ids = nullptr;
-    if (use_async_compute) {
+    if (batch_context && batch_context->d_target_ids) {
+        d_target_ids = batch_context->d_target_ids;
+    } else if (use_async_compute) {
         std::tie(d_target_ids, std::ignore) =
             upload_target_states_for_compute(target_states, &upload_slot);
     } else {
@@ -99,7 +109,7 @@ void QuantumCircuit::execute_level0_gate(const GateParams& gate) {
 
     // 检查GPU内核执行错误
     CHECK_CUDA(cudaGetLastError());
-    if (use_async_compute) {
+    if (use_async_compute && !(batch_context && batch_context->d_target_ids)) {
         mark_target_upload_slot_in_use(upload_slot);
     }
 
@@ -111,8 +121,16 @@ void QuantumCircuit::execute_level0_gate(const GateParams& gate) {
  * 执行Level 1门 (梯算符门)
  */
 void QuantumCircuit::execute_level1_gate(const GateParams& gate) {
+    execute_level1_gate(gate, nullptr);
+}
+
+void QuantumCircuit::execute_level1_gate(const GateParams& gate,
+                                         const ExactGateBatchContext* batch_context) {
     ScopedNvtxRange nvtx_range("qc::execute_level1_gate");
-    const auto& target_states = get_cached_target_states();
+    const auto& target_states =
+        batch_context && batch_context->target_states
+            ? *batch_context->target_states
+            : get_cached_target_states();
 
     if (target_states.empty()) return;
 
@@ -120,7 +138,9 @@ void QuantumCircuit::execute_level1_gate(const GateParams& gate) {
     auto transfer_start = std::chrono::high_resolution_clock::now();
     size_t upload_slot = 0;
     int* d_target_ids = nullptr;
-    if (async_cv_pipeline_enabled_) {
+    if (batch_context && batch_context->d_target_ids) {
+        d_target_ids = batch_context->d_target_ids;
+    } else if (async_cv_pipeline_enabled_) {
         std::tie(d_target_ids, std::ignore) =
             upload_target_states_for_compute(target_states, &upload_slot);
     } else {
@@ -154,7 +174,7 @@ void QuantumCircuit::execute_level1_gate(const GateParams& gate) {
 
     // 检查GPU内核执行错误
     CHECK_CUDA(cudaGetLastError());
-    if (async_cv_pipeline_enabled_) {
+    if (async_cv_pipeline_enabled_ && !(batch_context && batch_context->d_target_ids)) {
         mark_target_upload_slot_in_use(upload_slot);
     }
 
@@ -166,8 +186,16 @@ void QuantumCircuit::execute_level1_gate(const GateParams& gate) {
  * 执行Level 2门 (单模门)
  */
 void QuantumCircuit::execute_level2_gate(const GateParams& gate) {
+    execute_level2_gate(gate, nullptr);
+}
+
+void QuantumCircuit::execute_level2_gate(const GateParams& gate,
+                                         const ExactGateBatchContext* batch_context) {
     ScopedNvtxRange nvtx_range("qc::execute_level2_gate");
-    const auto& target_states = get_cached_target_states();
+    const auto& target_states =
+        batch_context && batch_context->target_states
+            ? *batch_context->target_states
+            : get_cached_target_states();
 
     if (target_states.empty()) return;
 
@@ -191,7 +219,9 @@ void QuantumCircuit::execute_level2_gate(const GateParams& gate) {
     auto transfer_start = std::chrono::high_resolution_clock::now();
     size_t upload_slot = 0;
     int* d_target_ids = nullptr;
-    if (use_async_compute) {
+    if (batch_context && batch_context->d_target_ids) {
+        d_target_ids = batch_context->d_target_ids;
+    } else if (use_async_compute) {
         std::tie(d_target_ids, std::ignore) =
             upload_target_states_for_compute(target_states, &upload_slot);
     } else if (needs_target_upload) {
@@ -214,12 +244,19 @@ void QuantumCircuit::execute_level2_gate(const GateParams& gate) {
                                     compute_stream_,
                                     false);
         } else {
-            apply_controlled_displacement_on_mode(
-                &state_pool_, target_states, alpha, target_qumode, num_qumodes_);
+            apply_controlled_displacement_on_mode(&state_pool_,
+                                                  target_states,
+                                                  d_target_ids,
+                                                  static_cast<int>(target_states.size()),
+                                                  alpha,
+                                                  target_qumode,
+                                                  num_qumodes_,
+                                                  async_cv_pipeline_enabled_ ? compute_stream_ : nullptr,
+                                                  !async_cv_pipeline_enabled_);
         }
 
         CHECK_CUDA(cudaGetLastError());
-        if (use_async_compute) {
+        if (use_async_compute && !(batch_context && batch_context->d_target_ids)) {
             mark_target_upload_slot_in_use(upload_slot);
         }
 
@@ -247,11 +284,8 @@ void QuantumCircuit::execute_level2_gate(const GateParams& gate) {
         computation_time_ += std::chrono::duration<double, std::milli>(compute_end - compute_start).count();
     } else {
         // 使用ELL格式的通用实现
-        FockELLOperator* ell_op = prepare_ell_operator(gate);
+        FockELLOperator* ell_op = get_cached_ell_operator(gate);
         if (ell_op && ell_op->ell_val && ell_op->ell_col && ell_op->dim > 0) {
-            // 确保ELL算符已上传到GPU
-            ell_op->upload_to_gpu();
-            
             // 清除之前的CUDA错误
             cudaGetLastError();
             
@@ -264,18 +298,14 @@ void QuantumCircuit::execute_level2_gate(const GateParams& gate) {
             // 检查GPU内核执行错误
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) {
-                delete ell_op;
                 throw std::runtime_error("GPU单模门执行失败: " + std::string(cudaGetErrorString(err)));
             }
 
             auto compute_end = std::chrono::high_resolution_clock::now();
             computation_time_ += std::chrono::duration<double, std::milli>(compute_end - compute_start).count();
-            
-            delete ell_op;
         } else {
             // ELL算符为空或无效
             std::cerr << "警告：单模门ELL算符无效，跳过执行" << std::endl;
-            if (ell_op) delete ell_op;
         }
     }
 }
@@ -284,8 +314,16 @@ void QuantumCircuit::execute_level2_gate(const GateParams& gate) {
  * 执行Level 3门 (双模门)
  */
 void QuantumCircuit::execute_level3_gate(const GateParams& gate) {
+    execute_level3_gate(gate, nullptr);
+}
+
+void QuantumCircuit::execute_level3_gate(const GateParams& gate,
+                                         const ExactGateBatchContext* batch_context) {
     ScopedNvtxRange nvtx_range("qc::execute_level3_gate");
-    const auto& target_states = get_cached_target_states();
+    const auto& target_states =
+        batch_context && batch_context->target_states
+            ? *batch_context->target_states
+            : get_cached_target_states();
 
     if (target_states.empty()) return;
 
@@ -293,7 +331,9 @@ void QuantumCircuit::execute_level3_gate(const GateParams& gate) {
     auto transfer_start = std::chrono::high_resolution_clock::now();
     size_t upload_slot = 0;
     int* d_target_ids = nullptr;
-    if (async_cv_pipeline_enabled_) {
+    if (batch_context && batch_context->d_target_ids) {
+        d_target_ids = batch_context->d_target_ids;
+    } else if (async_cv_pipeline_enabled_) {
         std::tie(d_target_ids, std::ignore) =
             upload_target_states_for_compute(target_states, &upload_slot);
     } else {
@@ -320,7 +360,7 @@ void QuantumCircuit::execute_level3_gate(const GateParams& gate) {
 
         // 检查GPU内核执行错误
         CHECK_CUDA(cudaGetLastError());
-        if (async_cv_pipeline_enabled_) {
+        if (async_cv_pipeline_enabled_ && !(batch_context && batch_context->d_target_ids)) {
             mark_target_upload_slot_in_use(upload_slot);
         }
 

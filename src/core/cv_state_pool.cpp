@@ -43,7 +43,14 @@ CVStatePool::CVStatePool(int trunc_dim, int max_states, int num_qumodes, size_t 
         throw std::invalid_argument("截断维度和容量必须为正数");
     }
 
-    const cudaError_t set_device_err = cudaSetDevice(0);
+    int current_device = 0;
+    cudaError_t current_device_err = cudaGetDevice(&current_device);
+    if (current_device_err != cudaSuccess) {
+        current_device = 0;
+        cudaGetLastError();
+    }
+
+    const cudaError_t set_device_err = cudaSetDevice(current_device);
     if (set_device_err != cudaSuccess) {
         throw std::runtime_error("无法设置CUDA设备: " + std::string(cudaGetErrorString(set_device_err)));
     }

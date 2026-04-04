@@ -38,6 +38,19 @@ int compute_mode_right_stride(int trunc_dim, int target_qumode, int num_qumodes)
     return right_stride;
 }
 
+int infer_single_mode_cutoff(const CVStatePool* state_pool, int num_qumodes) {
+    if (num_qumodes <= 0) {
+        throw std::invalid_argument("number of qumodes must be positive");
+    }
+    const double inferred =
+        std::pow(static_cast<double>(state_pool->max_total_dim), 1.0 / static_cast<double>(num_qumodes));
+    const int cutoff = static_cast<int>(std::llround(inferred));
+    if (cutoff <= 0) {
+        throw std::runtime_error("failed to infer single-mode cutoff");
+    }
+    return cutoff;
+}
+
 cuDoubleComplex to_device_complex(const HostComplex& value) {
     return make_cuDoubleComplex(value.real(), value.imag());
 }
@@ -318,14 +331,14 @@ std::vector<cuDoubleComplex> build_tms_tensor_dense(int cutoff, double r, double
 
             if (p + 1 < cutoff && q + 1 < cutoff) {
                 const int output_idx = (p + 1) * cutoff + (q + 1);
-                const double coeff = 0.5 * std::sqrt(static_cast<double>((p + 1) * (q + 1)));
-                generator[static_cast<size_t>(output_idx) * dim + input_idx] += std::conj(xi) * coeff;
+                const double coeff = std::sqrt(static_cast<double>((p + 1) * (q + 1)));
+                generator[static_cast<size_t>(output_idx) * dim + input_idx] += xi * coeff;
             }
 
             if (p > 0 && q > 0) {
                 const int output_idx = (p - 1) * cutoff + (q - 1);
-                const double coeff = -0.5 * std::sqrt(static_cast<double>(p * q));
-                generator[static_cast<size_t>(output_idx) * dim + input_idx] += xi * coeff;
+                const double coeff = -std::sqrt(static_cast<double>(p * q));
+                generator[static_cast<size_t>(output_idx) * dim + input_idx] += std::conj(xi) * coeff;
             }
         }
     }
@@ -369,6 +382,34 @@ std::vector<cuDoubleComplex> build_sum_tensor_dense(int cutoff, double scale) {
     }
 
     return dense_matrix_to_two_mode_tensor(matrix_exponential(generator, dim), cutoff);
+}
+
+__host__ __device__ size_t square_sum_size_t(size_t n) {
+    return n * (n + 1) * (2 * n + 1) / 6;
+}
+
+__host__ __device__ int tms_difference_block_dim(int cutoff, int diff) {
+    const int abs_diff = diff >= 0 ? diff : -diff;
+    return cutoff - abs_diff;
+}
+
+__host__ __device__ size_t tms_difference_offset(int cutoff, int diff) {
+    const size_t cutoff_size = static_cast<size_t>(cutoff);
+    if (diff < 0) {
+        const size_t negative_index = static_cast<size_t>(diff + cutoff - 1);
+        return square_sum_size_t(negative_index);
+    }
+    if (diff == 0) {
+        return square_sum_size_t(cutoff_size - 1);
+    }
+    return cutoff_size * cutoff_size +
+           2 * square_sum_size_t(cutoff_size - 1) -
+           square_sum_size_t(static_cast<size_t>(cutoff - diff));
+}
+
+size_t tms_difference_total_elements(int cutoff) {
+    const size_t cutoff_size = static_cast<size_t>(cutoff);
+    return cutoff_size * cutoff_size + 2 * square_sum_size_t(cutoff_size - 1);
 }
 
 void apply_cached_two_mode_tensor_gate(CVStatePool* state_pool,
@@ -847,6 +888,210 @@ __global__ void apply_two_mode_gate_fast_kernel(
     }
 }
 
+__global__ void apply_bs_subspace_gate_on_modes_kernel(
+    const cuDoubleComplex* state_data,
+    const size_t* state_offsets,
+    const int64_t* state_dims,
+    const int* target_indices,
+    int batch_size,
+    const cuDoubleComplex* cached_matrices,
+    int single_mode_cutoff,
+    int mode1_stride,
+    int mode2_stride,
+    cuDoubleComplex* temp_buffer,
+    size_t buffer_stride
+) {
+    int batch_id = blockIdx.y;
+    if (batch_id >= batch_size) return;
+
+    const int state_idx = target_indices[batch_id];
+    const size_t flat_index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const int64_t current_dim = state_dims[state_idx];
+    if (flat_index >= static_cast<size_t>(current_dim)) return;
+
+    const size_t input_offset = state_offsets[state_idx];
+    const cuDoubleComplex* psi_in = &state_data[input_offset];
+    cuDoubleComplex* psi_out = &temp_buffer[batch_id * buffer_stride];
+
+    const size_t stride1 = static_cast<size_t>(mode1_stride);
+    const size_t stride2 = static_cast<size_t>(mode2_stride);
+    const int out_mode1 = static_cast<int>((flat_index / stride1) % single_mode_cutoff);
+    const int out_mode2 = static_cast<int>((flat_index / stride2) % single_mode_cutoff);
+    const int total_photons = out_mode1 + out_mode2;
+    const size_t base_index =
+        flat_index - static_cast<size_t>(out_mode1) * stride1 - static_cast<size_t>(out_mode2) * stride2;
+    const size_t matrix_offset =
+        static_cast<size_t>(total_photons) * (total_photons + 1) * (2 * total_photons + 1) / 6;
+
+    cuDoubleComplex sum = make_cuDoubleComplex(0.0, 0.0);
+    for (int input_mode2 = 0; input_mode2 <= total_photons; ++input_mode2) {
+        const int input_mode1 = total_photons - input_mode2;
+        if (input_mode1 >= single_mode_cutoff || input_mode2 >= single_mode_cutoff) {
+            continue;
+        }
+
+        const size_t matrix_index =
+            matrix_offset + static_cast<size_t>(out_mode2) * (total_photons + 1) + input_mode2;
+        const size_t source_index =
+            base_index + static_cast<size_t>(input_mode1) * stride1 + static_cast<size_t>(input_mode2) * stride2;
+        sum = cuCadd(sum, cuCmul(cached_matrices[matrix_index], psi_in[source_index]));
+    }
+
+    psi_out[flat_index] = sum;
+}
+
+__global__ void apply_bs_subspace_gate_to_output_kernel(
+    const cuDoubleComplex* state_data,
+    const size_t* state_offsets,
+    const int64_t* state_dims,
+    const int* target_indices,
+    const size_t* output_offsets,
+    int batch_size,
+    const cuDoubleComplex* cached_matrices,
+    int single_mode_cutoff,
+    int mode1_stride,
+    int mode2_stride
+) {
+    int batch_id = blockIdx.y;
+    if (batch_id >= batch_size) return;
+
+    const int state_idx = target_indices[batch_id];
+    const size_t flat_index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const int64_t current_dim = state_dims[state_idx];
+    if (flat_index >= static_cast<size_t>(current_dim)) return;
+
+    const size_t input_offset = state_offsets[state_idx];
+    const size_t output_offset = output_offsets[batch_id];
+    const cuDoubleComplex* psi_in = &state_data[input_offset];
+    cuDoubleComplex* psi_out = const_cast<cuDoubleComplex*>(&state_data[output_offset]);
+
+    const size_t stride1 = static_cast<size_t>(mode1_stride);
+    const size_t stride2 = static_cast<size_t>(mode2_stride);
+    const int out_mode1 = static_cast<int>((flat_index / stride1) % single_mode_cutoff);
+    const int out_mode2 = static_cast<int>((flat_index / stride2) % single_mode_cutoff);
+    const int total_photons = out_mode1 + out_mode2;
+    const size_t base_index =
+        flat_index - static_cast<size_t>(out_mode1) * stride1 - static_cast<size_t>(out_mode2) * stride2;
+    const size_t matrix_offset =
+        static_cast<size_t>(total_photons) * (total_photons + 1) * (2 * total_photons + 1) / 6;
+
+    cuDoubleComplex sum = make_cuDoubleComplex(0.0, 0.0);
+    for (int input_mode2 = 0; input_mode2 <= total_photons; ++input_mode2) {
+        const int input_mode1 = total_photons - input_mode2;
+        if (input_mode1 >= single_mode_cutoff || input_mode2 >= single_mode_cutoff) {
+            continue;
+        }
+
+        const size_t matrix_index =
+            matrix_offset + static_cast<size_t>(out_mode2) * (total_photons + 1) + input_mode2;
+        const size_t source_index =
+            base_index + static_cast<size_t>(input_mode1) * stride1 + static_cast<size_t>(input_mode2) * stride2;
+        sum = cuCadd(sum, cuCmul(cached_matrices[matrix_index], psi_in[source_index]));
+    }
+
+    psi_out[flat_index] = sum;
+}
+
+__global__ void apply_tms_difference_gate_on_modes_kernel(
+    const cuDoubleComplex* state_data,
+    const size_t* state_offsets,
+    const int64_t* state_dims,
+    const int* target_indices,
+    int batch_size,
+    const cuDoubleComplex* cached_matrices,
+    int single_mode_cutoff,
+    int mode1_stride,
+    int mode2_stride,
+    cuDoubleComplex* temp_buffer,
+    size_t buffer_stride
+) {
+    int batch_id = blockIdx.y;
+    if (batch_id >= batch_size) return;
+
+    const int state_idx = target_indices[batch_id];
+    const size_t flat_index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const int64_t current_dim = state_dims[state_idx];
+    if (flat_index >= static_cast<size_t>(current_dim)) return;
+
+    const size_t input_offset = state_offsets[state_idx];
+    const cuDoubleComplex* psi_in = &state_data[input_offset];
+    cuDoubleComplex* psi_out = &temp_buffer[batch_id * buffer_stride];
+
+    const size_t stride1 = static_cast<size_t>(mode1_stride);
+    const size_t stride2 = static_cast<size_t>(mode2_stride);
+    const int out_mode1 = static_cast<int>((flat_index / stride1) % single_mode_cutoff);
+    const int out_mode2 = static_cast<int>((flat_index / stride2) % single_mode_cutoff);
+    const int diff = out_mode1 - out_mode2;
+    const int block_dim = tms_difference_block_dim(single_mode_cutoff, diff);
+    const int row_index = diff >= 0 ? out_mode2 : out_mode1;
+    const size_t block_offset = tms_difference_offset(single_mode_cutoff, diff);
+    const size_t base_index =
+        flat_index - static_cast<size_t>(out_mode1) * stride1 - static_cast<size_t>(out_mode2) * stride2;
+
+    cuDoubleComplex sum = make_cuDoubleComplex(0.0, 0.0);
+    for (int local_input = 0; local_input < block_dim; ++local_input) {
+        const int input_mode1 = diff >= 0 ? local_input + diff : local_input;
+        const int input_mode2 = diff >= 0 ? local_input : local_input - diff;
+        const size_t matrix_index =
+            block_offset + static_cast<size_t>(row_index) * block_dim + local_input;
+        const size_t source_index =
+            base_index + static_cast<size_t>(input_mode1) * stride1 + static_cast<size_t>(input_mode2) * stride2;
+        sum = cuCadd(sum, cuCmul(cached_matrices[matrix_index], psi_in[source_index]));
+    }
+
+    psi_out[flat_index] = sum;
+}
+
+__global__ void apply_tms_difference_gate_to_output_kernel(
+    const cuDoubleComplex* state_data,
+    const size_t* state_offsets,
+    const int64_t* state_dims,
+    const int* target_indices,
+    const size_t* output_offsets,
+    int batch_size,
+    const cuDoubleComplex* cached_matrices,
+    int single_mode_cutoff,
+    int mode1_stride,
+    int mode2_stride
+) {
+    int batch_id = blockIdx.y;
+    if (batch_id >= batch_size) return;
+
+    const int state_idx = target_indices[batch_id];
+    const size_t flat_index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const int64_t current_dim = state_dims[state_idx];
+    if (flat_index >= static_cast<size_t>(current_dim)) return;
+
+    const size_t input_offset = state_offsets[state_idx];
+    const size_t output_offset = output_offsets[batch_id];
+    const cuDoubleComplex* psi_in = &state_data[input_offset];
+    cuDoubleComplex* psi_out = const_cast<cuDoubleComplex*>(&state_data[output_offset]);
+
+    const size_t stride1 = static_cast<size_t>(mode1_stride);
+    const size_t stride2 = static_cast<size_t>(mode2_stride);
+    const int out_mode1 = static_cast<int>((flat_index / stride1) % single_mode_cutoff);
+    const int out_mode2 = static_cast<int>((flat_index / stride2) % single_mode_cutoff);
+    const int diff = out_mode1 - out_mode2;
+    const int block_dim = tms_difference_block_dim(single_mode_cutoff, diff);
+    const int row_index = diff >= 0 ? out_mode2 : out_mode1;
+    const size_t block_offset = tms_difference_offset(single_mode_cutoff, diff);
+    const size_t base_index =
+        flat_index - static_cast<size_t>(out_mode1) * stride1 - static_cast<size_t>(out_mode2) * stride2;
+
+    cuDoubleComplex sum = make_cuDoubleComplex(0.0, 0.0);
+    for (int local_input = 0; local_input < block_dim; ++local_input) {
+        const int input_mode1 = diff >= 0 ? local_input + diff : local_input;
+        const int input_mode2 = diff >= 0 ? local_input : local_input - diff;
+        const size_t matrix_index =
+            block_offset + static_cast<size_t>(row_index) * block_dim + local_input;
+        const size_t source_index =
+            base_index + static_cast<size_t>(input_mode1) * stride1 + static_cast<size_t>(input_mode2) * stride2;
+        sum = cuCadd(sum, cuCmul(cached_matrices[matrix_index], psi_in[source_index]));
+    }
+
+    psi_out[flat_index] = sum;
+}
+
 /**
  * 主机端：预计算Beam Splitter矩阵到常量内存
  */
@@ -888,18 +1133,41 @@ static cuDoubleComplex* d_bs_subspace_cache = nullptr;
 static double cached_bs_subspace_theta = -999.0;
 static double cached_bs_subspace_phi = -999.0;
 static int cached_bs_subspace_max_k = -1;
+static cuDoubleComplex* d_tms_difference_cache = nullptr;
+static double cached_tms_difference_r = -999.0;
+static double cached_tms_difference_theta = -999.0;
+static int cached_tms_difference_cutoff = -1;
 
 void prepare_bs_subspace_matrices(double theta, double phi, int max_k) {
     int total_elements = (max_k + 1) * (max_k + 2) * (2 * max_k + 3) / 6;
-    
-    std::vector<cuDoubleComplex> h_matrices(total_elements);
-    
+    const int cutoff = max_k / 2 + 1;
+
+    std::vector<cuDoubleComplex> dense_bs_tensor;
+    build_bs_matrix_recursive(dense_bs_tensor, cutoff, theta, phi);
+
+    std::vector<cuDoubleComplex> h_matrices(
+        static_cast<size_t>(total_elements), make_cuDoubleComplex(0.0, 0.0));
+
     for (int k = 0; k <= max_k; ++k) {
-        int sub_dim = k + 1;
-        int offset = k * (k + 1) * (2 * k + 1) / 6;
-        for (int m = 0; m < sub_dim; ++m) {
-            for (int n = 0; n < sub_dim; ++n) {
-                h_matrices[offset + m * sub_dim + n] = compute_bs_matrix_element(k, m, n, theta, phi);
+        const int sub_dim = k + 1;
+        const int offset = k * (k + 1) * (2 * k + 1) / 6;
+        for (int out_mode2 = 0; out_mode2 < sub_dim; ++out_mode2) {
+            const int out_mode1 = k - out_mode2;
+            for (int input_mode2 = 0; input_mode2 < sub_dim; ++input_mode2) {
+                const int input_mode1 = k - input_mode2;
+                if (out_mode1 >= cutoff || out_mode2 >= cutoff ||
+                    input_mode1 >= cutoff || input_mode2 >= cutoff) {
+                    continue;
+                }
+
+                const size_t dense_index =
+                    static_cast<size_t>(out_mode1) * cutoff * cutoff * cutoff +
+                    static_cast<size_t>(out_mode2) * cutoff * cutoff +
+                    static_cast<size_t>(input_mode1) * cutoff +
+                    static_cast<size_t>(input_mode2);
+                h_matrices[static_cast<size_t>(offset) +
+                           static_cast<size_t>(out_mode2) * sub_dim +
+                           static_cast<size_t>(input_mode2)] = dense_bs_tensor[dense_index];
             }
         }
     }
@@ -916,43 +1184,320 @@ void prepare_bs_subspace_matrices(double theta, double phi, int max_k) {
     cached_bs_subspace_max_k = max_k;
 }
 
+void apply_beam_splitter_subspace(CVStatePool* state_pool, const int* target_indices,
+                                  int batch_size, double theta, double phi,
+                                  int target_qumode1, int target_qumode2, int num_qumodes,
+                                  cudaStream_t stream, bool synchronize) {
+    if (batch_size <= 0) {
+        return;
+    }
+    if (target_qumode1 == target_qumode2) {
+        throw std::invalid_argument("Beam Splitter targets must be distinct");
+    }
+
+    const int single_mode_cutoff = infer_single_mode_cutoff(state_pool, num_qumodes);
+    const int safe_max_photon = 2 * single_mode_cutoff - 2;
+
+    if (d_bs_subspace_cache == nullptr ||
+        std::abs(theta - cached_bs_subspace_theta) > 1e-10 ||
+        std::abs(phi - cached_bs_subspace_phi) > 1e-10 ||
+        safe_max_photon > cached_bs_subspace_max_k) {
+        prepare_bs_subspace_matrices(theta, phi, safe_max_photon);
+    }
+
+    const int mode1_stride =
+        compute_mode_right_stride(single_mode_cutoff, target_qumode1, num_qumodes);
+    const int mode2_stride =
+        compute_mode_right_stride(single_mode_cutoff, target_qumode2, num_qumodes);
+    dim3 block_dim(256);
+    dim3 grid_dim((state_pool->max_total_dim + block_dim.x - 1) / block_dim.x, batch_size);
+
+    if (!synchronize) {
+        const size_t buffer_stride = state_pool->max_total_dim;
+        const size_t temp_bytes = static_cast<size_t>(batch_size) * buffer_stride * sizeof(cuDoubleComplex);
+        cuDoubleComplex* temp_state = static_cast<cuDoubleComplex*>(
+            state_pool->scratch_temp.ensure(temp_bytes));
+
+        apply_bs_subspace_gate_on_modes_kernel<<<grid_dim, block_dim, 0, stream>>>(
+            state_pool->data,
+            state_pool->state_offsets,
+            state_pool->state_dims,
+            target_indices,
+            batch_size,
+            d_bs_subspace_cache,
+            single_mode_cutoff,
+            mode1_stride,
+            mode2_stride,
+            temp_state,
+            buffer_stride
+        );
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            throw std::runtime_error("Beam Splitter subspace kernel launch failed: " +
+                                     std::string(cudaGetErrorString(err)));
+        }
+
+        copy_back_two_mode_tensor_gate_kernel<<<grid_dim, block_dim, 0, stream>>>(
+            state_pool->data,
+            state_pool->state_offsets,
+            state_pool->state_dims,
+            target_indices,
+            batch_size,
+            temp_state,
+            buffer_stride
+        );
+        err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            throw std::runtime_error("Beam Splitter subspace write-back failed: " +
+                                     std::string(cudaGetErrorString(err)));
+        }
+        return;
+    }
+
+    const std::vector<int> host_targets = copy_target_indices_to_host(target_indices, batch_size);
+    std::vector<int> state_dims(batch_size, 0);
+    std::vector<size_t> output_offsets(batch_size, 0);
+    std::vector<bool> output_owned(batch_size, false);
+
+    try {
+        for (int batch_id = 0; batch_id < batch_size; ++batch_id) {
+            const int state_id = host_targets[batch_id];
+            if (!state_pool->is_valid_state(state_id)) {
+                throw std::invalid_argument("Beam Splitter subspace target state is invalid");
+            }
+
+            const int64_t state_dim = state_pool->get_state_dim(state_id);
+            state_dims[batch_id] = state_dim;
+            output_offsets[batch_id] =
+                state_pool->allocate_detached_storage(static_cast<size_t>(state_dim));
+            output_owned[batch_id] = true;
+        }
+
+        const size_t* d_output_offsets =
+            state_pool->upload_values_to_buffer(output_offsets.data(),
+                                                output_offsets.size(),
+                                                state_pool->scratch_aux);
+
+        apply_bs_subspace_gate_to_output_kernel<<<grid_dim, block_dim, 0, stream>>>(
+            state_pool->data,
+            state_pool->state_offsets,
+            state_pool->state_dims,
+            target_indices,
+            d_output_offsets,
+            batch_size,
+            d_bs_subspace_cache,
+            single_mode_cutoff,
+            mode1_stride,
+            mode2_stride
+        );
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            throw std::runtime_error("Beam Splitter subspace direct-write launch failed: " +
+                                     std::string(cudaGetErrorString(err)));
+        }
+
+        synchronize_if_requested(stream, true, "Beam Splitter subspace direct-write sync failed: ");
+
+        for (int batch_id = 0; batch_id < batch_size; ++batch_id) {
+            state_pool->replace_state_storage(host_targets[batch_id],
+                                              output_offsets[batch_id],
+                                              static_cast<size_t>(state_dims[batch_id]),
+                                              state_dims[batch_id]);
+            output_owned[batch_id] = false;
+        }
+    } catch (...) {
+        for (int batch_id = 0; batch_id < batch_size; ++batch_id) {
+            if (!output_owned[batch_id]) {
+                continue;
+            }
+            state_pool->release_detached_storage(output_offsets[batch_id],
+                                                 static_cast<size_t>(state_dims[batch_id]));
+        }
+        throw;
+    }
+}
+
 void apply_beam_splitter(CVStatePool* state_pool, const int* target_indices,
                         int batch_size, double theta, double phi, int max_photon_number) {
-    int single_mode_cutoff = state_pool->d_trunc;
-    
-    // To avoid truncation of tensor product space, max_photon_number MUST be enough to cover it
-    int safe_max_photon = 2 * single_mode_cutoff - 2;
-    if (max_photon_number < safe_max_photon) {
-        max_photon_number = safe_max_photon;
+    const int safe_max_photon = std::max(max_photon_number, 2 * state_pool->d_trunc - 2);
+    (void)safe_max_photon;
+    apply_beam_splitter_subspace(
+        state_pool, target_indices, batch_size, theta, phi, 0, 1, 2, nullptr, true);
+}
+
+void prepare_tms_difference_matrices(double r, double theta, int cutoff) {
+    const size_t total_elements = tms_difference_total_elements(cutoff);
+
+    const std::vector<cuDoubleComplex> dense_tms_tensor =
+        build_tms_tensor_dense(cutoff, r, theta);
+    std::vector<cuDoubleComplex> h_matrices(
+        total_elements, make_cuDoubleComplex(0.0, 0.0));
+
+    for (int diff = -cutoff + 1; diff <= cutoff - 1; ++diff) {
+        const int block_dim = tms_difference_block_dim(cutoff, diff);
+        const size_t block_offset = tms_difference_offset(cutoff, diff);
+
+        for (int output_index = 0; output_index < block_dim; ++output_index) {
+            const int out_mode1 = diff >= 0 ? output_index + diff : output_index;
+            const int out_mode2 = diff >= 0 ? output_index : output_index - diff;
+            for (int input_index = 0; input_index < block_dim; ++input_index) {
+                const int input_mode1 = diff >= 0 ? input_index + diff : input_index;
+                const int input_mode2 = diff >= 0 ? input_index : input_index - diff;
+                const size_t dense_index =
+                    static_cast<size_t>(out_mode1) * cutoff * cutoff * cutoff +
+                    static_cast<size_t>(out_mode2) * cutoff * cutoff +
+                    static_cast<size_t>(input_mode1) * cutoff +
+                    static_cast<size_t>(input_mode2);
+                h_matrices[block_offset +
+                           static_cast<size_t>(output_index) * block_dim +
+                           static_cast<size_t>(input_index)] = dense_tms_tensor[dense_index];
+            }
+        }
     }
 
-    if (d_bs_subspace_cache == nullptr || 
-        std::abs(theta - cached_bs_subspace_theta) > 1e-10 || 
-        std::abs(phi - cached_bs_subspace_phi) > 1e-10 || 
-        max_photon_number > cached_bs_subspace_max_k) {
-        prepare_bs_subspace_matrices(theta, phi, max_photon_number);
+    if (d_tms_difference_cache == nullptr || cached_tms_difference_cutoff != cutoff) {
+        if (d_tms_difference_cache) cudaFree(d_tms_difference_cache);
+        cudaMalloc(&d_tms_difference_cache, total_elements * sizeof(cuDoubleComplex));
     }
 
-    int max_sub_dim = max_photon_number + 1;
-    int max_padded_stride = max_sub_dim + (max_sub_dim % 2 == 0 ? 1 : 0);
-    size_t shared_mem_size = max_sub_dim * max_padded_stride * sizeof(cuDoubleComplex) + 
-                           2 * max_sub_dim * sizeof(cuDoubleComplex);
+    cudaMemcpy(d_tms_difference_cache,
+               h_matrices.data(),
+               total_elements * sizeof(cuDoubleComplex),
+               cudaMemcpyHostToDevice);
 
-    dim3 block_dim(16, 16); 
-    dim3 grid_dim(max_photon_number + 1, 1, batch_size);
+    cached_tms_difference_r = r;
+    cached_tms_difference_theta = theta;
+    cached_tms_difference_cutoff = cutoff;
+}
 
-    apply_two_mode_gate_kernel_cached<<<grid_dim, block_dim, shared_mem_size>>>(
-        state_pool->data, state_pool->state_offsets, single_mode_cutoff, target_indices, batch_size, max_photon_number, d_bs_subspace_cache
-    );
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Beam Splitter kernel launch failed: " + std::string(cudaGetErrorString(err)));
+void apply_two_mode_squeezing_difference_subspace(CVStatePool* state_pool, const int* target_indices,
+                                                  int batch_size, double r, double theta,
+                                                  int target_qumode1, int target_qumode2, int num_qumodes,
+                                                  cudaStream_t stream, bool synchronize) {
+    if (batch_size <= 0) {
+        return;
+    }
+    if (target_qumode1 == target_qumode2) {
+        throw std::invalid_argument("Two-mode squeezing targets must be distinct");
     }
 
-    err = cudaDeviceSynchronize();
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Beam Splitter kernel synchronization failed: " + std::string(cudaGetErrorString(err)));
+    const int single_mode_cutoff = infer_single_mode_cutoff(state_pool, num_qumodes);
+    if (d_tms_difference_cache == nullptr ||
+        std::abs(r - cached_tms_difference_r) > 1e-10 ||
+        std::abs(theta - cached_tms_difference_theta) > 1e-10 ||
+        cached_tms_difference_cutoff != single_mode_cutoff) {
+        prepare_tms_difference_matrices(r, theta, single_mode_cutoff);
+    }
+
+    const int mode1_stride =
+        compute_mode_right_stride(single_mode_cutoff, target_qumode1, num_qumodes);
+    const int mode2_stride =
+        compute_mode_right_stride(single_mode_cutoff, target_qumode2, num_qumodes);
+    dim3 block_dim(256);
+    dim3 grid_dim((state_pool->max_total_dim + block_dim.x - 1) / block_dim.x, batch_size);
+
+    if (!synchronize) {
+        const size_t buffer_stride = state_pool->max_total_dim;
+        const size_t temp_bytes = static_cast<size_t>(batch_size) * buffer_stride * sizeof(cuDoubleComplex);
+        cuDoubleComplex* temp_state = static_cast<cuDoubleComplex*>(
+            state_pool->scratch_temp.ensure(temp_bytes));
+
+        apply_tms_difference_gate_on_modes_kernel<<<grid_dim, block_dim, 0, stream>>>(
+            state_pool->data,
+            state_pool->state_offsets,
+            state_pool->state_dims,
+            target_indices,
+            batch_size,
+            d_tms_difference_cache,
+            single_mode_cutoff,
+            mode1_stride,
+            mode2_stride,
+            temp_state,
+            buffer_stride
+        );
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            throw std::runtime_error("Two-mode squeezing difference kernel launch failed: " +
+                                     std::string(cudaGetErrorString(err)));
+        }
+
+        copy_back_two_mode_tensor_gate_kernel<<<grid_dim, block_dim, 0, stream>>>(
+            state_pool->data,
+            state_pool->state_offsets,
+            state_pool->state_dims,
+            target_indices,
+            batch_size,
+            temp_state,
+            buffer_stride
+        );
+        err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            throw std::runtime_error("Two-mode squeezing difference write-back failed: " +
+                                     std::string(cudaGetErrorString(err)));
+        }
+        return;
+    }
+
+    const std::vector<int> host_targets = copy_target_indices_to_host(target_indices, batch_size);
+    std::vector<int> state_dims(batch_size, 0);
+    std::vector<size_t> output_offsets(batch_size, 0);
+    std::vector<bool> output_owned(batch_size, false);
+
+    try {
+        for (int batch_id = 0; batch_id < batch_size; ++batch_id) {
+            const int state_id = host_targets[batch_id];
+            if (!state_pool->is_valid_state(state_id)) {
+                throw std::invalid_argument("Two-mode squeezing difference target state is invalid");
+            }
+
+            const int64_t state_dim = state_pool->get_state_dim(state_id);
+            state_dims[batch_id] = state_dim;
+            output_offsets[batch_id] =
+                state_pool->allocate_detached_storage(static_cast<size_t>(state_dim));
+            output_owned[batch_id] = true;
+        }
+
+        const size_t* d_output_offsets =
+            state_pool->upload_values_to_buffer(output_offsets.data(),
+                                                output_offsets.size(),
+                                                state_pool->scratch_aux);
+
+        apply_tms_difference_gate_to_output_kernel<<<grid_dim, block_dim, 0, stream>>>(
+            state_pool->data,
+            state_pool->state_offsets,
+            state_pool->state_dims,
+            target_indices,
+            d_output_offsets,
+            batch_size,
+            d_tms_difference_cache,
+            single_mode_cutoff,
+            mode1_stride,
+            mode2_stride
+        );
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            throw std::runtime_error("Two-mode squeezing difference direct-write launch failed: " +
+                                     std::string(cudaGetErrorString(err)));
+        }
+
+        synchronize_if_requested(stream, true, "Two-mode squeezing difference direct-write sync failed: ");
+
+        for (int batch_id = 0; batch_id < batch_size; ++batch_id) {
+            state_pool->replace_state_storage(host_targets[batch_id],
+                                              output_offsets[batch_id],
+                                              static_cast<size_t>(state_dims[batch_id]),
+                                              state_dims[batch_id]);
+            output_owned[batch_id] = false;
+        }
+    } catch (...) {
+        for (int batch_id = 0; batch_id < batch_size; ++batch_id) {
+            if (!output_owned[batch_id]) {
+                continue;
+            }
+            state_pool->release_detached_storage(output_offsets[batch_id],
+                                                 static_cast<size_t>(state_dims[batch_id]));
+        }
+        throw;
     }
 }
 
@@ -994,4 +1539,3 @@ void apply_two_mode_gate(CVStatePool* state_pool, const int* target_indices,
     apply_beam_splitter(state_pool, target_indices, batch_size,
                        param1, param2, max_photon_number);
 }
-

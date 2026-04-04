@@ -29,6 +29,14 @@ void apply_beam_splitter_recursive(CVStatePool* state_pool, const int* target_in
                                   cudaStream_t stream = nullptr,
                                   bool synchronize = true);
 
+// 按总光子数子空间分块的 Beam Splitter 实现
+void apply_beam_splitter_subspace(CVStatePool* state_pool, const int* target_indices,
+                                  int batch_size, double theta, double phi,
+                                  int target_qumode1 = 0, int target_qumode2 = 1,
+                                  int num_qumodes = 2,
+                                  cudaStream_t stream = nullptr,
+                                  bool synchronize = true);
+
 // 双模挤压门 TMS(r, theta)
 void apply_two_mode_squeezing_recursive(CVStatePool* state_pool, const int* target_indices,
                                        int batch_size, double r, double theta,
@@ -36,6 +44,14 @@ void apply_two_mode_squeezing_recursive(CVStatePool* state_pool, const int* targ
                                        int num_qumodes = 2,
                                        cudaStream_t stream = nullptr,
                                        bool synchronize = true);
+
+// 按 photon-number difference 子空间分块的双模挤压实现
+void apply_two_mode_squeezing_difference_subspace(CVStatePool* state_pool, const int* target_indices,
+                                                  int batch_size, double r, double theta,
+                                                  int target_qumode1 = 0, int target_qumode2 = 1,
+                                                  int num_qumodes = 2,
+                                                  cudaStream_t stream = nullptr,
+                                                  bool synchronize = true);
 
 // SUM 门
 void apply_sum_gate(CVStatePool* state_pool, const int* target_indices,

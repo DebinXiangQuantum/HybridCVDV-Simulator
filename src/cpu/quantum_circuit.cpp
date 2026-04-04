@@ -137,6 +137,54 @@ std::pair<int*, size_t> QuantumCircuit::upload_target_states_for_compute(
     return {device_target_ids, ids_bytes};
 }
 
+QuantumCircuit::ExactGateBatchContext QuantumCircuit::prepare_exact_gate_batch_context(
+    const std::vector<int>& target_states) {
+    ExactGateBatchContext context;
+    context.target_states = &target_states;
+    context.batch_size = static_cast<int>(target_states.size());
+    if (target_states.empty()) {
+        return context;
+    }
+
+    const size_t ids_bytes = target_states.size() * sizeof(int);
+    int* staged_host = static_cast<int*>(state_pool_.host_transfer_staging.ensure(ids_bytes));
+    std::memcpy(staged_host, target_states.data(), ids_bytes);
+    context.d_target_ids = static_cast<int*>(exact_block_target_ids_buffer_.ensure(ids_bytes));
+    CHECK_CUDA(cudaMemcpy(context.d_target_ids, staged_host, ids_bytes, cudaMemcpyHostToDevice));
+    return context;
+}
+
+std::string QuantumCircuit::make_ell_cache_key(const GateParams& gate) const {
+    std::ostringstream key;
+    key << static_cast<int>(gate.type) << ':' << cv_truncation_;
+    key << std::hexfloat;
+    for (const auto& param : gate.params) {
+        key << ':' << param.real() << ':' << param.imag();
+    }
+    return key.str();
+}
+
+FockELLOperator* QuantumCircuit::get_cached_ell_operator(const GateParams& gate) {
+    const std::string key = make_ell_cache_key(gate);
+    const auto found = ell_operator_cache_.find(key);
+    if (found != ell_operator_cache_.end()) {
+        return found->second.get();
+    }
+
+    std::shared_ptr<FockELLOperator> ell_op(prepare_ell_operator(gate));
+    if (!ell_op || ell_op->dim <= 0) {
+        return nullptr;
+    }
+    ell_op->upload_to_gpu();
+    FockELLOperator* raw_ptr = ell_op.get();
+    ell_operator_cache_.emplace(key, std::move(ell_op));
+    return raw_ptr;
+}
+
+void QuantumCircuit::prewarm_exact_gate_resources(const std::vector<GateParams>& gates) {
+    (void)gates;
+}
+
 void QuantumCircuit::mark_target_upload_slot_in_use(size_t slot_index) {
     if (!async_cv_pipeline_enabled_) {
         return;
@@ -194,7 +242,16 @@ QuantumCircuit::QuantumCircuit(int num_qubits, int num_qumodes, int cv_truncatio
       gaussian_symbolic_mode_limit_(4), symbolic_branch_limit_(kDefaultSymbolicBranchLimit),
       gaussian_state_pool_capacity_override_(0),
       next_symbolic_terminal_id_(-2),
-      pending_gc_replacements_(0) {
+      pending_gc_replacements_(0),
+      gaussian_symbolic_enabled_(true),
+      diagonal_mixture_enabled_(true),
+      fused_diagonal_enabled_(true),
+      eager_symbolic_materialization_enabled_(false),
+      qubit_only_block_count_(0),
+      gaussian_symbolic_block_count_(0),
+      diagonal_mixture_block_count_(0),
+      exact_block_count_(0),
+      symbolic_materialization_count_(0) {
 
     if (num_qubits < 0 || num_qumodes <= 0 || cv_truncation <= 0) {
         throw std::invalid_argument("Qubit数量不能为负数，Qumode数量和截断维度必须为正数");
@@ -458,6 +515,11 @@ size_t QuantumCircuit::execute_range(size_t start_block, size_t max_blocks) {
     transfer_time_ = 0.0;
     computation_time_ = 0.0;
     planning_time_ = 0.0;
+    qubit_only_block_count_ = 0;
+    gaussian_symbolic_block_count_ = 0;
+    diagonal_mixture_block_count_ = 0;
+    exact_block_count_ = 0;
+    symbolic_materialization_count_ = 0;
 
     // 记录总开始时间
     auto start_total = std::chrono::high_resolution_clock::now();
@@ -521,14 +583,26 @@ size_t QuantumCircuit::execute_range(size_t start_block, size_t max_blocks) {
         }
 
         bool block_executed = false;
-        if (current_block.kind == ExecutionBlockKind::Gaussian) {
+        if (gaussian_symbolic_enabled_ &&
+            current_block.kind == ExecutionBlockKind::Gaussian) {
             block_executed = try_execute_gaussian_block_with_ede(current_block);
-        } else if (current_block.kind == ExecutionBlockKind::DiagonalNonGaussian) {
+        } else if (diagonal_mixture_enabled_ &&
+                   current_block.kind == ExecutionBlockKind::DiagonalNonGaussian) {
             block_executed = try_execute_diagonal_non_gaussian_block_with_mixture(current_block);
         }
 
         if (block_executed) {
+            if (current_block.kind == ExecutionBlockKind::Gaussian) {
+                ++gaussian_symbolic_block_count_;
+            } else if (current_block.kind == ExecutionBlockKind::DiagonalNonGaussian) {
+                ++diagonal_mixture_block_count_;
+            }
             synchronize_async_cv_pipeline();
+            if (eager_symbolic_materialization_enabled_ &&
+                has_symbolic_terminals()) {
+                materialize_symbolic_terminals_to_fock();
+                ++symbolic_materialization_count_;
+            }
             collect_hdd_garbage_if_needed(false);
             if (block_index + 1 < total_blocks &&
                 executed_blocks + 1 < max_blocks) {
@@ -614,8 +688,28 @@ size_t QuantumCircuit::execute_range(size_t start_block, size_t max_blocks) {
                                << " materializing symbolic terminals to exact Fock"
                                << std::endl;
             materialize_symbolic_terminals_to_fock();
+            ++symbolic_materialization_count_;
             FALLBACK_DEBUG_LOG << "[fallback] block " << block_index
                                << " symbolic materialization complete" << std::endl;
+        }
+
+        ExactGateBatchContext exact_batch_context;
+        if (current_block.kind != ExecutionBlockKind::QubitOnly) {
+            prewarm_exact_gate_resources(current_block.gates);
+            const auto& target_states = get_cached_target_states();
+            if (!target_states.empty()) {
+                auto transfer_start = std::chrono::high_resolution_clock::now();
+                exact_batch_context = prepare_exact_gate_batch_context(target_states);
+                auto transfer_end = std::chrono::high_resolution_clock::now();
+                transfer_time_ += std::chrono::duration<double, std::milli>(
+                    transfer_end - transfer_start).count();
+            }
+        }
+
+        if (current_block.kind == ExecutionBlockKind::QubitOnly) {
+            ++qubit_only_block_count_;
+        } else {
+            ++exact_block_count_;
         }
 
         // ── Cross-mode fused diagonal optimization ──────────────────
@@ -623,7 +717,8 @@ size_t QuantumCircuit::execute_range(size_t start_block, size_t max_blocks) {
         // into a single kernel pass. This also catches Gaussian blocks that
         // fell back from EDE (their kind is still Gaussian but they contain
         // fusable diagonal gates like PhaseRotation).
-        if (current_block.kind != ExecutionBlockKind::QubitOnly) {
+        if (fused_diagonal_enabled_ &&
+            current_block.kind != ExecutionBlockKind::QubitOnly) {
             // Partition gates: fusable simple diagonals vs. everything else
             std::vector<GateParams> fusable_gates;
             std::vector<GateParams> other_gates;
@@ -672,25 +767,13 @@ size_t QuantumCircuit::execute_range(size_t start_block, size_t max_blocks) {
                 }
 
                 if (!ops_vec.empty()) {
-                    const auto& target_states = get_cached_target_states();
-                    if (!target_states.empty()) {
-                        auto transfer_start = std::chrono::high_resolution_clock::now();
-                        size_t upload_slot = 0;
-                        auto [d_target_ids, ids_bytes] = upload_target_states_for_compute(
-                            target_states, &upload_slot);
-                        auto transfer_end = std::chrono::high_resolution_clock::now();
-                        transfer_time_ += std::chrono::duration<double, std::milli>(
-                            transfer_end - transfer_start).count();
-
+                    if (exact_batch_context.d_target_ids && exact_batch_context.batch_size > 0) {
                         auto compute_start = std::chrono::high_resolution_clock::now();
-                        apply_fused_diagonal_gates(&state_pool_, d_target_ids,
-                                                   static_cast<int>(target_states.size()),
+                        apply_fused_diagonal_gates(&state_pool_, exact_batch_context.d_target_ids,
+                                                   exact_batch_context.batch_size,
                                                    ops_vec, num_qumodes_,
                                                    async_cv_pipeline_enabled_ ? compute_stream_ : nullptr,
                                                    !async_cv_pipeline_enabled_);
-                        if (async_cv_pipeline_enabled_) {
-                            mark_target_upload_slot_in_use(upload_slot);
-                        }
                         auto compute_end = std::chrono::high_resolution_clock::now();
                         computation_time_ += std::chrono::duration<double, std::milli>(
                             compute_end - compute_start).count();
@@ -709,7 +792,7 @@ size_t QuantumCircuit::execute_range(size_t start_block, size_t max_blocks) {
                                        << " gate " << (gate_index + 1) << "/"
                                        << other_gates.size() << " "
                                        << gate_type_name(gate.type) << std::endl;
-                    execute_gate(gate);
+                    execute_gate(gate, &exact_batch_context);
                 }
 
                 synchronize_async_cv_pipeline();
@@ -739,7 +822,7 @@ size_t QuantumCircuit::execute_range(size_t start_block, size_t max_blocks) {
                                << " gate " << (gate_index + 1) << "/"
                                << current_block.gates.size() << " "
                                << gate_type_name(gate.type) << std::endl;
-            execute_gate(gate);
+            execute_gate(gate, &exact_batch_context);
         }
 
         synchronize_async_cv_pipeline();
@@ -808,6 +891,11 @@ void QuantumCircuit::reset() {
     transfer_time_ = 0.0;
     computation_time_ = 0.0;
     planning_time_ = 0.0;
+    qubit_only_block_count_ = 0;
+    gaussian_symbolic_block_count_ = 0;
+    diagonal_mixture_block_count_ = 0;
+    exact_block_count_ = 0;
+    symbolic_materialization_count_ = 0;
 }
 
 void QuantumCircuit::set_gaussian_symbolic_mode_limit(int limit) {
@@ -822,6 +910,22 @@ void QuantumCircuit::set_symbolic_branch_limit(int limit) {
         throw std::invalid_argument("symbolic branch limit must be positive");
     }
     symbolic_branch_limit_ = limit;
+}
+
+void QuantumCircuit::set_gaussian_symbolic_enabled(bool enabled) {
+    gaussian_symbolic_enabled_ = enabled;
+}
+
+void QuantumCircuit::set_diagonal_mixture_enabled(bool enabled) {
+    diagonal_mixture_enabled_ = enabled;
+}
+
+void QuantumCircuit::set_fused_diagonal_enabled(bool enabled) {
+    fused_diagonal_enabled_ = enabled;
+}
+
+void QuantumCircuit::set_eager_symbolic_materialization_enabled(bool enabled) {
+    eager_symbolic_materialization_enabled_ = enabled;
 }
 
 void QuantumCircuit::set_gaussian_state_pool_capacity(int capacity) {
@@ -966,6 +1070,11 @@ void QuantumCircuit::collect_hdd_garbage_if_needed(bool force) {
 // ==================== Gate Dispatch Router ====================
 
 void QuantumCircuit::execute_gate(const GateParams& gate) {
+    execute_gate(gate, nullptr);
+}
+
+void QuantumCircuit::execute_gate(const GateParams& gate,
+                                  const ExactGateBatchContext* batch_context) {
     switch (gate.type) {
         // CPU端纯Qubit门
         case GateType::HADAMARD:
@@ -990,21 +1099,21 @@ void QuantumCircuit::execute_gate(const GateParams& gate) {
         case GateType::SNAP_GATE:
         case GateType::MULTI_SNAP_GATE:
         case GateType::CROSS_KERR_GATE:
-            execute_level0_gate(gate);
+            execute_level0_gate(gate, batch_context);
             break;
 
         case GateType::CREATION_OPERATOR:
         case GateType::ANNIHILATION_OPERATOR:
-            execute_level1_gate(gate);
+            execute_level1_gate(gate, batch_context);
             break;
 
         case GateType::DISPLACEMENT:
         case GateType::SQUEEZING:
-            execute_level2_gate(gate);
+            execute_level2_gate(gate, batch_context);
             break;
 
         case GateType::BEAM_SPLITTER:
-            execute_level3_gate(gate);
+            execute_level3_gate(gate, batch_context);
             break;
 
         // CPU+GPU混合门
@@ -1029,4 +1138,3 @@ void QuantumCircuit::execute_gate(const GateParams& gate) {
 /**
  * 执行Level 0门 (对角门)
  */
-

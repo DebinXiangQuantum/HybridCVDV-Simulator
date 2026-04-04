@@ -217,6 +217,27 @@ bool build_circuit_from_ref(QuantumCircuit& circuit, const SFReferenceData& ref)
         circuit.add_gate(Gates::CrossKerr(0, 1, ref.param_double("kappa")));
         return true;
     }
+    if (gate == "TWO_MODE_SQUEEZING") {
+        const std::string input = ref.param_str("input", "vacuum");
+        if (input == "fock10") {
+            circuit.add_gate(Gates::CreationOperator(0));
+        } else if (input == "vacuum") {
+            // Force the circuit through the exact Fock path while leaving the state on vacuum.
+            circuit.add_gate(Gates::CreationOperator(0));
+            circuit.add_gate(Gates::AnnihilationOperator(0));
+        } else {
+            std::cerr << "Unsupported TMS input state: " << input << "\n";
+            return false;
+        }
+
+        // 主线路里当前只有 conditional TMS，控制位默认在 |0>，等价于直接施加 +xi。
+        circuit.add_gate(Gates::ConditionalTwoModeSqueezing(
+            0,
+            0,
+            1,
+            std::polar(ref.param_double("r"), ref.param_double("phi"))));
+        return true;
+    }
     if (gate == "COMPOSED_D_K") {
         circuit.add_gate(Gates::Displacement(0, {ref.param_double("d_r"), 0.0}));
         circuit.add_gate(Gates::KerrGate(0, ref.param_double("kappa")));
@@ -255,7 +276,7 @@ std::string find_reference_dir() {
         std::ifstream probe(std::string(p) + "/.");
         // Try to list directory by opening a known file pattern
         // A simpler check: try to open manifest
-        for (int c : {16, 8, 32}) {
+        for (int c : {16, 8, 32, 4}) {
             std::string mpath = std::string(p) + "/manifest_c" + std::to_string(c) + ".json";
             std::ifstream mf(mpath);
             if (mf.good()) return p;
@@ -266,7 +287,7 @@ std::string find_reference_dir() {
 
 // Find reference file by case name
 std::string find_reference_file(const std::string& dir, const std::string& case_name) {
-    for (int c : {16, 8, 32}) {
+    for (int c : {16, 8, 32, 4}) {
         std::string path = dir + "/sf_ref_" + case_name + "_c" + std::to_string(c) + ".txt";
         std::ifstream f(path);
         if (f.good()) return path;
@@ -388,6 +409,17 @@ TEST_F(SFPrecisionTest, BeamSplitter_piOver4) {
 // Cross-Kerr (2-mode)
 TEST_F(SFPrecisionTest, CrossKerr_0p1) {
     run_comparison("cross_kerr_kappa0.1", 1e-3, 1e-4);
+}
+
+// Two-mode squeezing (2-mode)
+TEST_F(SFPrecisionTest, TwoModeSqueezingVacuum_r0p2) {
+    run_comparison("tms_vacuum_r0.2_phi0.10", 1e-6, 1e-7);
+}
+TEST_F(SFPrecisionTest, TwoModeSqueezingVacuum_r0p3) {
+    run_comparison("tms_vacuum_r0.3_phi0.25", 1e-6, 1e-7);
+}
+TEST_F(SFPrecisionTest, TwoModeSqueezingFock10_r0p2) {
+    run_comparison("tms_fock10_r0.2_phi0.10", 1e-6, 1e-7);
 }
 
 // Composed sequences

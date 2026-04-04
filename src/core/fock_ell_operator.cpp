@@ -247,12 +247,14 @@ int FockELLOperator::get_nnz() const {
  * 重新分配GPU内存
  */
 void FockELLOperator::realloc_gpu_memory() {
-    // 同步所有GPU操作，确保在释放内存前所有操作完成
-    cudaDeviceSynchronize();
-    cudaError_t sync_err = cudaGetLastError();
-    if (sync_err != cudaSuccess && sync_err != cudaErrorNotReady) {
-        // 如果之前的操作有错误，记录但不抛出异常
-        std::cerr << "警告：重新分配GPU内存前检测到GPU错误: " << cudaGetErrorString(sync_err) << std::endl;
+    if (ell_val || ell_col) {
+        // 仅在需要释放已有设备缓冲时同步，首次分配不应强制全设备栅栏。
+        cudaDeviceSynchronize();
+        cudaError_t sync_err = cudaGetLastError();
+        if (sync_err != cudaSuccess && sync_err != cudaErrorNotReady) {
+            // 如果之前的操作有错误，记录但不抛出异常
+            std::cerr << "警告：重新分配GPU内存前检测到GPU错误: " << cudaGetErrorString(sync_err) << std::endl;
+        }
     }
 
     // 释放现有内存

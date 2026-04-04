@@ -21,10 +21,28 @@ void apply_cached_two_mode_tensor_gate(CVStatePool* state_pool,
                                        cudaStream_t stream,
                                        bool synchronize);
 
-void build_bs_matrix_recursive(std::vector<cuDoubleComplex>& Z,
-                               int cutoff, double theta, double phi);
+void apply_beam_splitter_subspace(CVStatePool* state_pool,
+                                  const int* target_indices,
+                                  int batch_size,
+                                  double theta,
+                                  double phi,
+                                  int target_qumode1,
+                                  int target_qumode2,
+                                  int num_qumodes,
+                                  cudaStream_t stream,
+                                  bool synchronize);
 
-std::vector<cuDoubleComplex> build_tms_tensor_dense(int cutoff, double r, double theta);
+void apply_two_mode_squeezing_difference_subspace(CVStatePool* state_pool,
+                                                  const int* target_indices,
+                                                  int batch_size,
+                                                  double r,
+                                                  double theta,
+                                                  int target_qumode1,
+                                                  int target_qumode2,
+                                                  int num_qumodes,
+                                                  cudaStream_t stream,
+                                                  bool synchronize);
+
 std::vector<cuDoubleComplex> build_sum_tensor_dense(int cutoff, double scale);
 
 namespace {
@@ -145,26 +163,9 @@ std::vector<int> copy_target_indices_to_host(const int* target_indices, int batc
     return host_targets;
 }
 
-int infer_single_mode_cutoff(const CVStatePool* state_pool, int num_qumodes) {
-    if (num_qumodes <= 0) {
-        throw std::invalid_argument("number of qumodes must be positive");
-    }
-    const double inferred =
-        std::pow(static_cast<double>(state_pool->max_total_dim), 1.0 / static_cast<double>(num_qumodes));
-    const int cutoff = static_cast<int>(std::llround(inferred));
-    if (cutoff <= 0) {
-        throw std::runtime_error("failed to infer single-mode cutoff");
-    }
-    return cutoff;
-}
-
 }  // namespace
 
 // Global caches for tensor gate matrices, shared across gate calls.
-static std::vector<TensorMatrixCacheEntry> g_bs_matrix_cache_entries;
-static uint64_t g_bs_matrix_cache_use_counter = 0;
-static std::vector<TensorMatrixCacheEntry> g_tms_matrix_cache_entries;
-static uint64_t g_tms_matrix_cache_use_counter = 0;
 static std::vector<TensorMatrixCacheEntry> g_sum_matrix_cache_entries;
 static uint64_t g_sum_matrix_cache_use_counter = 0;
 
@@ -586,7 +587,7 @@ void build_tms_matrix_recursive(
 /**
  * 主机端接口：应用Two-Mode Squeezing门 S2(r,θ)
  * 
- * 使用Strawberry Fields递推方法 + GPU缓存策略
+ * 使用按 photon-number difference 子空间分块的 exact 路径
  * 
  * 物理意义：
  * - 双模挤压态是量子光学中的重要资源
@@ -603,45 +604,27 @@ void apply_two_mode_squeezing_recursive(CVStatePool* state_pool, const int* targ
                                        int batch_size, double r, double theta,
                                        int target_qumode1, int target_qumode2, int num_qumodes,
                                        cudaStream_t stream, bool synchronize) {
-    if (batch_size <= 0) {
-        return;
-    }
-
-    const int single_mode_cutoff = infer_single_mode_cutoff(state_pool, num_qumodes);
-    const cuDoubleComplex* tms_matrix = get_or_build_two_mode_tensor_cache(
-        &g_tms_matrix_cache_entries,
-        &g_tms_matrix_cache_use_counter,
-        single_mode_cutoff,
-        r,
-        theta,
-        "Two-Mode Squeezing matrix allocation failed: ",
-        "Two-Mode Squeezing matrix upload failed: ",
-        [&]() {
-            return build_tms_tensor_dense(single_mode_cutoff, r, theta);
-        });
-    
-    apply_cached_two_mode_tensor_gate(
-        state_pool,
-        target_indices,
-        batch_size,
-        single_mode_cutoff,
-        tms_matrix,
-        target_qumode1,
-        target_qumode2,
-        num_qumodes,
-        stream,
-        synchronize);
+    apply_two_mode_squeezing_difference_subspace(state_pool,
+                                                 target_indices,
+                                                 batch_size,
+                                                 r,
+                                                 theta,
+                                                 target_qumode1,
+                                                 target_qumode2,
+                                                 num_qumodes,
+                                                 stream,
+                                                 synchronize);
 }
 
 /**
  * 主机端接口：应用Beam Splitter门 BS(θ,φ) - 新递推方法
  * 
- * 使用Strawberry Fields递推方法 + GPU缓存策略（类似挤压门）
+ * 使用按总光子数子空间分块的缓存矩阵路径
  * 
  * 优势：
- * - 数值稳定（无阶乘、无指数）
- * - 完美保真度（保持幺正性）
- * - 使用标准张量积格式（无需转换）
+ * - 数值稳定（矩阵元素来自 Strawberry Fields 递推）
+ * - 只在 m+n=p+q 的 photon-number 子空间内做乘法
+ * - 直接支持主 dispatch 的任意双模寻址
  * - GPU缓存复用（相同参数时无需重新计算）
  * 
  * @param state_pool 状态池（维度应为 D^2，其中D是单模cutoff）
@@ -654,36 +637,16 @@ void apply_beam_splitter_recursive(CVStatePool* state_pool, const int* target_in
                                    int batch_size, double theta, double phi,
                                    int target_qumode1, int target_qumode2, int num_qumodes,
                                    cudaStream_t stream, bool synchronize) {
-    if (batch_size <= 0) {
-        return;
-    }
-
-    int single_mode_cutoff = infer_single_mode_cutoff(state_pool, num_qumodes);
-    const cuDoubleComplex* bs_matrix = get_or_build_two_mode_tensor_cache(
-        &g_bs_matrix_cache_entries,
-        &g_bs_matrix_cache_use_counter,
-        single_mode_cutoff,
-        theta,
-        phi,
-        "Beam Splitter matrix allocation failed: ",
-        "Beam Splitter matrix upload failed: ",
-        [&]() {
-            std::vector<cuDoubleComplex> h_bs_matrix;
-            build_bs_matrix_recursive(h_bs_matrix, single_mode_cutoff, theta, phi);
-            return h_bs_matrix;
-        });
-    
-    apply_cached_two_mode_tensor_gate(
-        state_pool,
-        target_indices,
-        batch_size,
-        single_mode_cutoff,
-        bs_matrix,
-        target_qumode1,
-        target_qumode2,
-        num_qumodes,
-        stream,
-        synchronize);
+    apply_beam_splitter_subspace(state_pool,
+                                 target_indices,
+                                 batch_size,
+                                 theta,
+                                 phi,
+                                 target_qumode1,
+                                 target_qumode2,
+                                 num_qumodes,
+                                 stream,
+                                 synchronize);
 }
 
 // ==========================================

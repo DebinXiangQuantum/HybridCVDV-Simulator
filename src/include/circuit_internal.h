@@ -108,6 +108,15 @@ void apply_controlled_displacement_on_mode(CVStatePool* state_pool,
                                            cuDoubleComplex alpha,
                                            int target_qumode,
                                            int num_qumodes);
+void apply_controlled_displacement_on_mode(CVStatePool* state_pool,
+                                           const std::vector<int>& controlled_states,
+                                           const int* d_state_ids,
+                                           int num_states,
+                                           cuDoubleComplex alpha,
+                                           int target_qumode,
+                                           int num_qumodes,
+                                           cudaStream_t stream = nullptr,
+                                           bool synchronize = true);
 void apply_controlled_displacement(CVStatePool* state_pool,
                                    const std::vector<int>& controlled_states,
                                    cuDoubleComplex alpha);

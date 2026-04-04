@@ -218,14 +218,14 @@ Matrix build_two_mode_squeezing_matrix(int cutoff, Complex xi) {
 
             if (p + 1 < cutoff && q + 1 < cutoff) {
                 const int output_idx = (p + 1) * cutoff + (q + 1);
-                const double coeff = 0.5 * std::sqrt(static_cast<double>((p + 1) * (q + 1)));
-                generator[output_idx][input_idx] += std::conj(xi) * coeff;
+                const double coeff = std::sqrt(static_cast<double>((p + 1) * (q + 1)));
+                generator[output_idx][input_idx] += xi * coeff;
             }
 
             if (p > 0 && q > 0) {
                 const int output_idx = (p - 1) * cutoff + (q - 1);
-                const double coeff = -0.5 * std::sqrt(static_cast<double>(p * q));
-                generator[output_idx][input_idx] += xi * coeff;
+                const double coeff = -std::sqrt(static_cast<double>(p * q));
+                generator[output_idx][input_idx] += std::conj(xi) * coeff;
             }
         }
     }

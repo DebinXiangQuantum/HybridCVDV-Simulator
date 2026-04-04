@@ -1,6 +1,7 @@
 #include "batch_scheduler.h"
 #include "quantum_circuit.h"
 #include "reference_gates.h"
+#include "gpu_context.h"
 
 #include <cuda_runtime.h>
 #include <cuComplex.h>
@@ -81,6 +82,11 @@ struct BenchmarkSummary {
     double median_memory_bytes = 0.0;
     double median_active_states = 0.0;
     double median_hdd_nodes = 0.0;
+    double median_qubit_only_blocks = 0.0;
+    double median_gaussian_symbolic_blocks = 0.0;
+    double median_diagonal_mixture_blocks = 0.0;
+    double median_exact_blocks = 0.0;
+    double median_symbolic_materializations = 0.0;
     int warmup_runs = 0;
     int measured_runs = 0;
 };
@@ -89,13 +95,23 @@ struct CliOptions {
     std::string suite = "all";
     std::string name_filter;
     int gaussian_symbolic_mode_limit = 4;
+    int symbolic_branch_limit = 64;
     bool use_interaction_picture = false;
+    bool gaussian_symbolic_enabled = true;
+    bool diagonal_mixture_enabled = true;
+    bool fused_diagonal_enabled = true;
+    bool eager_symbolic_materialization_enabled = false;
     int max_states_override = 0; // 0 = use default per-circuit values
     fs::path output_path = fs::path("experiments/results/internal_single_gpu.json");
 };
 
 int g_gaussian_symbolic_mode_limit = 4;
+int g_symbolic_branch_limit = 64;
 bool g_use_interaction_picture = false;
+bool g_gaussian_symbolic_enabled = true;
+bool g_diagonal_mixture_enabled = true;
+bool g_fused_diagonal_enabled = true;
+bool g_eager_symbolic_materialization_enabled = false;
 int g_max_states_override = 0;
 int g_scaling_warmup_runs_override = -1;
 int g_scaling_measured_runs_override = -1;
@@ -556,6 +572,12 @@ CircuitRunResult run_circuit_once(int num_qubits,
     try {
         QuantumCircuit circuit(num_qubits, num_qumodes, cutoff, max_states);
         circuit.set_gaussian_symbolic_mode_limit(g_gaussian_symbolic_mode_limit);
+        circuit.set_symbolic_branch_limit(g_symbolic_branch_limit);
+        circuit.set_gaussian_symbolic_enabled(g_gaussian_symbolic_enabled);
+        circuit.set_diagonal_mixture_enabled(g_diagonal_mixture_enabled);
+        circuit.set_fused_diagonal_enabled(g_fused_diagonal_enabled);
+        circuit.set_eager_symbolic_materialization_enabled(
+            g_eager_symbolic_materialization_enabled);
         setup_fn(circuit);
         circuit.build();
         if (initial_state && !set_terminal_state(circuit, *initial_state)) {
@@ -606,6 +628,11 @@ BenchmarkSummary benchmark_circuit_case(int num_qubits,
     std::vector<double> memory_bytes;
     std::vector<double> active_states;
     std::vector<double> hdd_nodes;
+    std::vector<double> qubit_only_blocks;
+    std::vector<double> gaussian_symbolic_blocks;
+    std::vector<double> diagonal_mixture_blocks;
+    std::vector<double> exact_blocks;
+    std::vector<double> symbolic_materializations;
 
     for (int i = 0; i < measured_runs; ++i) {
         CircuitRunResult run =
@@ -620,6 +647,15 @@ BenchmarkSummary benchmark_circuit_case(int num_qubits,
         memory_bytes.push_back(static_cast<double>(run.memory_bytes));
         active_states.push_back(static_cast<double>(run.circuit_stats.active_states));
         hdd_nodes.push_back(static_cast<double>(run.circuit_stats.hdd_nodes));
+        qubit_only_blocks.push_back(
+            static_cast<double>(run.circuit_stats.qubit_only_blocks));
+        gaussian_symbolic_blocks.push_back(
+            static_cast<double>(run.circuit_stats.gaussian_symbolic_blocks));
+        diagonal_mixture_blocks.push_back(
+            static_cast<double>(run.circuit_stats.diagonal_mixture_blocks));
+        exact_blocks.push_back(static_cast<double>(run.circuit_stats.exact_blocks));
+        symbolic_materializations.push_back(
+            static_cast<double>(run.circuit_stats.symbolic_materializations));
     }
 
     summary.ok = true;
@@ -633,6 +669,11 @@ BenchmarkSummary benchmark_circuit_case(int num_qubits,
     summary.median_memory_bytes = percentile(memory_bytes, 0.5);
     summary.median_active_states = percentile(active_states, 0.5);
     summary.median_hdd_nodes = percentile(hdd_nodes, 0.5);
+    summary.median_qubit_only_blocks = percentile(qubit_only_blocks, 0.5);
+    summary.median_gaussian_symbolic_blocks = percentile(gaussian_symbolic_blocks, 0.5);
+    summary.median_diagonal_mixture_blocks = percentile(diagonal_mixture_blocks, 0.5);
+    summary.median_exact_blocks = percentile(exact_blocks, 0.5);
+    summary.median_symbolic_materializations = percentile(symbolic_materializations, 0.5);
     return summary;
 }
 
@@ -1478,6 +1519,14 @@ ExperimentResult run_scaling_case(const std::string& name,
     result.metrics["median_memory_bytes"] = summary.median_memory_bytes;
     result.metrics["median_active_states"] = summary.median_active_states;
     result.metrics["median_hdd_nodes"] = summary.median_hdd_nodes;
+    result.metrics["median_qubit_only_blocks"] = summary.median_qubit_only_blocks;
+    result.metrics["median_gaussian_symbolic_blocks"] =
+        summary.median_gaussian_symbolic_blocks;
+    result.metrics["median_diagonal_mixture_blocks"] =
+        summary.median_diagonal_mixture_blocks;
+    result.metrics["median_exact_blocks"] = summary.median_exact_blocks;
+    result.metrics["median_symbolic_materializations"] =
+        summary.median_symbolic_materializations;
     return result;
 }
 
@@ -1581,6 +1630,44 @@ void add_shors_circuit_gates(QuantumCircuit& circuit, int num_qubits, int num_qu
         circuit.add_gate(Gates::JaynesCummings(0, 1, M_PI / 4.0));
     }
 }
+
+void add_weak_kerr_chain_gates(QuantumCircuit& circuit,
+                               int num_qumodes,
+                               int rounds,
+                               double chi,
+                               double squeeze_r,
+                               double displacement_scale) {
+    for (int qm = 0; qm < num_qumodes; ++qm) {
+        circuit.add_gate(Gates::Squeezing(qm, Complex(squeeze_r, 0.0)));
+        circuit.add_gate(Gates::Displacement(qm, Complex(displacement_scale, 0.0)));
+    }
+
+    for (int step = 0; step < rounds; ++step) {
+        for (int qm = 0; qm < num_qumodes; ++qm) {
+            circuit.add_gate(Gates::PhaseRotation(qm, 0.05 * static_cast<double>(step + 1)));
+        }
+        for (int qm = 0; qm < num_qumodes; ++qm) {
+            circuit.add_gate(Gates::KerrGate(qm, chi));
+        }
+        for (int qm = 0; qm + 1 < num_qumodes; ++qm) {
+            circuit.add_gate(Gates::BeamSplitter(qm, qm + 1, 0.08, 0.0));
+        }
+        for (int qm = 0; qm < num_qumodes; ++qm) {
+            circuit.add_gate(Gates::Displacement(
+                qm,
+                Complex(displacement_scale * 0.25, 0.0)));
+        }
+    }
+}
+
+void add_diagonal_mixture_probe_gates(QuantumCircuit& circuit, int cutoff) {
+    const int target_fock_state = std::min(2, cutoff - 1);
+    circuit.add_gate(Gates::Displacement(0, Complex(0.22, -0.04)));
+    circuit.add_gate(Gates::ConditionalParity(0, 0.37));
+    circuit.add_gate(Gates::Snap(0, 0.05, target_fock_state));
+    circuit.add_gate(Gates::Squeezing(0, Complex(0.08, -0.03)));
+}
+
 std::vector<ExperimentResult> run_scaling_suite(const std::string& name_filter) {
     std::vector<ExperimentResult> results;
     const int cat_max_states = g_max_states_override > 0 ? g_max_states_override : 64;
@@ -1786,95 +1873,168 @@ std::vector<ExperimentResult> run_scaling_suite(const std::string& name_filter) 
         });
     }
 
-    // SC26 requested scaling: qubits 3-10, qumodes 3-7
-    for (int nq : {3, 4, 5, 6, 7, 8, 9, 10}) {
-        for (int nm : {3, 4, 5, 6, 7}) {
-            const int cutoff = 16;
-            const std::string sc_vqe_name = "sc26_vqe_nq" + std::to_string(nq) + 
-                                            "_nm" + std::to_string(nm) + "_c" + std::to_string(cutoff);
-            append_filtered_scaling_case(results, name_filter, sc_vqe_name, [nq, nm, cutoff, sc_vqe_name, qaoa_max_states]() {
-                const std::vector<double> params = make_vqe_parameters(2, nq, nm);
+    // SC26 requested scaling: qubits 3-10, qumodes 3-7, cutoffs 4/8/16/32
+    for (int cutoff : {4, 8, 16, 32}) {
+        for (int nq : {3, 4, 5, 6, 7, 8, 9, 10}) {
+            for (int nm : {2, 3, 4, 5, 6, 7}) {
+                // Memory per CV state = cutoff^nm * 16 bytes (complex double)
+                // With 2 GPUs (96GB total), budget ~80GB (conservative)
+                double mem_per_state = std::pow(static_cast<double>(cutoff), nm) * 16.0;
+                double total_vram_budget = 80.0e9; // 2x L20 48GB, conservative
+                if (hybridcvdv::GPUContext::is_initialized()) {
+                    total_vram_budget = hybridcvdv::GPUContext::instance().total_free_memory() * 0.7;
+                }
+                int effective_max_states = qaoa_max_states;
+                if (mem_per_state * effective_max_states > total_vram_budget) {
+                    effective_max_states = static_cast<int>(total_vram_budget / mem_per_state);
+                    if (effective_max_states < 1) {
+                        // Skip: even 1 state exceeds VRAM budget
+                        continue;
+                    }
+                }
+
+                const std::string sc_vqe_name = "sc26_vqe_nq" + std::to_string(nq) + 
+                                                "_nm" + std::to_string(nm) + "_c" + std::to_string(cutoff);
+                append_filtered_scaling_case(results, name_filter, sc_vqe_name, [nq, nm, cutoff, sc_vqe_name, effective_max_states]() {
+                    const std::vector<double> params = make_vqe_parameters(2, nq, nm);
+                    ExperimentResult result = run_scaling_case(
+                        sc_vqe_name,
+                        "vqe_circuit",
+                        nq,
+                        nm,
+                        cutoff,
+                        2,
+                        effective_max_states,
+                        nullptr,
+                        [nq, nm, params](QuantumCircuit& circuit) { add_vqe_circuit_gates(circuit, nq, nm, 2, params); });
+                    result.params["source_circuit"] = "circuit/src/vqe_circuit.cpp";
+                    return result;
+                });
+
+                const std::string sc_jch_name = "sc26_jch_nq" + std::to_string(nq) + 
+                                                "_nm" + std::to_string(nm) + "_c" + std::to_string(cutoff);
+                append_filtered_scaling_case(results, name_filter, sc_jch_name, [nq, nm, cutoff, sc_jch_name, effective_max_states]() {
+                    ExperimentResult result = run_scaling_case(
+                        sc_jch_name,
+                        "jch_simulation_circuit",
+                        nq,
+                        nm,
+                        cutoff,
+                        5,
+                        effective_max_states,
+                        nullptr,
+                        [nq, nm](QuantumCircuit& circuit) {
+                            add_jch_simulation_circuit_gates(circuit, nm, nq, 1.0, 1.0, 1.0, 0.5, 0.1, 5);
+                        });
+                    result.params["source_circuit"] = "circuit/src/jch_simulation_circuit.cpp";
+                    return result;
+                });
+            }
+        }
+    }
+
+    // Pure CV benchmarks (0 qubits) — JCH lattice and CV-QAOA.
+    // Keep depth/timestep fixed across the mode sweep so the paper plots compare
+    // like-for-like workloads instead of increasing algorithmic depth at high nm.
+    for (int cutoff : {4, 8, 12, 16, 24, 32}) {
+        for (int nm : {2, 3, 4, 5, 6, 7}) {
+            double mem_per_state = std::pow(static_cast<double>(cutoff), nm) * 16.0;
+            double total_vram_budget = 80.0e9;
+            if (hybridcvdv::GPUContext::is_initialized()) {
+                total_vram_budget = hybridcvdv::GPUContext::instance().total_free_memory() * 0.7;
+            }
+            int cv_max = (nm <= 6) ? 64 : (nm == 7) ? 8 : 1;
+            if (g_max_states_override > 0) cv_max = g_max_states_override;
+            if (mem_per_state * cv_max > total_vram_budget) {
+                cv_max = static_cast<int>(total_vram_budget / mem_per_state);
+                if (cv_max < 1) continue;
+            }
+
+            const int jch_trotter = 5;
+            const int qaoa_layers = 2;
+
+            const std::string cv_jch_name = "sc26_cv_jch_nm" + std::to_string(nm) + "_c" + std::to_string(cutoff);
+            append_filtered_scaling_case(results, name_filter, cv_jch_name, [nm, cutoff, cv_jch_name, cv_max, jch_trotter]() {
                 ExperimentResult result = run_scaling_case(
-                    sc_vqe_name,
-                    "vqe_circuit",
-                    nq,
-                    nm,
-                    cutoff,
-                    2,
-                    qaoa_max_states,
-                    nullptr, // Use default vacuum
-                    [nq, nm, params](QuantumCircuit& circuit) { add_vqe_circuit_gates(circuit, nq, nm, 2, params); });
-                result.params["source_circuit"] = "circuit/src/vqe_circuit.cpp";
+                    cv_jch_name,
+                    "cv_jch_lattice",
+                    0, nm, cutoff, jch_trotter, cv_max,
+                    nullptr,
+                    [nm, jch_trotter](QuantumCircuit& circuit) {
+                        add_jch_simulation_circuit_gates(circuit, nm, 0, 1.0, 1.0, 1.0, 0.5, 0.1, jch_trotter);
+                    });
+                result.params["source_circuit"] = "circuit/src/jch_simulation_circuit.cpp";
+                result.params["pure_cv"] = "true";
                 return result;
             });
 
-            const std::string sc_jch_name = "sc26_jch_nq" + std::to_string(nq) + 
-                                            "_nm" + std::to_string(nm) + "_c" + std::to_string(cutoff);
-            append_filtered_scaling_case(results, name_filter, sc_jch_name, [nq, nm, cutoff, sc_jch_name, jch_max_states]() {
+            const std::string cv_qaoa_name = "sc26_cv_qaoa_nm" + std::to_string(nm) + "_c" + std::to_string(cutoff);
+            append_filtered_scaling_case(results, name_filter, cv_qaoa_name, [nm, cutoff, cv_qaoa_name, cv_max, qaoa_layers]() {
+                const std::vector<double> params = make_qaoa_angles(qaoa_layers);
                 ExperimentResult result = run_scaling_case(
-                    sc_jch_name,
-                    "jch_simulation_circuit",
-                    nq,
-                    nm,
-                    cutoff,
-                    5,
-                    jch_max_states,
-                    nullptr, // Use default vacuum
-                    [nq, nm](QuantumCircuit& circuit) {
-                        add_jch_simulation_circuit_gates(circuit, nm, nq, 1.0, 1.0, 1.0, 0.5, 0.1, 5);
+                    cv_qaoa_name,
+                    "cv_qaoa_circuit",
+                    0, nm, cutoff, qaoa_layers, cv_max,
+                    nullptr,
+                    [nm, params, qaoa_layers](QuantumCircuit& circuit) {
+                        add_cv_qaoa_circuit_gates(circuit, nm, params, 0.5, 1.0, qaoa_layers);
                     });
-                result.params["source_circuit"] = "circuit/src/jch_simulation_circuit.cpp";
+                result.params["pure_cv"] = "true";
                 return result;
             });
         }
     }
 
-    // Pure CV benchmarks (0 qubits) — JCH lattice and CV-QAOA
-    // nm=8 requires int64_t for max_total_dim (16^8 = 4.3B), needs ~68.7GB per state
-    for (int nm : {5, 6, 7, 8}) {
-        const int cutoff = 16;
-        // Memory per state: cutoff^nm * 16 bytes (complex double)
-        // nm=5: 16.8MB, nm=6: 268MB, nm=7: 4.29GB, nm=8: 68.7GB
-        int cv_max = (nm <= 6) ? 64 : (nm == 7) ? 8 : 1;
-        if (g_max_states_override > 0) cv_max = g_max_states_override;
-
-        // Deeper circuits for larger nm to get meaningful compute timing
-        const int jch_trotter = (nm >= 8) ? 20 : (nm >= 7) ? 10 : 5;
-        const int qaoa_layers = (nm >= 8) ? 10 : (nm >= 7) ? 5 : 2;
-
-        const std::string cv_jch_name = "sc26_cv_jch_nm" + std::to_string(nm) + "_c" + std::to_string(cutoff);
-        append_filtered_scaling_case(results, name_filter, cv_jch_name, [nm, cutoff, cv_jch_name, cv_max, jch_trotter]() {
+    for (int cutoff : {4, 8, 12, 16, 24, 32}) {
+        const std::string name = "sc26_diagonal_mix_c" + std::to_string(cutoff);
+        append_filtered_scaling_case(results, name_filter, name, [cutoff, name]() {
             ExperimentResult result = run_scaling_case(
-                cv_jch_name,
-                "cv_jch_lattice",
-                0, nm, cutoff, jch_trotter, cv_max,
+                name,
+                "diagonal_mixture_probe",
+                0,
+                1,
+                cutoff,
+                4,
+                128,
                 nullptr,
-                [nm, jch_trotter](QuantumCircuit& circuit) {
-                    add_jch_simulation_circuit_gates(circuit, nm, 0, 1.0, 1.0, 1.0, 0.5, 0.1, jch_trotter);
-                });
-            result.params["source_circuit"] = "circuit/src/jch_simulation_circuit.cpp";
-            result.params["pure_cv"] = "true";
-            return result;
-        });
-
-        const std::string cv_qaoa_name = "sc26_cv_qaoa_nm" + std::to_string(nm) + "_c" + std::to_string(cutoff);
-        append_filtered_scaling_case(results, name_filter, cv_qaoa_name, [nm, cutoff, cv_qaoa_name, cv_max, qaoa_layers]() {
-            const std::vector<double> params = make_qaoa_angles(qaoa_layers);
-            ExperimentResult result = run_scaling_case(
-                cv_qaoa_name,
-                "cv_qaoa_circuit",
-                0, nm, cutoff, qaoa_layers, cv_max,
-                nullptr,
-                [nm, params, qaoa_layers](QuantumCircuit& circuit) {
-                    add_cv_qaoa_circuit_gates(circuit, nm, params, 0.5, 1.0, qaoa_layers);
+                [cutoff](QuantumCircuit& circuit) {
+                    add_diagonal_mixture_probe_gates(circuit, cutoff);
                 });
             result.params["pure_cv"] = "true";
+            result.params["source_circuit"] =
+                "experiments/cpp/single_gpu_experiments.cpp (diagonal mixture probe)";
+            result.params["target_fock_state"] =
+                std::to_string(std::min(2, cutoff - 1));
             return result;
         });
     }
 
-    // Additional SC26 cases
-    for (int cutoff : {16, 32}) {
+    {
+        const std::string name = "sc26_kerr_mix_nm4_c16";
+        append_filtered_scaling_case(results, name_filter, name, [name]() {
+            ExperimentResult result = run_scaling_case(
+                name,
+                "weak_kerr_chain",
+                0,
+                4,
+                16,
+                6,
+                32,
+                nullptr,
+                [](QuantumCircuit& circuit) {
+                    add_weak_kerr_chain_gates(circuit, 4, 6, 0.05, 0.35, 0.6);
+                });
+            result.params["chi"] = "0.05";
+            result.params["rounds"] = "6";
+            result.params["pure_cv"] = "true";
+            result.params["source_circuit"] =
+                "experiments/cpp/single_gpu_experiments.cpp (weak Kerr stress case)";
+            return result;
+        });
+    }
+
+    // Additional SC26 cases — expanded cutoffs
+    for (int cutoff : {4, 8, 16, 32}) {
         const std::string name = "sc26_cat_c" + std::to_string(cutoff);
         append_filtered_scaling_case(results, name_filter, name, [cutoff, name, cat_max_states]() {
             return run_scaling_case(name, "cat_state_circuit", 1, 1, cutoff, 8, cat_max_states, nullptr,
@@ -1882,7 +2042,7 @@ std::vector<ExperimentResult> run_scaling_suite(const std::string& name_filter) 
         });
     }
 
-    for (int cutoff : {16, 32}) {
+    for (int cutoff : {4, 8, 16, 32}) {
         const std::string name = "sc26_gkp_c" + std::to_string(cutoff);
         append_filtered_scaling_case(results, name_filter, name, [cutoff, name, gkp_max_states]() {
             return run_scaling_case(name, "gkp_state_circuit", 1, 1, cutoff, 9, gkp_max_states, nullptr,
@@ -1890,19 +2050,27 @@ std::vector<ExperimentResult> run_scaling_suite(const std::string& name_filter) 
         });
     }
 
-    for (int nm : {1, 2, 4, 8}) {
-        const int cutoff = 16;
-        const std::string name = "sc26_qaoa_nm" + std::to_string(nm) + "_c" + std::to_string(cutoff);
-        append_filtered_scaling_case(results, name_filter, name, [nm, cutoff, name, qaoa_max_states]() {
-            const std::vector<double> params = make_qaoa_angles(2);
-            return run_scaling_case(name, "qaoa_circuit", 1, nm, cutoff, 2, qaoa_max_states, nullptr,
-                [nm, params](QuantumCircuit& circuit) { add_cv_qaoa_circuit_gates(circuit, nm, params, 0.5, 1.0, 2); });
-        });
+    for (int cutoff : {4, 8, 16, 32}) {
+        for (int nm : {1, 2, 4, 8}) {
+            double mem_per_state = std::pow(static_cast<double>(cutoff), nm) * 16.0;
+            double total_vram_budget = 80.0e9;
+            if (hybridcvdv::GPUContext::is_initialized()) {
+                total_vram_budget = hybridcvdv::GPUContext::instance().total_free_memory() * 0.7;
+            }
+            if (mem_per_state * qaoa_max_states > total_vram_budget) continue;
+
+            const std::string name = "sc26_qaoa_nm" + std::to_string(nm) + "_c" + std::to_string(cutoff);
+            append_filtered_scaling_case(results, name_filter, name, [nm, cutoff, name, qaoa_max_states]() {
+                const std::vector<double> params = make_qaoa_angles(2);
+                return run_scaling_case(name, "qaoa_circuit", 1, nm, cutoff, 2, qaoa_max_states, nullptr,
+                    [nm, params](QuantumCircuit& circuit) { add_cv_qaoa_circuit_gates(circuit, nm, params, 0.5, 1.0, 2); });
+            });
+        }
     }
 
     for (int nq : {3, 5, 7, 9}) {
-        for (int cutoff : {16, 32}) {
-            if (cutoff == 32 && nq > 5) continue; // Skip large combinations
+        for (int cutoff : {4, 8, 16, 32}) {
+            if (cutoff == 32 && nq > 5) continue;
             const std::string name = "sc26_qft_nq" + std::to_string(nq) + "_c" + std::to_string(cutoff);
             append_filtered_scaling_case(results, name_filter, name, [nq, cutoff, name, qaoa_max_states]() {
                 int n = nq / 2 + 1;
@@ -1914,7 +2082,7 @@ std::vector<ExperimentResult> run_scaling_suite(const std::string& name_filter) 
         }
     }
 
-    for (int cutoff : {8, 16}) {
+    for (int cutoff : {4, 8, 16, 32}) {
         const std::string name = "sc26_shors_c" + std::to_string(cutoff);
         append_filtered_scaling_case(results, name_filter, name, [cutoff, name, qaoa_max_states]() {
             return run_scaling_case(name, "shors_circuit", 1, 3, cutoff, 10, qaoa_max_states, nullptr,
@@ -1923,17 +2091,18 @@ std::vector<ExperimentResult> run_scaling_suite(const std::string& name_filter) 
     }
 
     for (int nq : {2, 4, 8, 16}) {
-        const int cutoff = 16;
-        const std::string cvtodv = "sc26_transfer_CVtoDV_nq" + std::to_string(nq) + "_c" + std::to_string(cutoff);
-        append_filtered_scaling_case(results, name_filter, cvtodv, [nq, cutoff, cvtodv, qaoa_max_states]() {
-            return run_scaling_case(cvtodv, "state_transfer_CVtoDV_circuit", nq, 1, cutoff, 8, qaoa_max_states, nullptr,
-                [nq](QuantumCircuit& circuit) { add_state_transfer_cvtodv_gates(circuit, nq, 1, 0.29, true); });
-        });
-        const std::string dvtocv = "sc26_transfer_DVtoCV_nq" + std::to_string(nq) + "_c" + std::to_string(cutoff);
-        append_filtered_scaling_case(results, name_filter, dvtocv, [nq, cutoff, dvtocv, qaoa_max_states]() {
-            return run_scaling_case(dvtocv, "state_transfer_DVtoCV_circuit", nq, 1, cutoff, 8, qaoa_max_states, nullptr,
-                [nq](QuantumCircuit& circuit) { add_state_transfer_dvtocv_gates(circuit, nq, 1, 0.29, true); });
-        });
+        for (int cutoff : {4, 8, 16, 32}) {
+            const std::string cvtodv = "sc26_transfer_CVtoDV_nq" + std::to_string(nq) + "_c" + std::to_string(cutoff);
+            append_filtered_scaling_case(results, name_filter, cvtodv, [nq, cutoff, cvtodv, qaoa_max_states]() {
+                return run_scaling_case(cvtodv, "state_transfer_CVtoDV_circuit", nq, 1, cutoff, 8, qaoa_max_states, nullptr,
+                    [nq](QuantumCircuit& circuit) { add_state_transfer_cvtodv_gates(circuit, nq, 1, 0.29, true); });
+            });
+            const std::string dvtocv = "sc26_transfer_DVtoCV_nq" + std::to_string(nq) + "_c" + std::to_string(cutoff);
+            append_filtered_scaling_case(results, name_filter, dvtocv, [nq, cutoff, dvtocv, qaoa_max_states]() {
+                return run_scaling_case(dvtocv, "state_transfer_DVtoCV_circuit", nq, 1, cutoff, 8, qaoa_max_states, nullptr,
+                    [nq](QuantumCircuit& circuit) { add_state_transfer_dvtocv_gates(circuit, nq, 1, 0.29, true); });
+            });
+        }
     }
 return results;
 }
@@ -1952,8 +2121,18 @@ CliOptions parse_cli(int argc, char** argv) {
             options.name_filter = argv[++i];
         } else if (arg == "--gaussian-symbolic-mode-limit" && i + 1 < argc) {
             options.gaussian_symbolic_mode_limit = std::stoi(argv[++i]);
+        } else if (arg == "--symbolic-branch-limit" && i + 1 < argc) {
+            options.symbolic_branch_limit = std::stoi(argv[++i]);
         } else if (arg == "--use-interaction-picture") {
             options.use_interaction_picture = true;
+        } else if (arg == "--disable-gaussian-symbolic") {
+            options.gaussian_symbolic_enabled = false;
+        } else if (arg == "--disable-diagonal-mixture") {
+            options.diagonal_mixture_enabled = false;
+        } else if (arg == "--disable-fused-diagonal") {
+            options.fused_diagonal_enabled = false;
+        } else if (arg == "--enable-eager-symbolic-materialization") {
+            options.eager_symbolic_materialization_enabled = true;
         } else if (arg == "--output" && i + 1 < argc) {
             options.output_path = fs::path(argv[++i]);
         } else if (arg == "--max-states" && i + 1 < argc) {
@@ -1962,7 +2141,11 @@ CliOptions parse_cli(int argc, char** argv) {
             std::cout << "Usage: hybridcvdv_single_gpu_experiments "
                          "[--suite all|correctness|microbench|runtime_ablation|scaling] "
                          "[--name-filter substring] "
-                         "[--gaussian-symbolic-mode-limit N] [--use-interaction-picture] "
+                         "[--gaussian-symbolic-mode-limit N] [--symbolic-branch-limit N] "
+                         "[--disable-gaussian-symbolic] [--disable-diagonal-mixture] "
+                         "[--disable-fused-diagonal] "
+                         "[--enable-eager-symbolic-materialization] "
+                         "[--use-interaction-picture] "
                          "[--max-states N] [--output path]\n";
             std::exit(0);
         } else {
@@ -1971,6 +2154,9 @@ CliOptions parse_cli(int argc, char** argv) {
     }
     if (options.gaussian_symbolic_mode_limit <= 0) {
         throw std::invalid_argument("gaussian-symbolic-mode-limit must be positive");
+    }
+    if (options.symbolic_branch_limit <= 0) {
+        throw std::invalid_argument("symbolic-branch-limit must be positive");
     }
     return options;
 }
@@ -1994,9 +2180,23 @@ void write_report(const fs::path& output_path,
     out << "  \"schema_version\": \"1.0\",\n";
     out << "  \"generated_at_utc\": \"" << json_escape(now_utc_iso8601()) << "\",\n";
     out << "  \"simulator\": \"HybridCVDV-Simulator\",\n";
-    out << "  \"single_gpu_only\": true,\n";
+    const bool multi_gpu = hybridcvdv::GPUContext::is_initialized() &&
+                           hybridcvdv::GPUContext::instance().is_multi_gpu();
+    out << "  \"single_gpu_only\": " << (multi_gpu ? "false" : "true") << ",\n";
+    if (hybridcvdv::GPUContext::is_initialized()) {
+        out << "  \"num_gpus\": " << hybridcvdv::GPUContext::instance().num_devices() << ",\n";
+    }
     out << "  \"requested_suite\": \"" << json_escape(requested_suite) << "\",\n";
     out << "  \"gaussian_symbolic_mode_limit\": " << gaussian_symbolic_mode_limit << ",\n";
+    out << "  \"symbolic_branch_limit\": " << g_symbolic_branch_limit << ",\n";
+    out << "  \"gaussian_symbolic_enabled\": "
+        << (g_gaussian_symbolic_enabled ? "true" : "false") << ",\n";
+    out << "  \"diagonal_mixture_enabled\": "
+        << (g_diagonal_mixture_enabled ? "true" : "false") << ",\n";
+    out << "  \"fused_diagonal_enabled\": "
+        << (g_fused_diagonal_enabled ? "true" : "false") << ",\n";
+    out << "  \"eager_symbolic_materialization_enabled\": "
+        << (g_eager_symbolic_materialization_enabled ? "true" : "false") << ",\n";
     out << "  \"use_interaction_picture\": " << (use_interaction_picture ? "true" : "false") << ",\n";
     out << "  \"device\": {\n";
     out << "    \"available\": " << (device.available ? "true" : "false") << ",\n";
@@ -2041,15 +2241,32 @@ int main(int argc, char** argv) {
     try {
         const CliOptions options = parse_cli(argc, argv);
         g_gaussian_symbolic_mode_limit = options.gaussian_symbolic_mode_limit;
+        g_symbolic_branch_limit = options.symbolic_branch_limit;
         g_use_interaction_picture = options.use_interaction_picture;
+        g_gaussian_symbolic_enabled = options.gaussian_symbolic_enabled;
+        g_diagonal_mixture_enabled = options.diagonal_mixture_enabled;
+        g_fused_diagonal_enabled = options.fused_diagonal_enabled;
+        g_eager_symbolic_materialization_enabled =
+            options.eager_symbolic_materialization_enabled;
         g_max_states_override = options.max_states_override;
         g_scaling_warmup_runs_override =
             parse_nonnegative_env_override("HYBRIDCVDV_SCALING_WARMUP_RUNS", 0);
         g_scaling_measured_runs_override =
             parse_nonnegative_env_override("HYBRIDCVDV_SCALING_MEASURED_RUNS", 1);
+
+        // Initialize multi-GPU context with P2P enabled
+        if (hybridcvdv::GPUContext::initialize(true)) {
+            const auto& ctx = hybridcvdv::GPUContext::instance();
+            std::cout << "[MultiGPU] Initialized " << ctx.num_devices() << " GPU(s)"
+                      << (ctx.is_multi_gpu() ? " with P2P" : "") << "\n";
+            ctx.print_device_summary();
+        } else {
+            std::cout << "[MultiGPU] GPUContext init failed, falling back to default device\n";
+        }
+
         const DeviceMetadata device = query_device();
         if (!device.available) {
-            throw std::runtime_error("no CUDA device available for single-GPU experiments");
+            throw std::runtime_error("no CUDA device available for experiments");
         }
 
         std::vector<ExperimentResult> results;
@@ -2090,10 +2307,13 @@ int main(int argc, char** argv) {
             }
         }
 
-        std::cout << "Wrote single-GPU experiment report to " << options.output_path << "\n";
+        std::cout << "Wrote experiment report to " << options.output_path << "\n";
         std::cout << "Results: ok=" << ok_count
                   << ", unsupported=" << unsupported_count
                   << ", error=" << error_count << "\n";
+        if (hybridcvdv::GPUContext::is_initialized()) {
+            hybridcvdv::GPUContext::shutdown();
+        }
         return 0;
     } catch (const std::exception& e) {
         std::cerr << "Experiment runner failed: " << e.what() << std::endl;

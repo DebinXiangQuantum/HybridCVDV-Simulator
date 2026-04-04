@@ -129,7 +129,12 @@ QuantumCircuit::CircuitStats QuantumCircuit::get_stats() const {
         cv_truncation_,
         static_cast<int>(gate_sequence_.size()),
         static_cast<int>(reachable_states.size() + reachable_symbolic_states.size()),
-        count_reachable_hdd_nodes(root_node_)
+        count_reachable_hdd_nodes(root_node_),
+        qubit_only_block_count_,
+        gaussian_symbolic_block_count_,
+        diagonal_mixture_block_count_,
+        exact_block_count_,
+        symbolic_materialization_count_
     };
 }
 
@@ -150,6 +155,11 @@ QuantumCircuit::TimeStats QuantumCircuit::get_time_stats() const {
  */
 void QuantumCircuit::execute_with_interaction_picture() {
     auto start_time = std::chrono::high_resolution_clock::now();
+    qubit_only_block_count_ = 0;
+    gaussian_symbolic_block_count_ = 0;
+    diagonal_mixture_block_count_ = 0;
+    exact_block_count_ = 0;
+    symbolic_materialization_count_ = 0;
     
     // 1. 初始化高斯参考系 (Frame) 和 HDD
     GaussianFrame current_frame(num_qumodes_);

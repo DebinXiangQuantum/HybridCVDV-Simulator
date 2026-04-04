@@ -178,6 +178,29 @@ def build_two_mode_cases() -> list[GateTestCase]:
                 "theta": 0.5, "phi": 0.2}
     ))
 
+    # --- Two-mode squeezing on vacuum and a non-zero difference sector ---
+    for r, phi in [(0.2, 0.1), (0.3, 0.25)]:
+        vacuum_name = f"tms_vacuum_r{r}_phi{phi:.2f}"
+        def make_tms_vacuum(r_=r, phi_=phi):
+            def fn(regs):
+                ops.S2gate(r_, phi_) | (regs[0], regs[1])
+            return fn
+        cases.append(GateTestCase(
+            name=vacuum_name, num_modes=2, gate_fn=make_tms_vacuum(),
+            description=f"S2(r={r}, phi={phi}) on vacuum",
+            params={"gate": "TWO_MODE_SQUEEZING", "input": "vacuum", "r": r, "phi": phi}
+        ))
+
+    name = "tms_fock10_r0.2_phi0.10"
+    def make_tms_fock10(regs):
+        ops.Fock(1) | regs[0]
+        ops.S2gate(0.2, 0.1) | (regs[0], regs[1])
+    cases.append(GateTestCase(
+        name=name, num_modes=2, gate_fn=make_tms_fock10,
+        description="|1,0> then S2(r=0.2, phi=0.1)",
+        params={"gate": "TWO_MODE_SQUEEZING", "input": "fock10", "r": 0.2, "phi": 0.1}
+    ))
+
     return cases
 
 
@@ -204,18 +227,61 @@ def save_state_vector(filepath: str, state: np.ndarray, metadata: dict):
             f.write(f"{c.real:.17e} {c.imag:.17e}\n")
 
 
-def run_sf_gate(case: GateTestCase, cutoff: int, use_gpu: bool) -> np.ndarray:
-    """Run a single gate test case through SF TF backend, return ket."""
+def select_sf_backend(case: GateTestCase) -> str:
+    """Pick an SF backend compatible with the prepared input state."""
+    input_state = str(case.params.get("input", "vacuum"))
+    if input_state.startswith("fock"):
+        return "fock"
+    return "tf"
+
+
+def recover_pure_state_from_dm(dm: np.ndarray) -> np.ndarray:
+    """Recover a truncated pure-state vector from an interleaved density tensor."""
+    if dm.ndim % 2 != 0:
+        raise ValueError(f"Expected even-rank density tensor, got shape={dm.shape}")
+
+    ket_axes = list(range(0, dm.ndim, 2))
+    bra_axes = list(range(1, dm.ndim, 2))
+    matrix = np.transpose(dm, ket_axes + bra_axes).reshape(
+        int(np.prod(dm.shape[::2])),
+        int(np.prod(dm.shape[1::2])),
+    )
+
+    evals, evecs = np.linalg.eigh(matrix)
+    max_index = int(np.argmax(evals.real))
+    max_eval = float(max(evals[max_index].real, 0.0))
+    state = np.sqrt(max_eval) * evecs[:, max_index]
+
+    anchor = int(np.argmax(np.abs(state)))
+    if np.abs(state[anchor]) > 0:
+        state *= np.exp(-1j * np.angle(state[anchor]))
+
+    residual = np.linalg.norm(matrix - np.outer(state, np.conj(state)))
+    if residual > 1e-6:
+        raise ValueError(f"density-matrix recovery residual too large: {residual}")
+
+    return state.reshape(dm.shape[::2])
+
+
+def run_sf_gate(case: GateTestCase, cutoff: int, use_gpu: bool) -> tuple[np.ndarray, str, str]:
+    """Run a single gate test case through SF and return state plus backend metadata."""
     prog = sf.Program(case.num_modes)
     with prog.context as registers:
         case.gate_fn(registers)
 
     backend_opts = {"cutoff_dim": cutoff}
-    engine = sf.Engine("tf", backend_options=backend_opts)
+    backend_name = select_sf_backend(case)
+    engine = sf.Engine(backend_name, backend_options=backend_opts)
     result = engine.run(prog)
     ket = result.state.ket()
-    state = np.asarray(ket.numpy() if hasattr(ket, "numpy") else ket)
-    return state
+    if ket is not None:
+        state = np.asarray(ket.numpy() if hasattr(ket, "numpy") else ket)
+        return state, backend_name, "ket"
+
+    dm = result.state.dm()
+    dm_array = np.asarray(dm.numpy() if hasattr(dm, "numpy") else dm)
+    state = recover_pure_state_from_dm(dm_array)
+    return state, backend_name, "dm_eig"
 
 
 # ---------------------------------------------------------------------------
@@ -253,7 +319,7 @@ def main():
 
         t0 = time.perf_counter()
         try:
-            state = run_sf_gate(case, args.cutoff, args.gpu)
+            state, backend_name, state_source = run_sf_gate(case, args.cutoff, args.gpu)
             elapsed = time.perf_counter() - t0
             norm = float(np.linalg.norm(state.flatten()))
 
@@ -263,6 +329,8 @@ def main():
                 "num_modes": case.num_modes,
                 "cutoff": args.cutoff,
                 "norm": norm,
+                "sf_backend": backend_name,
+                "sf_state_source": state_source,
                 **case.params
             }
             save_state_vector(filepath, state, metadata)
@@ -273,6 +341,8 @@ def main():
                 "num_modes": case.num_modes,
                 "norm": norm,
                 "elapsed_ms": elapsed * 1000,
+                "sf_backend": backend_name,
+                "sf_state_source": state_source,
                 **case.params
             })
 

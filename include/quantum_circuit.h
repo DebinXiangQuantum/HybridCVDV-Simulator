@@ -5,6 +5,7 @@
 #include <complex>
 #include <memory>
 #include <string>
+#include <sstream>
 #include <map>
 #include <unordered_map>
 #include <utility>
@@ -109,6 +110,15 @@ private:
     int gaussian_state_pool_capacity_override_; // 显式指定Gaussian branch池容量；0表示自动推导
     int next_symbolic_terminal_id_; // 负ID用于symbolic terminal sidecar
     size_t pending_gc_replacements_; // 延迟到block/阈值触发的HDD垃圾回收计数
+    bool gaussian_symbolic_enabled_;
+    bool diagonal_mixture_enabled_;
+    bool fused_diagonal_enabled_;
+    bool eager_symbolic_materialization_enabled_;
+    size_t qubit_only_block_count_;
+    size_t gaussian_symbolic_block_count_;
+    size_t diagonal_mixture_block_count_;
+    size_t exact_block_count_;
+    size_t symbolic_materialization_count_;
 
 public:
     /**
@@ -183,6 +193,26 @@ public:
     void set_symbolic_branch_limit(int limit);
 
     /**
+     * 启用或禁用Gaussian symbolic执行路径
+     */
+    void set_gaussian_symbolic_enabled(bool enabled);
+
+    /**
+     * 启用或禁用对角非高斯mixture执行路径
+     */
+    void set_diagonal_mixture_enabled(bool enabled);
+
+    /**
+     * 启用或禁用exact路径中的对角门融合
+     */
+    void set_fused_diagonal_enabled(bool enabled);
+
+    /**
+     * 启用或禁用symbolic block后的立即materialization
+     */
+    void set_eager_symbolic_materialization_enabled(bool enabled);
+
+    /**
      * 获取显式设置的Gaussian symbolic branch池容量；0表示自动推导
      */
     int get_gaussian_state_pool_capacity() const { return gaussian_state_pool_capacity_override_; }
@@ -191,6 +221,12 @@ public:
      * 获取symbolic terminal的精确回退分支阈值
      */
     int get_symbolic_branch_limit() const { return symbolic_branch_limit_; }
+    bool is_gaussian_symbolic_enabled() const { return gaussian_symbolic_enabled_; }
+    bool is_diagonal_mixture_enabled() const { return diagonal_mixture_enabled_; }
+    bool is_fused_diagonal_enabled() const { return fused_diagonal_enabled_; }
+    bool is_eager_symbolic_materialization_enabled() const {
+        return eager_symbolic_materialization_enabled_;
+    }
 
     /**
      * 获取最终状态的振幅
@@ -254,6 +290,11 @@ public:
         int num_gates;
         int active_states;
         size_t hdd_nodes;
+        size_t qubit_only_blocks;
+        size_t gaussian_symbolic_blocks;
+        size_t diagonal_mixture_blocks;
+        size_t exact_blocks;
+        size_t symbolic_materializations;
     };
     CircuitStats get_stats() const;
 
@@ -328,6 +369,12 @@ private:
         bool reusable_recorded = false;
     };
 
+    struct ExactGateBatchContext {
+        const std::vector<int>* target_states = nullptr;
+        int* d_target_ids = nullptr;
+        int batch_size = 0;
+    };
+
     std::unordered_map<int, MixtureGaussianState> symbolic_terminal_states_;
     cudaStream_t compute_stream_ = nullptr;
     cudaStream_t upload_stream_ = nullptr;
@@ -338,6 +385,8 @@ private:
     mutable std::vector<int> cached_target_state_ids_;
     mutable size_t cached_symbolic_terminal_revision_ = 0;
     mutable std::vector<int> cached_symbolic_terminal_ids_;
+    GPUScratchBuffer exact_block_target_ids_buffer_;
+    std::unordered_map<std::string, std::shared_ptr<FockELLOperator>> ell_operator_cache_;
     bool async_cv_work_pending_ = false;
     bool async_cv_pipeline_enabled_ = false;
 
@@ -352,6 +401,11 @@ private:
     std::pair<int*, size_t> upload_target_states_for_compute(
         const std::vector<int>& target_states,
         size_t* slot_index = nullptr);
+    ExactGateBatchContext prepare_exact_gate_batch_context(
+        const std::vector<int>& target_states);
+    std::string make_ell_cache_key(const GateParams& gate) const;
+    FockELLOperator* get_cached_ell_operator(const GateParams& gate);
+    void prewarm_exact_gate_resources(const std::vector<GateParams>& gates);
     void mark_target_upload_slot_in_use(size_t slot_index);
     void invalidate_root_caches();
     const std::vector<int>& get_cached_target_states() const;
@@ -361,6 +415,8 @@ private:
      * 执行单个门操作
      */
     void execute_gate(const GateParams& gate);
+    void execute_gate(const GateParams& gate,
+                      const ExactGateBatchContext* batch_context);
 
     /**
      * 执行单个门操作 (交互绘景版)
@@ -444,21 +500,29 @@ private:
      * 执行Level 0门 (对角门)
      */
     void execute_level0_gate(const GateParams& gate);
+    void execute_level0_gate(const GateParams& gate,
+                             const ExactGateBatchContext* batch_context);
 
     /**
      * 执行Level 1门 (梯算符门)
      */
     void execute_level1_gate(const GateParams& gate);
+    void execute_level1_gate(const GateParams& gate,
+                             const ExactGateBatchContext* batch_context);
 
     /**
      * 执行Level 2门 (单模门)
      */
     void execute_level2_gate(const GateParams& gate);
+    void execute_level2_gate(const GateParams& gate,
+                             const ExactGateBatchContext* batch_context);
 
     /**
      * 执行Level 3门 (双模门)
      */
     void execute_level3_gate(const GateParams& gate);
+    void execute_level3_gate(const GateParams& gate,
+                             const ExactGateBatchContext* batch_context);
 
     /**
      * 执行Level 4门 (混合控制门)

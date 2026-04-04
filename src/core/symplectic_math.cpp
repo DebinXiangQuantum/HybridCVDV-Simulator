@@ -123,10 +123,10 @@ SymplecticGate TwoModeSqueezing(std::complex<double> xi, int M, int mode1, int m
     const int row1 = 2 * mode1;
     const int row2 = 2 * mode2;
 
-    // The exact Fock reference uses exp[(xi* a^\dagger b^\dagger - xi a b) / 2],
-    // so the quadrature squeezing strength is |xi| / 2.
-    const double squeeze = 0.5 * std::abs(xi);
-    const double phase = std::arg(xi);
+    // Strawberry Fields uses S2(z) = exp(z a^\dagger b^\dagger - z^* a b).
+    // Keep the symplectic path aligned with the exact Fock implementation.
+    const double squeeze = std::abs(xi);
+    const double phase = -std::arg(xi);
     const double cosh_s = std::cosh(squeeze);
     const double sinh_s = std::sinh(squeeze);
     const double cos_phase = std::cos(phase);

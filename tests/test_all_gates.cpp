@@ -768,6 +768,145 @@ TEST_F(GateTest, TestMultiQumodeHybridAndTwoModeSmoke) {
     }
 }
 
+TEST_F(GateTest, TestBeamSplitterOnNonAdjacentModesMatchesReference) {
+    try {
+        constexpr int cutoff = 6;
+        QuantumCircuit circuit(1, 3, cutoff, 1024);
+
+        const std::complex<double> alpha(0.22, 0.07);
+        const std::complex<double> xi(0.14, 0.0);
+        const double theta = 0.37;
+        const double phi = 0.15;
+
+        circuit.add_gate(Gates::Displacement(0, alpha));
+        circuit.add_gate(Gates::Squeezing(2, xi));
+        circuit.add_gate(Gates::BeamSplitter(0, 2, theta, phi));
+
+        circuit.build();
+        circuit.execute();
+
+        Reference::Vector vacuum(cutoff, {0.0, 0.0});
+        vacuum[0] = {1.0, 0.0};
+
+        Reference::Vector mode0 =
+            Reference::SingleModeGates::apply_displacement_gate(vacuum, alpha);
+        Reference::Vector mode2 =
+            Reference::SingleModeGates::apply_squeezing_gate(vacuum, xi);
+        Reference::Vector expected = Reference::tensor_product(
+            Reference::tensor_product(mode0, vacuum), mode2);
+        expected = apply_two_mode_transform(
+            expected,
+            cutoff,
+            3,
+            0,
+            2,
+            [&](const Reference::Vector& local_state) {
+                return Reference::TwoModeGates::apply_beam_splitter(local_state, theta, phi);
+            });
+
+        Reference::Vector actual(integer_power(static_cast<size_t>(cutoff), 3), {0.0, 0.0});
+        for (int n0 = 0; n0 < cutoff; ++n0) {
+            std::vector<std::complex<double>> basis0(cutoff, {0.0, 0.0});
+            basis0[n0] = {1.0, 0.0};
+            for (int n1 = 0; n1 < cutoff; ++n1) {
+                std::vector<std::complex<double>> basis1(cutoff, {0.0, 0.0});
+                basis1[n1] = {1.0, 0.0};
+                for (int n2 = 0; n2 < cutoff; ++n2) {
+                    std::vector<std::complex<double>> basis2(cutoff, {0.0, 0.0});
+                    basis2[n2] = {1.0, 0.0};
+                    const size_t index =
+                        static_cast<size_t>(n0) * cutoff * cutoff +
+                        static_cast<size_t>(n1) * cutoff +
+                        static_cast<size_t>(n2);
+                    actual[index] = circuit.get_amplitude({0}, {basis0, basis1, basis2});
+                }
+            }
+        }
+
+        const Reference::ErrorMetrics metrics = Reference::compute_error_metrics(expected, actual);
+        EXPECT_LT(metrics.fidelity_deviation, 1e-8);
+        EXPECT_LT(metrics.l2_error, 2e-5);
+    } catch (const std::exception& e) {
+        FAIL() << "非相邻模式Beam Splitter精度回归测试失败: " << e.what();
+    }
+}
+
+TEST_F(GateTest, TestControlledTwoModeSqueezingOnNonAdjacentModesMatchesReference) {
+    try {
+        constexpr int cutoff = 6;
+        QuantumCircuit circuit(1, 3, cutoff, 1024);
+
+        const std::complex<double> xi(0.11, 0.04);
+
+        circuit.add_gate(Gates::Hadamard(0));
+        circuit.add_gate(Gates::ConditionalTwoModeSqueezing(0, 0, 2, xi));
+
+        circuit.build();
+        circuit.execute();
+
+        Reference::Vector vacuum(cutoff, {0.0, 0.0});
+        vacuum[0] = {1.0, 0.0};
+
+        Reference::Vector expected_low = Reference::tensor_product(
+            Reference::tensor_product(vacuum, vacuum), vacuum);
+        expected_low = apply_two_mode_transform(
+            expected_low,
+            cutoff,
+            3,
+            0,
+            2,
+            [xi](const Reference::Vector& local_state) {
+                return Reference::TwoModeGatesExtended::apply_two_mode_squeezing(local_state, xi);
+            });
+
+        Reference::Vector expected_high = Reference::tensor_product(
+            Reference::tensor_product(vacuum, vacuum), vacuum);
+        expected_high = apply_two_mode_transform(
+            expected_high,
+            cutoff,
+            3,
+            0,
+            2,
+            [xi](const Reference::Vector& local_state) {
+                return Reference::TwoModeGatesExtended::apply_two_mode_squeezing(local_state, -xi);
+            });
+
+        const double branch_scale = 1.0 / std::sqrt(2.0);
+        for (std::complex<double>& amplitude : expected_low) {
+            amplitude *= branch_scale;
+        }
+        for (std::complex<double>& amplitude : expected_high) {
+            amplitude *= branch_scale;
+        }
+
+        Reference::Vector actual_low(integer_power(static_cast<size_t>(cutoff), 3), {0.0, 0.0});
+        Reference::Vector actual_high(integer_power(static_cast<size_t>(cutoff), 3), {0.0, 0.0});
+        for (int n0 = 0; n0 < cutoff; ++n0) {
+            std::vector<std::complex<double>> basis0(cutoff, {0.0, 0.0});
+            basis0[n0] = {1.0, 0.0};
+            for (int n1 = 0; n1 < cutoff; ++n1) {
+                std::vector<std::complex<double>> basis1(cutoff, {0.0, 0.0});
+                basis1[n1] = {1.0, 0.0};
+                for (int n2 = 0; n2 < cutoff; ++n2) {
+                    std::vector<std::complex<double>> basis2(cutoff, {0.0, 0.0});
+                    basis2[n2] = {1.0, 0.0};
+                    const size_t index =
+                        static_cast<size_t>(n0) * cutoff * cutoff +
+                        static_cast<size_t>(n1) * cutoff +
+                        static_cast<size_t>(n2);
+                    actual_low[index] = circuit.get_amplitude({0}, {basis0, basis1, basis2});
+                    actual_high[index] = circuit.get_amplitude({1}, {basis0, basis1, basis2});
+                }
+            }
+        }
+
+        EXPECT_LT(compute_error(expected_low, actual_low), 1e-8);
+        EXPECT_LT(compute_error(expected_high, actual_high), 1e-8);
+    } catch (const std::exception& e) {
+        FAIL() << "非相邻模式受控双模挤压精度回归测试失败: " << e.what();
+    }
+}
+
 TEST_F(GateTest, TestGaussianPrefixEDEProducesCorrectState) {
     try {
         constexpr int cutoff = 6;

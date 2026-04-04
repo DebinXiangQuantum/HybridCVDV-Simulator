@@ -377,10 +377,14 @@ __global__ void copy_back_hybrid_kernel(
 
 void apply_controlled_displacement_on_mode(CVStatePool* state_pool,
                                            const std::vector<int>& controlled_states,
+                                           const int* d_state_ids,
+                                           int num_states,
                                            cuDoubleComplex alpha,
                                            int target_qumode,
-                                           int num_qumodes) {
-    if (controlled_states.empty()) return;
+                                           int num_qumodes,
+                                           cudaStream_t stream,
+                                           bool synchronize) {
+    if (controlled_states.empty() || num_states <= 0) return;
     const int target_mode_right_stride =
         compute_mode_right_stride(state_pool->d_trunc, target_qumode, num_qumodes);
     const int target_mode_dim = state_pool->d_trunc;
@@ -391,10 +395,6 @@ void apply_controlled_displacement_on_mode(CVStatePool* state_pool,
             throw std::runtime_error("无效的状态ID: " + std::to_string(state_id));
         }
     }
-
-    const size_t ids_bytes = controlled_states.size() * sizeof(int);
-    int* d_state_ids = state_pool->upload_vector_to_buffer(
-        controlled_states, state_pool->scratch_target_ids);
 
     bool can_use_inplace_shared = target_mode_dim > 0 && target_mode_dim <= 256;
     size_t max_slices = 0;
@@ -453,7 +453,7 @@ void apply_controlled_displacement_on_mode(CVStatePool* state_pool,
             const int chunk_states = static_cast<int>(
                 std::min(states_per_launch, controlled_states.size() - state_offset));
             dim3 grid_dim(grid_x, static_cast<unsigned int>(chunk_states));
-            apply_controlled_displacement_inplace_shared_kernel<<<grid_dim, block_dim, shared_bytes>>>(
+            apply_controlled_displacement_inplace_shared_kernel<<<grid_dim, block_dim, shared_bytes, stream>>>(
                 state_pool->data,
                 state_pool->state_offsets,
                 state_pool->state_dims,
@@ -473,6 +473,9 @@ void apply_controlled_displacement_on_mode(CVStatePool* state_pool,
                           << " target_qumode=" << target_qumode
                           << std::endl;
             }
+        }
+        if (synchronize) {
+            CHECK_CUDA(stream != nullptr ? cudaStreamSynchronize(stream) : cudaDeviceSynchronize());
         }
         if (hybrid_debug_logging_enabled()) {
             std::cout << "[hybrid-debug] Displacement shared path complete"
@@ -508,7 +511,7 @@ void apply_controlled_displacement_on_mode(CVStatePool* state_pool,
     dim3 block_dim(256);
     dim3 grid_dim((state_pool->max_total_dim + block_dim.x - 1) / block_dim.x, controlled_states.size());
 
-    apply_controlled_displacement_kernel<<<grid_dim, block_dim>>>(
+    apply_controlled_displacement_kernel<<<grid_dim, block_dim, 0, stream>>>(
         state_pool->data,
         state_pool->state_offsets,
         state_pool->state_dims,
@@ -531,7 +534,7 @@ void apply_controlled_displacement_on_mode(CVStatePool* state_pool,
                   << std::endl;
     }
 
-    copy_back_hybrid_kernel<<<grid_dim, block_dim>>>(
+    copy_back_hybrid_kernel<<<grid_dim, block_dim, 0, stream>>>(
         state_pool->data,
         state_pool->state_offsets,
         state_pool->state_dims,
@@ -546,6 +549,31 @@ void apply_controlled_displacement_on_mode(CVStatePool* state_pool,
                   << " target_qumode=" << target_qumode
                   << std::endl;
     }
+    if (synchronize) {
+        CHECK_CUDA(stream != nullptr ? cudaStreamSynchronize(stream) : cudaDeviceSynchronize());
+    }
+}
+
+void apply_controlled_displacement_on_mode(CVStatePool* state_pool,
+                                           const std::vector<int>& controlled_states,
+                                           cuDoubleComplex alpha,
+                                           int target_qumode,
+                                           int num_qumodes) {
+    if (controlled_states.empty()) {
+        return;
+    }
+
+    const int* d_state_ids = state_pool->upload_vector_to_buffer(
+        controlled_states, state_pool->scratch_target_ids);
+    apply_controlled_displacement_on_mode(state_pool,
+                                          controlled_states,
+                                          d_state_ids,
+                                          static_cast<int>(controlled_states.size()),
+                                          alpha,
+                                          target_qumode,
+                                          num_qumodes,
+                                          nullptr,
+                                          true);
 }
 
 void apply_controlled_displacement(CVStatePool* state_pool,
@@ -711,4 +739,3 @@ void apply_rabi_interaction(CVStatePool* state_pool,
                             double theta) {
     apply_rabi_interaction_on_mode(state_pool, qubit0_states, qubit1_states, theta, 0, 1);
 }
-
