@@ -12,7 +12,6 @@
 #include "gaussian_mixture.h"
 #include "symplectic_math.h"
 #include "cv_state_pool.h"
-#include "fock_ell_operator.h"
 #include "hdd_node.h"
 
 class GaussianStatePool;
@@ -87,6 +86,7 @@ private:
     int num_qubits_;              // Qubit数量
     int num_qumodes_;             // Qumode数量
     int cv_truncation_;           // CV状态截断维度
+    int execution_device_id_;     // 单条电路执行绑定的GPU
 
     HDDNode* root_node_;          // HDD根节点
     HDDNodeManager node_manager_; // HDD节点管理器
@@ -386,7 +386,6 @@ private:
     mutable size_t cached_symbolic_terminal_revision_ = 0;
     mutable std::vector<int> cached_symbolic_terminal_ids_;
     GPUScratchBuffer exact_block_target_ids_buffer_;
-    std::unordered_map<std::string, std::shared_ptr<FockELLOperator>> ell_operator_cache_;
     bool async_cv_work_pending_ = false;
     bool async_cv_pipeline_enabled_ = false;
 
@@ -394,6 +393,8 @@ private:
      * 初始化HDD结构
      */
     void initialize_hdd();
+    static int select_execution_device_for_constructor();
+    void activate_execution_device() const;
     void ensure_async_cv_pipeline();
     void release_async_cv_pipeline();
     void prewarm_async_target_upload_slots();
@@ -403,8 +404,6 @@ private:
         size_t* slot_index = nullptr);
     ExactGateBatchContext prepare_exact_gate_batch_context(
         const std::vector<int>& target_states);
-    std::string make_ell_cache_key(const GateParams& gate) const;
-    FockELLOperator* get_cached_ell_operator(const GateParams& gate);
     void prewarm_exact_gate_resources(const std::vector<GateParams>& gates);
     void mark_target_upload_slot_in_use(size_t slot_index);
     void invalidate_root_caches();
@@ -530,11 +529,6 @@ private:
     void execute_level4_gate(const GateParams& gate);
 
     /**
-     * 工具函数：准备ELL算符
-     */
-    FockELLOperator* prepare_ell_operator(const GateParams& gate);
-
-    /**
      * 工具函数：收集需要更新的状态ID
      */
     std::vector<int> collect_target_states(const GateParams& gate);
@@ -578,11 +572,6 @@ private:
      * 对单个状态应用Anti-Jaynes-Cummings相互作用
      */
     void apply_anti_jaynes_cummings_to_state(int state_id, double theta, double phi);
-
-    /**
-     * 准备挤压门的ELL算符
-     */
-    FockELLOperator* prepare_squeezing_ell_operator(std::complex<double> xi);
 
     /**
      * HDD节点加法: result = w1 * n1 + w2 * n2

@@ -26,9 +26,6 @@ void apply_annihilation_operator_on_mode(CVStatePool* pool, const int* targets, 
 void apply_displacement_gate(CVStatePool* pool, const int* targets, int batch_size,
                             cuDoubleComplex alpha,
                             cudaStream_t stream = nullptr, bool synchronize = true);
-void apply_single_mode_gate(CVStatePool* pool, FockELLOperator* ell_op,
-                           const int* targets, int batch_size,
-                           cudaStream_t stream = nullptr, bool synchronize = true);
 void apply_controlled_displacement_on_mode(CVStatePool* state_pool,
                                            const std::vector<int>& controlled_states,
                                            cuDoubleComplex alpha,

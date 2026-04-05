@@ -2,10 +2,8 @@
 
 #include "quantum_circuit.h"
 #include "circuit_internal.h"
-#include "gaussian_circuit.h"
 #include "gaussian_kernels.h"
 #include "gaussian_state.h"
-#include "reference_gates.h"
 #include "squeezing_gate_gpu.h"
 #include "two_mode_gates.h"
 
@@ -196,12 +194,13 @@ bool QuantumCircuit::apply_gaussian_mixture_approximation_on_gpu(
         return false;
     }
 
-    const int scratch_state_id = state_pool_.allocate_state();
+    const int owner_device = state_pool_.get_state_device_id(state_id);
+    const int scratch_state_id = state_pool_.allocate_state(owner_device);
     if (scratch_state_id < 0) {
         throw std::runtime_error("Gaussian Mixture失败：无法分配scratch状态");
     }
 
-    const int accum_state_id = state_pool_.allocate_state();
+    const int accum_state_id = state_pool_.allocate_state(owner_device);
     if (accum_state_id < 0) {
         state_pool_.free_state(scratch_state_id);
         throw std::runtime_error("Gaussian Mixture失败：无法分配accumulator状态");
@@ -298,7 +297,7 @@ void QuantumCircuit::apply_replayable_gaussian_gate_to_state(int state_id, const
                 gate.target_qumodes[0],
                 num_qumodes_,
                 nullptr,
-                false);
+                true);
             break;
         }
         case GateType::DISPLACEMENT:
@@ -347,13 +346,10 @@ int QuantumCircuit::project_symbolic_terminal_to_fock_state(int terminal_id) {
         throw std::runtime_error("symbolic terminal sidecar missing during Fock materialization");
     }
 
-    if (gaussian_state_pool_ && it->second.components.size() > 1) {
-        std::unordered_map<std::string, size_t> unique_branch_index;
-        std::vector<GaussianComponent> coalesced_branches;
-        coalesced_branches.reserve(it->second.components.size());
+    if (gaussian_state_pool_) {
+        std::vector<GaussianComponent> live_branches;
+        live_branches.reserve(it->second.components.size());
 
-        std::vector<double> displacement;
-        std::vector<double> covariance;
         for (GaussianComponent& branch : it->second.components) {
             if (branch.gaussian_state_id < 0 ||
                 std::abs(branch.weight) < kSymbolicBranchPruneTolerance) {
@@ -362,49 +358,15 @@ int QuantumCircuit::project_symbolic_terminal_to_fock_state(int terminal_id) {
                 }
                 continue;
             }
-
-            gaussian_state_pool_->download_state(
-                branch.gaussian_state_id, displacement, covariance);
-
-            std::string state_key;
-            state_key.resize((displacement.size() + covariance.size()) * sizeof(double));
-            std::memcpy(state_key.data(),
-                        displacement.data(),
-                        displacement.size() * sizeof(double));
-            std::memcpy(state_key.data() + displacement.size() * sizeof(double),
-                        covariance.data(),
-                        covariance.size() * sizeof(double));
-
-            const auto [dedup_it, inserted] =
-                unique_branch_index.emplace(state_key, coalesced_branches.size());
-            if (inserted) {
-                coalesced_branches.push_back(std::move(branch));
-                continue;
-            }
-
-            GaussianComponent& canonical_branch = coalesced_branches[dedup_it->second];
-            canonical_branch.weight += branch.weight;
-            gaussian_state_pool_->release_ref(branch.gaussian_state_id);
+            live_branches.push_back(std::move(branch));
         }
 
-        std::vector<GaussianComponent> pruned_branches;
-        pruned_branches.reserve(coalesced_branches.size());
-        for (GaussianComponent& branch : coalesced_branches) {
-            if (std::abs(branch.weight) < kSymbolicBranchPruneTolerance) {
-                if (branch.gaussian_state_id >= 0) {
-                    gaussian_state_pool_->release_ref(branch.gaussian_state_id);
-                }
-                continue;
-            }
-            pruned_branches.push_back(std::move(branch));
-        }
-
-        if (pruned_branches.size() != it->second.components.size()) {
-            FALLBACK_DEBUG_LOG << "[fallback] coalesced symbolic terminal " << terminal_id
+        if (live_branches.size() != it->second.components.size()) {
+            FALLBACK_DEBUG_LOG << "[fallback] pruned symbolic terminal " << terminal_id
                                << " branches: " << it->second.components.size()
-                               << " -> " << pruned_branches.size() << std::endl;
+                               << " -> " << live_branches.size() << std::endl;
         }
-        it->second.components = std::move(pruned_branches);
+        it->second.components = std::move(live_branches);
     }
 
     if (it->second.components.empty()) {
@@ -412,22 +374,48 @@ int QuantumCircuit::project_symbolic_terminal_to_fock_state(int terminal_id) {
     }
 
     const int64_t state_dim = state_pool_.get_max_total_dim();
-    const int accum_state_id = state_pool_.allocate_state();
+    const size_t state_elements = static_cast<size_t>(state_dim);
+    if (state_dim <= 0) {
+        throw std::runtime_error("symbolic->Fock materialization failed: invalid state dimension");
+    }
+    if (state_elements > std::numeric_limits<size_t>::max() / 2) {
+        throw std::overflow_error("symbolic->Fock materialization working-set overflow");
+    }
+    const size_t branch_working_set = state_elements * 2;
+    const int materialize_device = state_pool_.recommend_device_for_storage(branch_working_set);
+    const size_t device_live_elements =
+        state_pool_.get_active_storage_elements_on_device(materialize_device);
+    if (device_live_elements > std::numeric_limits<size_t>::max() - branch_working_set) {
+        throw std::overflow_error("symbolic->Fock materialization device reservation overflow");
+    }
+    state_pool_.reserve_total_storage_elements_on_device(
+        materialize_device, device_live_elements + branch_working_set);
+
+    const int accum_state_id = state_pool_.allocate_state(materialize_device);
     if (accum_state_id < 0) {
         throw std::runtime_error("symbolic->Fock materialization failed: unable to allocate accumulator");
     }
-    const int scratch_state_id = state_pool_.allocate_state();
-    if (scratch_state_id < 0) {
-        state_pool_.free_state(accum_state_id);
-        throw std::runtime_error("symbolic->Fock materialization failed: unable to allocate scratch");
-    }
+    int scratch_state_id = -1;
 
     FALLBACK_DEBUG_LOG << "[fallback] projecting symbolic terminal " << terminal_id
-                       << " to Fock, branches=" << it->second.components.size() << std::endl;
+                       << " to Fock, branches=" << it->second.components.size()
+                       << ", device=" << materialize_device << std::endl;
 
     try {
         state_pool_.reserve_state_storage(accum_state_id, state_dim);
+        const int assigned_device = state_pool_.get_state_device_id(accum_state_id);
+        if (assigned_device < 0) {
+            throw std::runtime_error(
+                "symbolic->Fock materialization failed: accumulator device not assigned");
+        }
+        CHECK_CUDA(cudaSetDevice(assigned_device));
+        state_pool_.activate_device_view(assigned_device);
+
         zero_state_device(&state_pool_, accum_state_id, nullptr, false);
+        scratch_state_id = state_pool_.allocate_state(assigned_device);
+        if (scratch_state_id < 0) {
+            throw std::runtime_error("symbolic->Fock materialization failed: unable to allocate scratch");
+        }
         state_pool_.reserve_state_storage(scratch_state_id, state_dim);
 
         for (size_t branch_index = 0; branch_index < it->second.components.size(); ++branch_index) {
@@ -448,10 +436,8 @@ int QuantumCircuit::project_symbolic_terminal_to_fock_state(int terminal_id) {
                                << " branch " << (branch_index + 1)
                                << " reset scratch state " << scratch_state_id << std::endl;
             initialize_vacuum_state_device(&state_pool_, scratch_state_id, state_dim, nullptr, false);
-            if (fallback_debug_logging_enabled()) {
-                CHECK_CUDA(cudaGetLastError());
-                CHECK_CUDA(cudaDeviceSynchronize());
-            }
+            CHECK_CUDA(cudaGetLastError());
+            CHECK_CUDA(cudaDeviceSynchronize());
             for (size_t replay_gate_index = 0; replay_gate_index < branch.replay_gates.size(); ++replay_gate_index) {
                 const GateParams& replay_gate = branch.replay_gates[replay_gate_index];
                 FALLBACK_DEBUG_LOG << "[fallback] terminal " << terminal_id
@@ -471,10 +457,8 @@ int QuantumCircuit::project_symbolic_terminal_to_fock_state(int terminal_id) {
                 }
                 FALLBACK_DEBUG_LOG << std::endl;
                 apply_replayable_gaussian_gate_to_state(scratch_state_id, replay_gate);
-                if (fallback_debug_logging_enabled()) {
-                    CHECK_CUDA(cudaGetLastError());
-                    CHECK_CUDA(cudaDeviceSynchronize());
-                }
+                CHECK_CUDA(cudaGetLastError());
+                CHECK_CUDA(cudaDeviceSynchronize());
                 FALLBACK_DEBUG_LOG << "[fallback] terminal " << terminal_id
                                    << " branch " << (branch_index + 1)
                                    << " gate " << (replay_gate_index + 1)
@@ -507,14 +491,14 @@ int QuantumCircuit::project_symbolic_terminal_to_fock_state(int terminal_id) {
                 make_cuDoubleComplex(branch.weight.real(), branch.weight.imag()),
                 nullptr,
                 false);
-            if (fallback_debug_logging_enabled()) {
-                CHECK_CUDA(cudaGetLastError());
-                CHECK_CUDA(cudaDeviceSynchronize());
-            }
+            CHECK_CUDA(cudaGetLastError());
+            CHECK_CUDA(cudaDeviceSynchronize());
         }
         CHECK_CUDA(cudaDeviceSynchronize());
     } catch (...) {
-        state_pool_.free_state(scratch_state_id);
+        if (scratch_state_id >= 0) {
+            state_pool_.free_state(scratch_state_id);
+        }
         state_pool_.free_state(accum_state_id);
         throw;
     }
@@ -544,8 +528,10 @@ bool QuantumCircuit::materialize_symbolic_terminals_to_fock() {
             }
             const size_t reserved_projection_elements =
                 (projected_terminal_count + 1) * state_dim;
-            state_pool_.reserve_total_storage_elements(
-                active_storage + reserved_projection_elements);
+            if (state_pool_.get_device_count() == 1) {
+                state_pool_.reserve_total_storage_elements(
+                    active_storage + reserved_projection_elements);
+            }
         }
     }
     FALLBACK_DEBUG_LOG << "[fallback] materialize_symbolic_terminals_to_fock begin"

@@ -32,6 +32,13 @@ bool GPUContext::initialize(bool enable_p2p) {
         return true;  // Already initialized
     }
 
+    int previous_device = 0;
+    cudaError_t previous_device_err = cudaGetDevice(&previous_device);
+    if (previous_device_err != cudaSuccess) {
+        previous_device = 0;
+        cudaGetLastError();
+    }
+
     int device_count = 0;
     cudaError_t err = cudaGetDeviceCount(&device_count);
     if (err != cudaSuccess || device_count == 0) {
@@ -53,6 +60,7 @@ bool GPUContext::initialize(bool enable_p2p) {
     }
 
     initialized_ = true;
+    MGPU_CHECK_CUDA(cudaSetDevice(previous_device));
     printf("[GPUContext] Initialized with %d device(s)%s\n",
            device_count,
            device_count > 1 ? " (multi-GPU enabled)" : "");

@@ -119,8 +119,6 @@ set(CORE_SOURCES
     src/core/gaussian_state.cpp
     src/core/gaussian_mixture.cpp
     src/core/symplectic_math.cpp
-    src/core/gaussian_circuit.cpp
-    src/core/gaussian_projection.cpp
 )
 
 if(CUDA_FOUND)
@@ -335,10 +333,12 @@ if(HYBRIDCVDV_BUILD_TESTS)
         tests/test_gaussian_symplectic.cpp
         tests/test_gaussian_mixture.cpp
         tests/test_sf_precision.cpp
+        tests/support/gaussian_circuit.cpp
     )
 
     add_executable(${PROJECT_NAME}_tests ${TEST_SOURCES})
     target_link_libraries(${PROJECT_NAME}_tests ${PROJECT_NAME} GTest::gtest_main)
+    target_include_directories(${PROJECT_NAME}_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests/support)
     include(GoogleTest)
     gtest_discover_tests(${PROJECT_NAME}_tests)
 

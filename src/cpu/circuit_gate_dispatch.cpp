@@ -2,10 +2,8 @@
 
 #include "quantum_circuit.h"
 #include "circuit_internal.h"
-#include "gaussian_circuit.h"
 #include "gaussian_kernels.h"
 #include "gaussian_state.h"
-#include "reference_gates.h"
 #include "squeezing_gate_gpu.h"
 #include "two_mode_gates.h"
 
@@ -24,6 +22,18 @@ void QuantumCircuit::execute_level0_gate(const GateParams& gate,
             : get_cached_target_states();
 
     if (target_states.empty()) return;
+    if (state_pool_.spans_multiple_devices(target_states)) {
+        synchronize_async_cv_pipeline();
+        for (auto& [device_id, local_targets] : state_pool_.bucket_state_ids_by_device(target_states)) {
+            CHECK_CUDA(cudaSetDevice(device_id));
+            state_pool_.activate_device_view(device_id);
+            ExactGateBatchContext local_context;
+            local_context.target_states = &local_targets;
+            local_context.batch_size = static_cast<int>(local_targets.size());
+            execute_level0_gate(gate, &local_context);
+        }
+        return;
+    }
 
     // 统计传输时延
     auto transfer_start = std::chrono::high_resolution_clock::now();
@@ -133,6 +143,18 @@ void QuantumCircuit::execute_level1_gate(const GateParams& gate,
             : get_cached_target_states();
 
     if (target_states.empty()) return;
+    if (state_pool_.spans_multiple_devices(target_states)) {
+        synchronize_async_cv_pipeline();
+        for (auto& [device_id, local_targets] : state_pool_.bucket_state_ids_by_device(target_states)) {
+            CHECK_CUDA(cudaSetDevice(device_id));
+            state_pool_.activate_device_view(device_id);
+            ExactGateBatchContext local_context;
+            local_context.target_states = &local_targets;
+            local_context.batch_size = static_cast<int>(local_targets.size());
+            execute_level1_gate(gate, &local_context);
+        }
+        return;
+    }
 
     // 统计传输时延
     auto transfer_start = std::chrono::high_resolution_clock::now();
@@ -198,6 +220,18 @@ void QuantumCircuit::execute_level2_gate(const GateParams& gate,
             : get_cached_target_states();
 
     if (target_states.empty()) return;
+    if (state_pool_.spans_multiple_devices(target_states)) {
+        synchronize_async_cv_pipeline();
+        for (auto& [device_id, local_targets] : state_pool_.bucket_state_ids_by_device(target_states)) {
+            CHECK_CUDA(cudaSetDevice(device_id));
+            state_pool_.activate_device_view(device_id);
+            ExactGateBatchContext local_context;
+            local_context.target_states = &local_targets;
+            local_context.batch_size = static_cast<int>(local_targets.size());
+            execute_level2_gate(gate, &local_context);
+        }
+        return;
+    }
 
     const int target_qumode = gate.target_qumodes.empty() ? 0 : gate.target_qumodes[0];
     const bool displacement_uses_direct_kernel =
@@ -283,30 +317,7 @@ void QuantumCircuit::execute_level2_gate(const GateParams& gate,
         auto compute_end = std::chrono::high_resolution_clock::now();
         computation_time_ += std::chrono::duration<double, std::milli>(compute_end - compute_start).count();
     } else {
-        // 使用ELL格式的通用实现
-        FockELLOperator* ell_op = get_cached_ell_operator(gate);
-        if (ell_op && ell_op->ell_val && ell_op->ell_col && ell_op->dim > 0) {
-            // 清除之前的CUDA错误
-            cudaGetLastError();
-            
-            // 统计计算时延
-            auto compute_start = std::chrono::high_resolution_clock::now();
-            
-            apply_single_mode_gate(&state_pool_, ell_op, d_target_ids, target_states.size(),
-                                   nullptr, true);
-            
-            // 检查GPU内核执行错误
-            cudaError_t err = cudaGetLastError();
-            if (err != cudaSuccess) {
-                throw std::runtime_error("GPU单模门执行失败: " + std::string(cudaGetErrorString(err)));
-            }
-
-            auto compute_end = std::chrono::high_resolution_clock::now();
-            computation_time_ += std::chrono::duration<double, std::milli>(compute_end - compute_start).count();
-        } else {
-            // ELL算符为空或无效
-            std::cerr << "警告：单模门ELL算符无效，跳过执行" << std::endl;
-        }
+        throw std::runtime_error("Level 2 exact path only supports GPU-native displacement and squeezing gates");
     }
 }
 
@@ -326,6 +337,18 @@ void QuantumCircuit::execute_level3_gate(const GateParams& gate,
             : get_cached_target_states();
 
     if (target_states.empty()) return;
+    if (state_pool_.spans_multiple_devices(target_states)) {
+        synchronize_async_cv_pipeline();
+        for (auto& [device_id, local_targets] : state_pool_.bucket_state_ids_by_device(target_states)) {
+            CHECK_CUDA(cudaSetDevice(device_id));
+            state_pool_.activate_device_view(device_id);
+            ExactGateBatchContext local_context;
+            local_context.target_states = &local_targets;
+            local_context.batch_size = static_cast<int>(local_targets.size());
+            execute_level3_gate(gate, &local_context);
+        }
+        return;
+    }
 
     // 统计传输时延
     auto transfer_start = std::chrono::high_resolution_clock::now();

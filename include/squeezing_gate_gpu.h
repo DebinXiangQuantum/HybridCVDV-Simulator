@@ -3,13 +3,9 @@
 #include "cv_state_pool.h"
 
 /**
- * GPU版本的挤压门（带缓存优化）
- * 
- * @param pool 状态池
- * @param target_indices 设备端指针，指向目标状态ID数组
- * @param batch_size 批大小
- * @param r 挤压幅度
- * @param theta 挤压角度
+ * GPU版本的挤压门。
+ * 参数变化时在 device 侧生成并缓存单模 squeezing 矩阵，
+ * 再直接对多模 Fock 态目标 mode 做 GPU 应用。
  */
 void apply_squeezing_gate_gpu(
     CVStatePool* pool,
@@ -24,7 +20,6 @@ void apply_squeezing_gate_gpu(
 );
 
 /**
- * 清理挤压门缓存
- * 在程序结束时调用以释放GPU内存
+ * 清理 device 侧挤压门缓存。
  */
 void clear_squeezing_cache();

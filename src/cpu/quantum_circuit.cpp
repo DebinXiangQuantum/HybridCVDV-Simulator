@@ -2,10 +2,9 @@
 
 #include "quantum_circuit.h"
 #include "circuit_internal.h"
-#include "gaussian_circuit.h"
 #include "gaussian_kernels.h"
 #include "gaussian_state.h"
-#include "reference_gates.h"
+#include "gpu_context.h"
 #include "squeezing_gate_gpu.h"
 #include "two_mode_gates.h"
 
@@ -145,6 +144,15 @@ QuantumCircuit::ExactGateBatchContext QuantumCircuit::prepare_exact_gate_batch_c
     if (target_states.empty()) {
         return context;
     }
+    if (state_pool_.spans_multiple_devices(target_states)) {
+        return context;
+    }
+
+    const int device_id = state_pool_.get_state_device_id(target_states.front());
+    if (device_id >= 0) {
+        CHECK_CUDA(cudaSetDevice(device_id));
+        state_pool_.activate_device_view(device_id);
+    }
 
     const size_t ids_bytes = target_states.size() * sizeof(int);
     int* staged_host = static_cast<int*>(state_pool_.host_transfer_staging.ensure(ids_bytes));
@@ -152,33 +160,6 @@ QuantumCircuit::ExactGateBatchContext QuantumCircuit::prepare_exact_gate_batch_c
     context.d_target_ids = static_cast<int*>(exact_block_target_ids_buffer_.ensure(ids_bytes));
     CHECK_CUDA(cudaMemcpy(context.d_target_ids, staged_host, ids_bytes, cudaMemcpyHostToDevice));
     return context;
-}
-
-std::string QuantumCircuit::make_ell_cache_key(const GateParams& gate) const {
-    std::ostringstream key;
-    key << static_cast<int>(gate.type) << ':' << cv_truncation_;
-    key << std::hexfloat;
-    for (const auto& param : gate.params) {
-        key << ':' << param.real() << ':' << param.imag();
-    }
-    return key.str();
-}
-
-FockELLOperator* QuantumCircuit::get_cached_ell_operator(const GateParams& gate) {
-    const std::string key = make_ell_cache_key(gate);
-    const auto found = ell_operator_cache_.find(key);
-    if (found != ell_operator_cache_.end()) {
-        return found->second.get();
-    }
-
-    std::shared_ptr<FockELLOperator> ell_op(prepare_ell_operator(gate));
-    if (!ell_op || ell_op->dim <= 0) {
-        return nullptr;
-    }
-    ell_op->upload_to_gpu();
-    FockELLOperator* raw_ptr = ell_op.get();
-    ell_operator_cache_.emplace(key, std::move(ell_op));
-    return raw_ptr;
 }
 
 void QuantumCircuit::prewarm_exact_gate_resources(const std::vector<GateParams>& gates) {
@@ -233,8 +214,33 @@ const std::vector<int>& QuantumCircuit::get_cached_symbolic_terminal_ids() const
 
 // ==================== Constructor & Gaussian State Management ====================
 
+int QuantumCircuit::select_execution_device_for_constructor() {
+    if (hybridcvdv::GPUContext::is_initialized()) {
+        auto& ctx = hybridcvdv::GPUContext::instance();
+        const int device_id =
+            ctx.select_device(hybridcvdv::DeviceSelectionPolicy::MOST_FREE_MEM);
+        ctx.set_device(device_id);
+        return device_id;
+    }
+
+    int current_device = 0;
+    const cudaError_t err = cudaGetDevice(&current_device);
+    if (err != cudaSuccess) {
+        cudaGetLastError();
+        CHECK_CUDA(cudaSetDevice(0));
+        return 0;
+    }
+    CHECK_CUDA(cudaSetDevice(current_device));
+    return current_device;
+}
+
+void QuantumCircuit::activate_execution_device() const {
+    CHECK_CUDA(cudaSetDevice(execution_device_id_));
+}
+
 QuantumCircuit::QuantumCircuit(int num_qubits, int num_qumodes, int cv_truncation, int max_states)
     : num_qubits_(num_qubits), num_qumodes_(num_qumodes), cv_truncation_(cv_truncation),
+      execution_device_id_(select_execution_device_for_constructor()),
       root_node_(nullptr), state_pool_(cv_truncation, max_states, num_qumodes),
       gaussian_state_pool_(nullptr),
       is_built_(false), is_executed_(false), shared_zero_state_id_(-1),
@@ -258,7 +264,8 @@ QuantumCircuit::QuantumCircuit(int num_qubits, int num_qumodes, int cv_truncatio
     }
 
     std::cout << "创建量子电路: " << num_qubits << " qubits, "
-              << num_qumodes << " qumodes, 截断维度=" << cv_truncation << std::endl;
+              << num_qumodes << " qumodes, 截断维度=" << cv_truncation
+              << ", 执行GPU=" << execution_device_id_ << std::endl;
 }
 
 /**
@@ -458,14 +465,17 @@ void QuantumCircuit::add_gates(const std::vector<GateParams>& gates) {
  */
 void QuantumCircuit::build() {
     if (is_built_) return;
+    activate_execution_device();
+    cudaGetLastError();
 
     std::cout << "构建量子线路..." << std::endl;
 
-    async_cv_pipeline_enabled_ = !async_cv_pipeline_disabled();
+    async_cv_pipeline_enabled_ =
+        !async_cv_pipeline_disabled() && state_pool_.get_device_count() == 1;
     if (async_cv_pipeline_enabled_) {
         prewarm_async_target_upload_slots();
     } else {
-        std::cout << "异步CV流水线已通过环境变量禁用" << std::endl;
+        std::cout << "异步CV流水线已禁用（环境变量或multi-GPU状态池）" << std::endl;
     }
 
     const size_t target_id_bytes = static_cast<size_t>(state_pool_.capacity) * sizeof(int);
@@ -495,6 +505,8 @@ size_t QuantumCircuit::get_execution_block_count() const {
 
 size_t QuantumCircuit::execute_range(size_t start_block, size_t max_blocks) {
     ScopedNvtxRange nvtx_range("qc::execute");
+    activate_execution_device();
+    cudaGetLastError();
     if (!is_built_) {
         throw std::runtime_error("必须先构建量子线路");
     }
@@ -680,8 +692,14 @@ size_t QuantumCircuit::execute_range(size_t start_block, size_t max_blocks) {
                         projected_terminal_count * state_dim + extra_pairwise_elements;
                     exact_phase_peak_elements =
                         std::max(exact_phase_peak_elements, duplicated_gate_peak_elements);
-                    state_pool_.reserve_total_storage_elements(
-                        active_storage + exact_phase_peak_elements);
+                    if (state_pool_.get_device_count() == 1) {
+                        state_pool_.reserve_total_storage_elements(
+                            active_storage + exact_phase_peak_elements);
+                    } else {
+                        FALLBACK_DEBUG_LOG << "[fallback] block " << block_index
+                                           << " skip single-device exact headroom pre-reserve"
+                                           << " on multi-GPU CVStatePool" << std::endl;
+                    }
                 }
             }
             FALLBACK_DEBUG_LOG << "[fallback] block " << block_index
@@ -733,7 +751,10 @@ size_t QuantumCircuit::execute_range(size_t start_block, size_t max_blocks) {
                 }
             }
 
-            if (fusable_gates.size() >= 2) {
+            const bool fused_targets_span_multiple_devices =
+                exact_batch_context.target_states &&
+                state_pool_.spans_multiple_devices(*exact_batch_context.target_states);
+            if (fusable_gates.size() >= 2 && !fused_targets_span_multiple_devices) {
                 // Build per-mode descriptor: accumulate params by target mode
                 std::map<int, FusedDiagonalOp> mode_ops;
                 for (const GateParams& gate : fusable_gates) {
@@ -859,6 +880,7 @@ size_t QuantumCircuit::execute_range(size_t start_block, size_t max_blocks) {
 // ==================== Reset / Settings / HDD Init ====================
 
 void QuantumCircuit::reset() {
+    activate_execution_device();
     // 同步所有GPU操作，确保在重置前所有操作完成
     release_async_cv_pipeline();
     cudaDeviceSynchronize();
@@ -929,6 +951,7 @@ void QuantumCircuit::set_eager_symbolic_materialization_enabled(bool enabled) {
 }
 
 void QuantumCircuit::set_gaussian_state_pool_capacity(int capacity) {
+    activate_execution_device();
     if (capacity <= 0) {
         throw std::invalid_argument("Gaussian state pool capacity must be positive");
     }

@@ -2,10 +2,9 @@
 // circuit_internal.h — Shared declarations for quantum_circuit.cpp split files
 
 #include "quantum_circuit.h"
-#include "gaussian_circuit.h"
+#include "fock_ell_operator.h"
 #include "gaussian_kernels.h"
 #include "gaussian_state.h"
-#include "reference_gates.h"
 #include "squeezing_gate_gpu.h"
 #include "two_mode_gates.h"
 #include <iostream>
@@ -700,8 +699,6 @@ void collect_symbolic_terminal_ids_recursive(
     std::unordered_set<int>& symbolic_ids);
 int choose_snap_mixture_branch_cap(const GateParams& gate, int cutoff);
 int choose_cross_kerr_mixture_branch_cap(int cutoff);
-void apply_exact_diagonal_gate_host(std::vector<std::complex<double>>* state,
-    const GateParams& gate, int cutoff, int num_qumodes);
 bool is_pure_cv_diagonal_gate(const GateParams& gate);
 bool is_pure_cv_diagonal_non_gaussian_gate(const GateParams& gate);
 int choose_kerr_mixture_branch_cap(int cutoff);

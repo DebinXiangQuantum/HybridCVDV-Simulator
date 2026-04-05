@@ -7,6 +7,9 @@
 #include <vector>
 #include "cv_state_pool.h"
 
+void scale_state_device(CVStatePool* state_pool, int state_id, cuDoubleComplex weight,
+                        cudaStream_t stream, bool synchronize);
+
 namespace {
 
 struct VacuumClassificationScratch {
@@ -38,6 +41,7 @@ void check_kernel_launch(cudaError_t err, const char* message) {
         throw std::runtime_error(std::string(message) + cudaGetErrorString(err));
     }
 }
+
 
 void synchronize_if_requested(cudaStream_t stream, bool synchronize, const char* message) {
     if (!synchronize) {
@@ -562,6 +566,8 @@ void copy_state_device(CVStatePool* state_pool, int src_state_id, int dst_state_
     const int64_t state_dim = state_pool->get_state_dim(src_state_id);
     state_pool->reserve_state_storage(dst_state_id, state_dim);
 
+    const int src_device = state_pool->get_state_device_id(src_state_id);
+    const int dst_device = state_pool->get_state_device_id(dst_state_id);
     const cuDoubleComplex* src_ptr = state_pool->get_state_ptr(src_state_id);
     cuDoubleComplex* dst_ptr = state_pool->get_state_ptr(dst_state_id);
     if (!src_ptr || !dst_ptr || state_dim <= 0) {
@@ -572,6 +578,25 @@ void copy_state_device(CVStatePool* state_pool, int src_state_id, int dst_state_
     const size_t total_elements = static_cast<size_t>(state_dim);
     const size_t chunk_elements =
         std::max<size_t>(1, kCopyChunkBytes / sizeof(cuDoubleComplex));
+
+    if (src_device != dst_device) {
+        const size_t total_bytes = total_elements * sizeof(cuDoubleComplex);
+        const char* src_bytes = reinterpret_cast<const char*>(src_ptr);
+        char* dst_bytes = reinterpret_cast<char*>(dst_ptr);
+        for (size_t copied_bytes = 0; copied_bytes < total_bytes; copied_bytes += kCopyChunkBytes) {
+            const size_t chunk_bytes = std::min(kCopyChunkBytes, total_bytes - copied_bytes);
+            cudaError_t err = cudaMemcpyPeer(
+                dst_bytes + copied_bytes, dst_device,
+                src_bytes + copied_bytes, src_device,
+                chunk_bytes);
+            if (err != cudaSuccess) {
+                throw std::runtime_error("Cross-device state copy failed: " +
+                                         std::string(cudaGetErrorString(err)));
+            }
+        }
+        synchronize_if_requested(stream, synchronize, "Copy state synchronization failed: ");
+        return;
+    }
 
     dim3 block_dim(256);
     size_t copied_elements = 0;
@@ -603,6 +628,8 @@ void copy_scale_state_device(CVStatePool* state_pool,
     const int64_t state_dim = state_pool->get_state_dim(src_state_id);
     state_pool->reserve_state_storage(dst_state_id, state_dim);
 
+    const int src_device = state_pool->get_state_device_id(src_state_id);
+    const int dst_device = state_pool->get_state_device_id(dst_state_id);
     const cuDoubleComplex* src_ptr = state_pool->get_state_ptr(src_state_id);
     cuDoubleComplex* dst_ptr = state_pool->get_state_ptr(dst_state_id);
     if (!src_ptr || !dst_ptr || state_dim <= 0) {
@@ -613,6 +640,25 @@ void copy_scale_state_device(CVStatePool* state_pool,
     const size_t total_elements = static_cast<size_t>(state_dim);
     const size_t chunk_elements =
         std::max<size_t>(1, kVectorChunkBytes / sizeof(cuDoubleComplex));
+
+    if (src_device != dst_device) {
+        const size_t total_bytes = total_elements * sizeof(cuDoubleComplex);
+        const char* src_bytes = reinterpret_cast<const char*>(src_ptr);
+        char* dst_bytes = reinterpret_cast<char*>(dst_ptr);
+        for (size_t copied_bytes = 0; copied_bytes < total_bytes; copied_bytes += kVectorChunkBytes) {
+            const size_t chunk_bytes = std::min(kVectorChunkBytes, total_bytes - copied_bytes);
+            cudaError_t err = cudaMemcpyPeer(
+                dst_bytes + copied_bytes, dst_device,
+                src_bytes + copied_bytes, src_device,
+                chunk_bytes);
+            if (err != cudaSuccess) {
+                throw std::runtime_error("Cross-device copy-scale staging failed: " +
+                                         std::string(cudaGetErrorString(err)));
+            }
+        }
+        scale_state_device(state_pool, dst_state_id, weight, stream, synchronize);
+        return;
+    }
 
     dim3 block_dim(256);
     for (size_t copied_elements = 0; copied_elements < total_elements;) {
@@ -685,6 +731,8 @@ void axpy_state_device(CVStatePool* state_pool,
         return;
     }
 
+    const int src_device = state_pool->get_state_device_id(src_state_id);
+    const int dst_device = state_pool->get_state_device_id(dst_state_id);
     const cuDoubleComplex* src_ptr = state_pool->get_state_ptr(src_state_id);
     cuDoubleComplex* dst_ptr = state_pool->get_state_ptr(dst_state_id);
     if (!src_ptr || !dst_ptr) {
@@ -696,13 +744,36 @@ void axpy_state_device(CVStatePool* state_pool,
     const size_t chunk_elements =
         std::max<size_t>(1, kVectorChunkBytes / sizeof(cuDoubleComplex));
 
+    size_t temp_offset = 0;
+    cuDoubleComplex* axpy_src_ptr = const_cast<cuDoubleComplex*>(src_ptr);
+    if (src_device != dst_device) {
+        temp_offset = state_pool->allocate_detached_storage(total_elements);
+        dst_ptr = state_pool->get_state_ptr(dst_state_id);
+        axpy_src_ptr = state_pool->data + temp_offset;
+        const size_t total_bytes = total_elements * sizeof(cuDoubleComplex);
+        const char* src_bytes = reinterpret_cast<const char*>(src_ptr);
+        char* staged_bytes = reinterpret_cast<char*>(axpy_src_ptr);
+        for (size_t copied_bytes = 0; copied_bytes < total_bytes; copied_bytes += kVectorChunkBytes) {
+            const size_t chunk_bytes = std::min(kVectorChunkBytes, total_bytes - copied_bytes);
+            cudaError_t err = cudaMemcpyPeer(
+                staged_bytes + copied_bytes, dst_device,
+                src_bytes + copied_bytes, src_device,
+                chunk_bytes);
+            if (err != cudaSuccess) {
+                state_pool->release_detached_storage(temp_offset, total_elements);
+                throw std::runtime_error("Cross-device AXPY staging failed: " +
+                                         std::string(cudaGetErrorString(err)));
+            }
+        }
+    }
+
     dim3 block_dim(256);
     for (size_t processed_elements = 0; processed_elements < total_elements;) {
         const size_t elements_this_chunk =
             std::min(chunk_elements, total_elements - processed_elements);
         dim3 grid_dim((elements_this_chunk + block_dim.x - 1) / block_dim.x);
         axpy_state_vector_kernel<<<grid_dim, block_dim, 0, stream>>>(
-            src_ptr + processed_elements,
+            axpy_src_ptr + processed_elements,
             dst_ptr + processed_elements,
             weight,
             static_cast<int64_t>(elements_this_chunk));
@@ -716,6 +787,9 @@ void axpy_state_device(CVStatePool* state_pool,
     }
 
     synchronize_if_requested(stream, synchronize, "AXPY state kernel synchronization failed: ");
+    if (src_device != dst_device) {
+        state_pool->release_detached_storage(temp_offset, total_elements);
+    }
 }
 
 void classify_vacuum_ray_device(CVStatePool* state_pool,

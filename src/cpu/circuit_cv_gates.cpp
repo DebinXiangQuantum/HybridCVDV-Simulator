@@ -2,10 +2,8 @@
 
 #include "quantum_circuit.h"
 #include "circuit_internal.h"
-#include "gaussian_circuit.h"
 #include "gaussian_kernels.h"
 #include "gaussian_state.h"
-#include "reference_gates.h"
 #include "squeezing_gate_gpu.h"
 #include "two_mode_gates.h"
 
@@ -195,6 +193,12 @@ void QuantumCircuit::apply_displacement_to_state(
     int state_id, std::complex<double> alpha, int target_qumode) {
     // 统计传输时延
     auto transfer_start = std::chrono::high_resolution_clock::now();
+
+    const int device_id = state_pool_.get_state_device_id(state_id);
+    if (device_id >= 0) {
+        CHECK_CUDA(cudaSetDevice(device_id));
+        state_pool_.activate_device_view(device_id);
+    }
     
     cuDoubleComplex alpha_cu = make_cuDoubleComplex(alpha.real(), alpha.imag());
     auto transfer_end = std::chrono::high_resolution_clock::now();
@@ -317,6 +321,12 @@ HDDNode* QuantumCircuit::apply_conditional_squeezing_recursive(
  */
 void QuantumCircuit::apply_squeezing_to_state(int state_id, std::complex<double> xi, int target_qumode) {
     auto transfer_start = std::chrono::high_resolution_clock::now();
+
+    const int device_id = state_pool_.get_state_device_id(state_id);
+    if (device_id >= 0) {
+        CHECK_CUDA(cudaSetDevice(device_id));
+        state_pool_.activate_device_view(device_id);
+    }
 
     int* d_state_id = state_pool_.upload_values_to_buffer(
         &state_id, 1, state_pool_.scratch_target_ids);
@@ -449,6 +459,11 @@ HDDNode* QuantumCircuit::apply_conditional_beam_splitter_recursive(
 void QuantumCircuit::apply_beam_splitter_to_state(int state_id, double theta, double phi,
                                                   int qumode1, int qumode2) {
     // 调用GPU光束分裂器内核
+    const int device_id = state_pool_.get_state_device_id(state_id);
+    if (device_id >= 0) {
+        CHECK_CUDA(cudaSetDevice(device_id));
+        state_pool_.activate_device_view(device_id);
+    }
     int* d_state_id = state_pool_.upload_values_to_buffer(
         &state_id, 1, state_pool_.scratch_target_ids);
 
@@ -568,6 +583,12 @@ void QuantumCircuit::apply_two_mode_squeezing_to_state(
     }
 
     auto transfer_start = std::chrono::high_resolution_clock::now();
+
+    const int device_id = state_pool_.get_state_device_id(state_id);
+    if (device_id >= 0) {
+        CHECK_CUDA(cudaSetDevice(device_id));
+        state_pool_.activate_device_view(device_id);
+    }
 
     int* d_state_id = state_pool_.upload_values_to_buffer(
         &state_id, 1, state_pool_.scratch_target_ids);
@@ -699,6 +720,12 @@ void QuantumCircuit::apply_sum_to_state(
     }
 
     auto transfer_start = std::chrono::high_resolution_clock::now();
+
+    const int device_id = state_pool_.get_state_device_id(state_id);
+    if (device_id >= 0) {
+        CHECK_CUDA(cudaSetDevice(device_id));
+        state_pool_.activate_device_view(device_id);
+    }
 
     int* d_state_id = state_pool_.upload_values_to_buffer(
         &state_id, 1, state_pool_.scratch_target_ids);

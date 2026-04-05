@@ -2,10 +2,8 @@
 
 #include "quantum_circuit.h"
 #include "circuit_internal.h"
-#include "gaussian_circuit.h"
 #include "gaussian_kernels.h"
 #include "gaussian_state.h"
-#include "reference_gates.h"
 #include "squeezing_gate_gpu.h"
 #include "two_mode_gates.h"
 

@@ -955,6 +955,83 @@ TEST_F(GateTest, TestGaussianPrefixEDEProducesCorrectState) {
     }
 }
 
+TEST_F(GateTest, TestSingleModeSqueezingMatchesReference) {
+    try {
+        constexpr int cutoff = 10;
+        QuantumCircuit circuit(1, 1, cutoff, 1024);
+
+        const std::complex<double> xi(0.18, 0.07);
+        circuit.add_gate(Gates::Squeezing(0, xi));
+
+        circuit.build();
+        circuit.execute();
+
+        Reference::Vector vacuum(cutoff, {0.0, 0.0});
+        vacuum[0] = {1.0, 0.0};
+        const Reference::Vector expected =
+            Reference::SingleModeGates::apply_squeezing_gate(vacuum, xi);
+
+        Reference::Vector actual(static_cast<size_t>(cutoff), {0.0, 0.0});
+        for (int n = 0; n < cutoff; ++n) {
+            std::vector<std::complex<double>> basis(cutoff, {0.0, 0.0});
+            basis[n] = {1.0, 0.0};
+            actual[static_cast<size_t>(n)] = circuit.get_amplitude({0}, {basis});
+        }
+
+        const Reference::ErrorMetrics metrics = Reference::compute_error_metrics(expected, actual);
+        EXPECT_LT(metrics.fidelity_deviation, 1e-8);
+        EXPECT_LT(metrics.l2_error, 1e-5);
+    } catch (const std::exception& e) {
+        FAIL() << "单模挤压门精度回归测试失败: " << e.what();
+    }
+}
+
+TEST_F(GateTest, TestMultiQumodeSqueezingOnNonZeroModeMatchesReference) {
+    try {
+        constexpr int cutoff = 8;
+        QuantumCircuit circuit(1, 3, cutoff, 1024);
+
+        const std::complex<double> xi(0.16, -0.05);
+        circuit.add_gate(Gates::Squeezing(2, xi));
+
+        circuit.build();
+        circuit.execute();
+
+        Reference::Vector vacuum(cutoff, {0.0, 0.0});
+        vacuum[0] = {1.0, 0.0};
+
+        const Reference::Vector squeezed =
+            Reference::SingleModeGates::apply_squeezing_gate(vacuum, xi);
+        const Reference::Vector expected = Reference::tensor_product(
+            Reference::tensor_product(vacuum, vacuum), squeezed);
+
+        Reference::Vector actual(integer_power(static_cast<size_t>(cutoff), 3), {0.0, 0.0});
+        for (int n0 = 0; n0 < cutoff; ++n0) {
+            std::vector<std::complex<double>> basis0(cutoff, {0.0, 0.0});
+            basis0[n0] = {1.0, 0.0};
+            for (int n1 = 0; n1 < cutoff; ++n1) {
+                std::vector<std::complex<double>> basis1(cutoff, {0.0, 0.0});
+                basis1[n1] = {1.0, 0.0};
+                for (int n2 = 0; n2 < cutoff; ++n2) {
+                    std::vector<std::complex<double>> basis2(cutoff, {0.0, 0.0});
+                    basis2[n2] = {1.0, 0.0};
+                    const size_t index =
+                        static_cast<size_t>(n0) * cutoff * cutoff +
+                        static_cast<size_t>(n1) * cutoff +
+                        static_cast<size_t>(n2);
+                    actual[index] = circuit.get_amplitude({0}, {basis0, basis1, basis2});
+                }
+            }
+        }
+
+        const Reference::ErrorMetrics metrics = Reference::compute_error_metrics(expected, actual);
+        EXPECT_LT(metrics.fidelity_deviation, 1e-8);
+        EXPECT_LT(metrics.l2_error, 2e-5);
+    } catch (const std::exception& e) {
+        FAIL() << "多qumode非零目标mode挤压门精度回归测试失败: " << e.what();
+    }
+}
+
 TEST_F(GateTest, TestGaussianPrefixEDEHandlesCorrelatedState) {
     try {
         constexpr int cutoff = 6;

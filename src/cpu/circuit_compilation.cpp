@@ -2,10 +2,8 @@
 
 #include "quantum_circuit.h"
 #include "circuit_internal.h"
-#include "gaussian_circuit.h"
 #include "gaussian_kernels.h"
 #include "gaussian_state.h"
-#include "reference_gates.h"
 #include "squeezing_gate_gpu.h"
 #include "two_mode_gates.h"
 
@@ -372,132 +370,6 @@ int choose_cross_kerr_mixture_branch_cap(int cutoff) {
         return 0;
     }
     return std::min(cutoff * cutoff, kMaxCrossKerrMixtureBranches);
-}
-
-template <typename PhaseFactorFn>
-void apply_single_mode_diagonal_exact(std::vector<std::complex<double>>* state,
-                                      int cutoff,
-                                      int num_qumodes,
-                                      int target_qumode,
-                                      PhaseFactorFn&& phase_factor) {
-    if (target_qumode < 0 || target_qumode >= num_qumodes) {
-        throw std::out_of_range("single-mode diagonal target qumode out of range");
-    }
-
-    const size_t expected_dim = integer_power(static_cast<size_t>(cutoff), num_qumodes);
-    if (state->size() != expected_dim) {
-        throw std::invalid_argument("state size does not match cutoff^num_qumodes");
-    }
-
-    const size_t stride = integer_power(static_cast<size_t>(cutoff), num_qumodes - target_qumode - 1);
-    const size_t prefix_count = integer_power(static_cast<size_t>(cutoff), target_qumode);
-
-    for (size_t prefix = 0; prefix < prefix_count; ++prefix) {
-        const size_t block_base = prefix * static_cast<size_t>(cutoff) * stride;
-        for (int photon = 0; photon < cutoff; ++photon) {
-            const std::complex<double> factor = phase_factor(photon);
-            if (std::abs(factor - std::complex<double>(1.0, 0.0)) < kDiagonalCanonicalizationTolerance) {
-                continue;
-            }
-            for (size_t suffix = 0; suffix < stride; ++suffix) {
-                (*state)[block_base + static_cast<size_t>(photon) * stride + suffix] *= factor;
-            }
-        }
-    }
-}
-
-template <typename PhaseFactorFn>
-void apply_two_mode_diagonal_exact(std::vector<std::complex<double>>* state,
-                                   int cutoff,
-                                   int num_qumodes,
-                                   int first_target_qumode,
-                                   int second_target_qumode,
-                                   PhaseFactorFn&& phase_factor) {
-    if (first_target_qumode < 0 || first_target_qumode >= num_qumodes ||
-        second_target_qumode < 0 || second_target_qumode >= num_qumodes ||
-        first_target_qumode == second_target_qumode) {
-        throw std::out_of_range("two-mode diagonal target qumode out of range");
-    }
-
-    const size_t expected_dim = integer_power(static_cast<size_t>(cutoff), num_qumodes);
-    if (state->size() != expected_dim) {
-        throw std::invalid_argument("state size does not match cutoff^num_qumodes");
-    }
-
-    const size_t first_stride =
-        integer_power(static_cast<size_t>(cutoff), num_qumodes - first_target_qumode - 1);
-    const size_t second_stride =
-        integer_power(static_cast<size_t>(cutoff), num_qumodes - second_target_qumode - 1);
-
-    for (size_t flat_index = 0; flat_index < state->size(); ++flat_index) {
-        const int first_photon = static_cast<int>((flat_index / first_stride) % static_cast<size_t>(cutoff));
-        const int second_photon = static_cast<int>((flat_index / second_stride) % static_cast<size_t>(cutoff));
-        const std::complex<double> factor = phase_factor(first_photon, second_photon);
-        if (std::abs(factor - std::complex<double>(1.0, 0.0)) < kDiagonalCanonicalizationTolerance) {
-            continue;
-        }
-        (*state)[flat_index] *= factor;
-    }
-}
-
-void apply_exact_diagonal_gate_host(std::vector<std::complex<double>>* state,
-                                    const GateParams& gate,
-                                    int cutoff,
-                                    int num_qumodes) {
-    switch (gate.type) {
-        case GateType::SNAP_GATE: {
-            const double theta = gate.params[0].real();
-            const int target_fock_state = static_cast<int>(std::llround(gate.params[1].real()));
-            apply_single_mode_diagonal_exact(
-                state,
-                cutoff,
-                num_qumodes,
-                gate.target_qumodes[0],
-                [theta, target_fock_state](int photon) {
-                    if (photon != target_fock_state) {
-                        return std::complex<double>(1.0, 0.0);
-                    }
-                    return std::exp(std::complex<double>(0.0, theta));
-                });
-            break;
-        }
-        case GateType::MULTI_SNAP_GATE: {
-            std::vector<double> phase_map;
-            phase_map.reserve(gate.params.size());
-            for (const auto& phase : gate.params) {
-                phase_map.push_back(phase.real());
-            }
-            apply_single_mode_diagonal_exact(
-                state,
-                cutoff,
-                num_qumodes,
-                gate.target_qumodes[0],
-                [phase_map = std::move(phase_map)](int photon) {
-                    if (photon >= static_cast<int>(phase_map.size()) ||
-                        !is_nontrivial_phase(phase_map[static_cast<size_t>(photon)])) {
-                        return std::complex<double>(1.0, 0.0);
-                    }
-                    return std::exp(std::complex<double>(0.0, phase_map[static_cast<size_t>(photon)]));
-                });
-            break;
-        }
-        case GateType::CROSS_KERR_GATE: {
-            const double kappa = gate.params[0].real();
-            apply_two_mode_diagonal_exact(
-                state,
-                cutoff,
-                num_qumodes,
-                gate.target_qumodes[0],
-                gate.target_qumodes[1],
-                [kappa](int first_photon, int second_photon) {
-                    return std::exp(std::complex<double>(
-                        0.0, kappa * static_cast<double>(first_photon * second_photon)));
-                });
-            break;
-        }
-        default:
-            throw std::invalid_argument("unsupported host exact diagonal gate");
-    }
 }
 
 bool is_pure_cv_diagonal_gate(const GateParams& gate) {

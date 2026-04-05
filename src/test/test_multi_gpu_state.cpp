@@ -78,6 +78,75 @@ TEST_F(MultiGPUStateTest, AllocateMultipleStates) {
     pool.free_state(sid1);
 }
 
+TEST_F(MultiGPUStateTest, AutoGrowStateCapacityPreservesExistingStates) {
+    CVStatePool pool(10, 2, 1, 0);
+
+    const int sid0 = pool.allocate_state();
+    const int sid1 = pool.allocate_state();
+    ASSERT_GE(sid0, 0);
+    ASSERT_GE(sid1, 0);
+
+    std::vector<cuDoubleComplex> state0(10, make_cuDoubleComplex(0.0, 0.0));
+    std::vector<cuDoubleComplex> state1(10, make_cuDoubleComplex(0.0, 0.0));
+    state0[2] = make_cuDoubleComplex(1.0, 0.0);
+    state1[5] = make_cuDoubleComplex(0.0, 1.0);
+    pool.upload_state(sid0, state0);
+    pool.upload_state(sid1, state1);
+
+    const int sid2 = pool.allocate_state();
+    ASSERT_GE(sid2, 0);
+    EXPECT_GT(pool.capacity, 2);
+
+    std::vector<cuDoubleComplex> state2(10, make_cuDoubleComplex(0.0, 0.0));
+    state2[7] = make_cuDoubleComplex(-0.5, 0.25);
+    pool.upload_state(sid2, state2);
+
+    std::vector<cuDoubleComplex> out0;
+    std::vector<cuDoubleComplex> out1;
+    std::vector<cuDoubleComplex> out2;
+    pool.download_state(sid0, out0);
+    pool.download_state(sid1, out1);
+    pool.download_state(sid2, out2);
+
+    ASSERT_EQ(out0.size(), state0.size());
+    ASSERT_EQ(out1.size(), state1.size());
+    ASSERT_EQ(out2.size(), state2.size());
+    for (size_t i = 0; i < state0.size(); ++i) {
+        EXPECT_TRUE(complex_near(out0[i], state0[i])) << "state0 mismatch at " << i;
+        EXPECT_TRUE(complex_near(out1[i], state1[i])) << "state1 mismatch at " << i;
+        EXPECT_TRUE(complex_near(out2[i], state2[i])) << "state2 mismatch at " << i;
+    }
+
+    pool.free_state(sid0);
+    pool.free_state(sid1);
+    pool.free_state(sid2);
+}
+
+TEST_F(MultiGPUStateTest, SinglePoolDistributesLargeReservationsAcrossDevices) {
+    if (GPUContext::instance().num_devices() < 2) {
+        GTEST_SKIP() << "Need 2+ GPUs";
+    }
+
+    CVStatePool pool(4, 8, 1, 0);
+    const int sid0 = pool.allocate_state();
+    const int sid1 = pool.allocate_state();
+    ASSERT_GE(sid0, 0);
+    ASSERT_GE(sid1, 0);
+
+    constexpr int64_t kLargeStateDim = 32LL * 1024LL * 1024LL;  // 512 MiB of cuDoubleComplex
+    pool.reserve_state_storage(sid0, kLargeStateDim);
+    pool.reserve_state_storage(sid1, kLargeStateDim);
+
+    EXPECT_EQ(pool.get_state_dim(sid0), kLargeStateDim);
+    EXPECT_EQ(pool.get_state_dim(sid1), kLargeStateDim);
+    EXPECT_NE(pool.get_state_device_id(sid0), -1);
+    EXPECT_NE(pool.get_state_device_id(sid1), -1);
+    EXPECT_NE(pool.get_state_device_id(sid0), pool.get_state_device_id(sid1));
+
+    pool.free_state(sid0);
+    pool.free_state(sid1);
+}
+
 // ─── Upload/Download ─────────────────────────────────────────────────────────
 
 TEST_F(MultiGPUStateTest, UploadDownloadRoundTrip) {

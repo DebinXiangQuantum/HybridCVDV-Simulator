@@ -189,13 +189,19 @@ DeviceMetadata query_device() {
         return device;
     }
 
+    int device_index = 0;
+    if (cudaGetDevice(&device_index) != cudaSuccess) {
+        cudaGetLastError();
+        device_index = 0;
+    }
+
     cudaDeviceProp prop{};
-    if (cudaGetDeviceProperties(&prop, 0) != cudaSuccess) {
+    if (cudaGetDeviceProperties(&prop, device_index) != cudaSuccess) {
         return device;
     }
 
     device.available = true;
-    device.device_index = 0;
+    device.device_index = device_index;
     device.name = prop.name;
     device.cc_major = prop.major;
     device.cc_minor = prop.minor;
@@ -203,6 +209,29 @@ DeviceMetadata query_device() {
     device.total_global_mem_bytes = prop.totalGlobalMem;
     device.shared_mem_per_block_bytes = prop.sharedMemPerBlock;
     return device;
+}
+
+double single_circuit_vram_budget_bytes(double usage_ratio = 0.7) {
+    if (usage_ratio <= 0.0) {
+        return 0.0;
+    }
+
+    size_t best_free_bytes = 0;
+    if (hybridcvdv::GPUContext::is_initialized()) {
+        auto& ctx = hybridcvdv::GPUContext::instance();
+        ctx.refresh_memory_info();
+        for (const auto& info : ctx.all_devices()) {
+            best_free_bytes = std::max(best_free_bytes, info.free_memory_bytes);
+        }
+    } else {
+        size_t free_bytes = 0;
+        size_t total_bytes = 0;
+        if (cudaMemGetInfo(&free_bytes, &total_bytes) == cudaSuccess) {
+            best_free_bytes = free_bytes;
+        }
+    }
+
+    return static_cast<double>(best_free_bytes) * usage_ratio;
 }
 
 Reference::Vector make_fock_state(int dim, int level) {
@@ -1878,12 +1907,8 @@ std::vector<ExperimentResult> run_scaling_suite(const std::string& name_filter) 
         for (int nq : {3, 4, 5, 6, 7, 8, 9, 10}) {
             for (int nm : {2, 3, 4, 5, 6, 7}) {
                 // Memory per CV state = cutoff^nm * 16 bytes (complex double)
-                // With 2 GPUs (96GB total), budget ~80GB (conservative)
                 double mem_per_state = std::pow(static_cast<double>(cutoff), nm) * 16.0;
-                double total_vram_budget = 80.0e9; // 2x L20 48GB, conservative
-                if (hybridcvdv::GPUContext::is_initialized()) {
-                    total_vram_budget = hybridcvdv::GPUContext::instance().total_free_memory() * 0.7;
-                }
+                double total_vram_budget = single_circuit_vram_budget_bytes();
                 int effective_max_states = qaoa_max_states;
                 if (mem_per_state * effective_max_states > total_vram_budget) {
                     effective_max_states = static_cast<int>(total_vram_budget / mem_per_state);
@@ -1939,10 +1964,7 @@ std::vector<ExperimentResult> run_scaling_suite(const std::string& name_filter) 
     for (int cutoff : {4, 8, 12, 16, 24, 32}) {
         for (int nm : {2, 3, 4, 5, 6, 7}) {
             double mem_per_state = std::pow(static_cast<double>(cutoff), nm) * 16.0;
-            double total_vram_budget = 80.0e9;
-            if (hybridcvdv::GPUContext::is_initialized()) {
-                total_vram_budget = hybridcvdv::GPUContext::instance().total_free_memory() * 0.7;
-            }
+            double total_vram_budget = single_circuit_vram_budget_bytes();
             int cv_max = (nm <= 6) ? 64 : (nm == 7) ? 8 : 1;
             if (g_max_states_override > 0) cv_max = g_max_states_override;
             if (mem_per_state * cv_max > total_vram_budget) {
@@ -2053,10 +2075,7 @@ std::vector<ExperimentResult> run_scaling_suite(const std::string& name_filter) 
     for (int cutoff : {4, 8, 16, 32}) {
         for (int nm : {1, 2, 4, 8}) {
             double mem_per_state = std::pow(static_cast<double>(cutoff), nm) * 16.0;
-            double total_vram_budget = 80.0e9;
-            if (hybridcvdv::GPUContext::is_initialized()) {
-                total_vram_budget = hybridcvdv::GPUContext::instance().total_free_memory() * 0.7;
-            }
+            double total_vram_budget = single_circuit_vram_budget_bytes();
             if (mem_per_state * qaoa_max_states > total_vram_budget) continue;
 
             const std::string name = "sc26_qaoa_nm" + std::to_string(nm) + "_c" + std::to_string(cutoff);

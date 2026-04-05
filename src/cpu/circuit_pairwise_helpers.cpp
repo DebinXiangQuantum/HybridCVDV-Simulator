@@ -2,7 +2,6 @@
 
 #include "quantum_circuit.h"
 #include "circuit_internal.h"
-#include "gaussian_circuit.h"
 #include "gaussian_state.h"
 
 namespace circuit_internal {
@@ -221,7 +220,9 @@ void reserve_pairwise_hybrid_headroom(const char* gate_name,
                        << " early_release=" << (early_release_enabled ? 1 : 0)
                        << " active_storage=" << active_storage
                        << std::endl;
-    state_pool.reserve_total_storage_elements(active_storage + working_extra_elements);
+    if (state_pool.get_device_count() == 1) {
+        state_pool.reserve_total_storage_elements(active_storage + working_extra_elements);
+    }
 }
 
 void cleanup_duplicated_pairwise_states(CVStatePool& state_pool,

@@ -2,10 +2,8 @@
 
 #include "quantum_circuit.h"
 #include "circuit_internal.h"
-#include "gaussian_circuit.h"
 #include "gaussian_kernels.h"
 #include "gaussian_state.h"
-#include "reference_gates.h"
 #include "squeezing_gate_gpu.h"
 #include "two_mode_gates.h"
 
@@ -15,59 +13,6 @@ std::vector<int> QuantumCircuit::collect_target_states(const GateParams& gate) {
     ScopedNvtxRange nvtx_range("qc::collect_target_states");
     (void)gate;
     return get_cached_target_states();
-}
-
-/**
- * 准备ELL算符
- */
-FockELLOperator* QuantumCircuit::prepare_ell_operator(const GateParams& gate) {
-    if (gate.params.empty()) {
-        throw std::runtime_error("ELL算符构建失败：门参数为空");
-    }
-
-    Reference::Matrix dense_matrix;
-    switch (gate.type) {
-        case GateType::DISPLACEMENT:
-            dense_matrix = Reference::create_displacement_matrix(cv_truncation_, gate.params[0]);
-            break;
-        case GateType::SQUEEZING:
-            dense_matrix = Reference::create_squeezing_matrix(cv_truncation_, gate.params[0]);
-            break;
-        default:
-            throw std::runtime_error("当前ELL路径仅支持位移门和挤压门");
-    }
-
-    int max_bandwidth = 0;
-    std::vector<cuDoubleComplex> dense_flat;
-    dense_flat.reserve(static_cast<size_t>(cv_truncation_) * cv_truncation_);
-    for (int row = 0; row < cv_truncation_; ++row) {
-        int row_nnz = 0;
-        for (int col = 0; col < cv_truncation_; ++col) {
-            const std::complex<double>& value = dense_matrix[row][col];
-            if (std::abs(value) > 1e-12) {
-                ++row_nnz;
-            }
-            dense_flat.push_back(make_cuDoubleComplex(value.real(), value.imag()));
-        }
-        max_bandwidth = std::max(max_bandwidth, row_nnz);
-    }
-
-    max_bandwidth = std::max(1, max_bandwidth);
-    FockELLOperator* ell_op = new FockELLOperator(cv_truncation_, max_bandwidth);
-    ell_op->build_from_dense(dense_flat);
-    return ell_op;
-}
-
-/**
- * 准备挤压门的ELL算符
- */
-FockELLOperator* QuantumCircuit::prepare_squeezing_ell_operator(std::complex<double> xi) {
-    GateParams squeezing_gate(
-        GateType::SQUEEZING,
-        {},
-        {0},
-        {xi});
-    return prepare_ell_operator(squeezing_gate);
 }
 
 /**
@@ -154,6 +99,7 @@ QuantumCircuit::TimeStats QuantumCircuit::get_time_stats() const {
  * 方案 B：交互绘景执行引擎
  */
 void QuantumCircuit::execute_with_interaction_picture() {
+    activate_execution_device();
     auto start_time = std::chrono::high_resolution_clock::now();
     qubit_only_block_count_ = 0;
     gaussian_symbolic_block_count_ = 0;

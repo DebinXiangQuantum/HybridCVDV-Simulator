@@ -69,8 +69,8 @@ These details are useful for the paper/docs because they materially affect runti
 - Replaced the previous `SQR` placeholder behavior:
   `SQR` now performs real low/high branch mixing through paired recursion and expands the `(theta_n, phi_n)` profile onto the flattened multi-mode Fock layout using the selected control qumode.
 
-- Replaced placeholder ELL builders:
-  `prepare_ell_operator(...)` and `prepare_squeezing_ell_operator(...)` now build real dense reference matrices and convert them into `FockELLOperator` form.
+- Removed the Level-2 host operator fallback:
+  the main exact path now keeps `DISPLACEMENT` and `SQUEEZING` fully GPU-native, and no longer builds dense/ELL single-mode operators on the CPU before uploading them.
 
 - Removed the dead duplicate beam-splitter source:
   `src/gpu/beamsplitter_recursive.cu` was an unused placeholder copy and was removed. The active implementation remains in `src/gpu/two_mode_gates.cu`.

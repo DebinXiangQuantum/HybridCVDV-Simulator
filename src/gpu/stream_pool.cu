@@ -37,6 +37,13 @@ bool StreamPool::initialize(int num_devices,
     instance_ = new StreamPool();
     instance_->per_device_.resize(num_devices);
 
+    int previous_device = 0;
+    cudaError_t previous_device_err = cudaGetDevice(&previous_device);
+    if (previous_device_err != cudaSuccess) {
+        previous_device = 0;
+        cudaGetLastError();
+    }
+
     for (int d = 0; d < num_devices; ++d) {
         MGPU_CHECK_CUDA(cudaSetDevice(d));
 
@@ -68,6 +75,7 @@ bool StreamPool::initialize(int num_devices,
     }
 
     initialized_ = true;
+    MGPU_CHECK_CUDA(cudaSetDevice(previous_device));
     printf("[StreamPool] Initialized: %d devices × (%d compute + %d transfer) "
            "streams\n", num_devices, compute_per_dev, transfer_per_dev);
     return true;

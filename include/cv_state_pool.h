@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <utility>
 
 /**
  * High-water-mark GPU scratch buffer.
@@ -43,6 +44,20 @@ struct GPUScratchBuffer {
     GPUScratchBuffer() = default;
     GPUScratchBuffer(const GPUScratchBuffer&) = delete;
     GPUScratchBuffer& operator=(const GPUScratchBuffer&) = delete;
+    GPUScratchBuffer(GPUScratchBuffer&& other) noexcept
+        : ptr(other.ptr), capacity_bytes(other.capacity_bytes) {
+        other.ptr = nullptr;
+        other.capacity_bytes = 0;
+    }
+    GPUScratchBuffer& operator=(GPUScratchBuffer&& other) noexcept {
+        if (this == &other) return *this;
+        release();
+        ptr = other.ptr;
+        capacity_bytes = other.capacity_bytes;
+        other.ptr = nullptr;
+        other.capacity_bytes = 0;
+        return *this;
+    }
 };
 
 /**
@@ -76,6 +91,20 @@ struct PinnedHostBuffer {
     PinnedHostBuffer() = default;
     PinnedHostBuffer(const PinnedHostBuffer&) = delete;
     PinnedHostBuffer& operator=(const PinnedHostBuffer&) = delete;
+    PinnedHostBuffer(PinnedHostBuffer&& other) noexcept
+        : ptr(other.ptr), capacity_bytes(other.capacity_bytes) {
+        other.ptr = nullptr;
+        other.capacity_bytes = 0;
+    }
+    PinnedHostBuffer& operator=(PinnedHostBuffer&& other) noexcept {
+        if (this == &other) return *this;
+        release();
+        ptr = other.ptr;
+        capacity_bytes = other.capacity_bytes;
+        other.ptr = nullptr;
+        other.capacity_bytes = 0;
+        return *this;
+    }
 };
 
 /**
@@ -133,7 +162,7 @@ struct CVStatePool {
      * 分配新的状态ID
      * @return 新分配的状态ID，失败返回-1
      */
-    int allocate_state();
+    int allocate_state(int preferred_device = -1);
 
     /**
      * 释放状态ID
@@ -255,6 +284,16 @@ struct CVStatePool {
      * @return 活跃状态ID的向量
      */
     std::vector<int> get_active_state_ids() const;
+    int get_state_device_id(int state_id) const;
+    int get_active_device_view() const { return active_device_id_; }
+    int get_device_count() const { return static_cast<int>(device_ids_.size()); }
+    size_t get_active_storage_elements_on_device(int device_id) const;
+    int recommend_device_for_storage(size_t required_elements, int preferred_device = -1);
+    void activate_device_view(int device_id);
+    void reserve_total_storage_elements_on_device(int device_id, size_t required_elements);
+    std::vector<std::pair<int, std::vector<int>>> bucket_state_ids_by_device(
+        const std::vector<int>& state_ids) const;
+    bool spans_multiple_devices(const std::vector<int>& state_ids) const;
 
     // ── Scratch buffers (reused across gate executions) ──────────────
     GPUScratchBuffer scratch_target_ids;  // for d_target_ids (int arrays)
@@ -302,20 +341,53 @@ private:
         size_t length = 0;
     };
 
+    struct DeviceStorage {
+        int device_id = -1;
+        cuDoubleComplex* data = nullptr;
+        int* free_list = nullptr;
+        int64_t* state_dims = nullptr;
+        size_t* state_offsets = nullptr;
+        GPUScratchBuffer scratch_target_ids;
+        GPUScratchBuffer scratch_temp;
+        GPUScratchBuffer scratch_aux;
+        PinnedHostBuffer host_transfer_staging;
+        size_t data_capacity_elements = 0;
+        size_t allocated_elements = 0;
+        size_t metadata_memory_size = 0;
+        std::vector<FreeBlock> free_blocks;
+    };
+
     size_t data_capacity_elements_ = 0;
     size_t allocated_elements_ = 0;
     size_t metadata_memory_size_ = 0;
     std::vector<FreeBlock> free_blocks_;
+    std::vector<int> host_state_devices_;
+    std::vector<int> device_ids_;
+    std::vector<DeviceStorage> device_views_;
+    int active_device_id_ = -1;
+    int next_round_robin_device_index_ = 0;
 
     void release_device_scratch_buffers();
     size_t active_storage_elements() const;
+    size_t active_storage_elements_on_device(int device_id) const;
     void refresh_total_memory_size();
     void sync_state_metadata_to_device(int state_id);
+    void grow_state_capacity(int min_capacity);
     void ensure_data_capacity(size_t required_elements);
     size_t acquire_storage_block(size_t required_elements);
     void release_storage_block(int state_id);
     void assign_state_storage(int state_id, size_t required_elements);
     void merge_free_blocks();
+    int choose_device_for_storage(size_t required_elements, int preferred_device = -1);
+    void initialize_device_metadata(DeviceStorage& storage, int device_id);
+    void swap_active_view(DeviceStorage& storage);
+    void ensure_state_device_assigned(int state_id, size_t required_elements);
+    void release_active_data_and_scratch();
+    void copy_state_between_devices(const cuDoubleComplex* src_ptr,
+                                    int src_device,
+                                    cuDoubleComplex* dst_ptr,
+                                    int dst_device,
+                                    size_t elements) const;
 
     // 禁用拷贝构造和赋值
     CVStatePool(const CVStatePool&) = delete;
