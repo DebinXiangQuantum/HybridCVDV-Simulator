@@ -131,6 +131,10 @@ else()
     ${QSIM_ROOT}/src/base/*.cu)
 endif()
 
+# 添加性能监控源文件
+list(APPEND QSIM_SRC ${QSIM_ROOT}/src/base/performance_monitor.cc)
+list(APPEND QSIM_SRC ${QSIM_ROOT}/src/base/performance_monitor_global.cc)
+
 
 cuda_add_library(quansim SHARED ${QSIM_GPU_SRC} ${QSIM_SRC})
 set_property(TARGET quansim PROPERTY CUDA_ARCHITECTURES "70;75;80;90")

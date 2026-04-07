@@ -237,12 +237,29 @@ bool qcircuit::Circuit<DT>::compile(quartz::CircuitSeq *seq,
   //     /*shared_memory_init_cost=*/10,
   //     /*shared_memory_gate_cost=*/[](quartz::GateType type) { if (type == quartz::GateType::swap) return 1000.0; else return 0.8; },
   //     /*shared_memory_total_qubits=*/10, /*shared_memory_cacheline_qubits=*/3);
-  // auto schedules = get_schedules(*seq, local_qubits, kernel_cost, ctx, /*absorb_single_qubit_gates=*/true, -1, 
-  //                               cache_file_name_prefix);
-  auto schedules = get_schedules_with_ilp(*seq, n_local, std::min(2, int(num_qubits - n_local)),
-                                   kernel_cost, ctx, interpreter,
-                                   /*attach_single_qubit_gates=*/true,
-                                   /*max_num_dp_states=*/500, cache_file_name_prefix);
+  std::vector<quartz::Schedule> schedules;
+  if (use_ilp) {
+    // 使用 ILP 方法
+    schedules = get_schedules_with_ilp(*seq, n_local, std::min(2, int(num_qubits - n_local)),
+                                       kernel_cost, ctx, interpreter,
+                                       /*attach_single_qubit_gates=*/true,
+                                       /*max_num_dp_states=*/500, cache_file_name_prefix);
+  } else {
+    // 使用非 ILP 方法，创建默认的量子比特布局
+    std::vector<std::vector<int>> qubit_layout;
+    // 创建多个布局，每个布局都包含前 n_local 个量子比特作为本地量子比特
+    // 这样可以确保所有门都能被处理
+    for (int i = 0; i < 5; i++) { // 创建5个布局，应该足够处理所有门
+      std::vector<int> layout;
+      for (int j = 0; j < num_qubits; j++) {
+        layout.push_back(j);
+      }
+      qubit_layout.push_back(layout);
+    }
+    // 使用 get_schedules 方法，设置 max_num_dp_states 为 -10，这样 num_qubits_to_pack 就会被设置为 10，足以容纳大多数门
+    schedules = get_schedules(*seq, n_local, qubit_layout, kernel_cost, ctx,
+                             /*attach_single_qubit_gates=*/true, -100, cache_file_name_prefix);
+  }
   int idx = 0;
   num_fuse = 0;
   num_shm = 0;
@@ -715,15 +732,18 @@ bool qcircuit::Circuit<DT>::getMat_per_device(quartz::Context *ctx, int part_id,
           mask |= 1 << v;
         }
       }
-      std::vector<int> sorted_position_;
+      // 复制 position 到 sorted_position_ 并排序
+      std::vector<int> sorted_position_ = position;
       std::sort(sorted_position_.begin(), sorted_position_.end());
       assert(qubit_indices.size()==3);
       perm.resize(qubit_indices.size());
-      for (int t = 0; t < qubit_indices.size(); t++) {
+      for (int t = 0; t < sorted_position_.size(); t++) {
         int it2 = std::find(position.begin(), position.end(),
                             sorted_position_[t]) -
                   position.begin();
-        perm[it2] = t;
+        if (it2 < position.size()) {
+          perm[it2] = t;
+        }
       }
       return true;
     } else if (local_mask[c1] && !local_mask[c2]) {

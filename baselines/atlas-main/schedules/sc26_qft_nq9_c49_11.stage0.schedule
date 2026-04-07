@@ -1,0 +1,38 @@
+11
+[11, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+3
+6.2
+1
+// fusion
+// [2, 9, 10]
+OPENQASM 2.0;
+include "qelib1.inc";
+qreg q[11];
+h q[9];
+rz(pi*1/4) q[9];
+h q[9];
+p(pi*1/8) q[9];
+p(pi*1/20) q[9];
+h q[9];
+rz(pi*1/2) q[9];
+h q[9];
+p(pi*-1/2) q[9];
+h q[9];
+rz(pi*1/4) q[9];
+h q[9];
+p(pi*1/8) q[9];
+h q[10];
+rz(pi*1/4) q[10];
+h q[10];
+p(pi*1/8) q[10];
+p(pi*1/20) q[10];
+h q[10];
+rz(pi*1/2) q[10];
+h q[10];
+p(pi*-1/2) q[10];
+@
+OPENQASM 2.0;
+include "qelib1.inc";
+qreg q[11];
+h q[9];
+h q[10];
