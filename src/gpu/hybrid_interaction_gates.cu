@@ -232,87 +232,115 @@ void apply_jaynes_cummings_on_mode(CVStatePool* state_pool,
         return (offset + mask) & ~mask;
     };
 
-    size_t upload_bytes = 0;
-    upload_bytes = align_offset(upload_bytes, alignof(cuDoubleComplex*));
-    const size_t v0_offset = upload_bytes;
-    upload_bytes += n * sizeof(cuDoubleComplex*);
-    upload_bytes = align_offset(upload_bytes, alignof(cuDoubleComplex*));
-    const size_t v1_offset = upload_bytes;
-    upload_bytes += n * sizeof(cuDoubleComplex*);
-    upload_bytes = align_offset(upload_bytes, alignof(int64_t));
-    const size_t dims_offset = upload_bytes;
-    upload_bytes += n * sizeof(int64_t);
-
-    char* aux = static_cast<char*>(state_pool->scratch_aux.ensure(upload_bytes));
-    char* staged = static_cast<char*>(state_pool->host_transfer_staging.ensure(upload_bytes));
-    auto* d_v0 = reinterpret_cast<cuDoubleComplex**>(aux + v0_offset);
-    auto* d_v1 = reinterpret_cast<cuDoubleComplex**>(aux + v1_offset);
-    auto* d_dims = reinterpret_cast<int64_t*>(aux + dims_offset);
-    auto* h_v0 = reinterpret_cast<cuDoubleComplex**>(staged + v0_offset);
-    auto* h_v1 = reinterpret_cast<cuDoubleComplex**>(staged + v1_offset);
-    auto* h_dims = reinterpret_cast<int64_t*>(staged + dims_offset);
-
+    std::vector<std::pair<int, std::vector<size_t>>> grouped_pairs;
     for (size_t pair_idx = 0; pair_idx < n; ++pair_idx) {
         const int id0 = qubit0_states[pair_idx];
         const int id1 = qubit1_states[pair_idx];
-        const int64_t current_dim = state_pool->get_state_dim(id0);
-        cuDoubleComplex* v0 = state_pool->get_state_ptr(id0);
-        cuDoubleComplex* v1 = state_pool->get_state_ptr(id1);
-        if (!v0 || !v1 || current_dim <= 0) {
-            throw std::runtime_error("JaynesCummings encountered invalid paired state pointers");
+        const int dev0 = state_pool->get_state_device_id(id0);
+        const int dev1 = state_pool->get_state_device_id(id1);
+        if (dev0 < 0 || dev1 < 0 || dev0 != dev1) {
+            throw std::runtime_error(
+                "JaynesCummings requires each low/high pair to be co-located on one GPU");
         }
-
-        h_v0[pair_idx] = v0;
-        h_v1[pair_idx] = v1;
-        h_dims[pair_idx] = current_dim;
-
-        const size_t group_count =
-            static_cast<size_t>(current_dim) /
-            (static_cast<size_t>(target_mode_dim) * right_stride);
-        const size_t total_pairs = group_count * pair_group_span;
-
-        if (hybrid_debug_logging_enabled()) {
-            std::cout << "[hybrid-debug] JaynesCummings launching pair[" << pair_idx << "]"
-                      << " ids=(" << id0 << "," << id1 << ")"
-                      << " ptrs=(" << static_cast<const void*>(v0)
-                      << "," << static_cast<const void*>(v1) << ")"
-                      << " total_pairs=" << total_pairs
-                      << std::endl;
+        auto it = std::find_if(grouped_pairs.begin(), grouped_pairs.end(),
+                               [&](const auto& entry) { return entry.first == dev0; });
+        if (it == grouped_pairs.end()) {
+            grouped_pairs.push_back({dev0, {pair_idx}});
+        } else {
+            it->second.push_back(pair_idx);
         }
     }
 
-    if (hybrid_debug_logging_enabled()) {
-        for (size_t pair_idx = 0; pair_idx < n; ++pair_idx) {
-            const int64_t current_dim = h_dims[pair_idx];
+    for (const auto& [device_id, pair_indices] : grouped_pairs) {
+        CHECK_CUDA(cudaSetDevice(device_id));
+        state_pool->activate_device_view(device_id);
+
+        const size_t local_n = pair_indices.size();
+        size_t upload_bytes = 0;
+        upload_bytes = align_offset(upload_bytes, alignof(cuDoubleComplex*));
+        const size_t v0_offset = upload_bytes;
+        upload_bytes += local_n * sizeof(cuDoubleComplex*);
+        upload_bytes = align_offset(upload_bytes, alignof(cuDoubleComplex*));
+        const size_t v1_offset = upload_bytes;
+        upload_bytes += local_n * sizeof(cuDoubleComplex*);
+        upload_bytes = align_offset(upload_bytes, alignof(int64_t));
+        const size_t dims_offset = upload_bytes;
+        upload_bytes += local_n * sizeof(int64_t);
+
+        char* aux = static_cast<char*>(state_pool->scratch_aux.ensure(upload_bytes));
+        char* staged = static_cast<char*>(state_pool->host_transfer_staging.ensure(upload_bytes));
+        auto* d_v0 = reinterpret_cast<cuDoubleComplex**>(aux + v0_offset);
+        auto* d_v1 = reinterpret_cast<cuDoubleComplex**>(aux + v1_offset);
+        auto* d_dims = reinterpret_cast<int64_t*>(aux + dims_offset);
+        auto* h_v0 = reinterpret_cast<cuDoubleComplex**>(staged + v0_offset);
+        auto* h_v1 = reinterpret_cast<cuDoubleComplex**>(staged + v1_offset);
+        auto* h_dims = reinterpret_cast<int64_t*>(staged + dims_offset);
+
+        for (size_t local_idx = 0; local_idx < local_n; ++local_idx) {
+            const size_t pair_idx = pair_indices[local_idx];
+            const int id0 = qubit0_states[pair_idx];
+            const int id1 = qubit1_states[pair_idx];
+            const int64_t current_dim = state_pool->get_state_dim(id0);
+            cuDoubleComplex* v0 = state_pool->get_state_ptr(id0);
+            cuDoubleComplex* v1 = state_pool->get_state_ptr(id1);
+            if (!v0 || !v1 || current_dim <= 0) {
+                throw std::runtime_error("JaynesCummings encountered invalid paired state pointers");
+            }
+
+            h_v0[local_idx] = v0;
+            h_v1[local_idx] = v1;
+            h_dims[local_idx] = current_dim;
+
             const size_t group_count =
                 static_cast<size_t>(current_dim) /
                 (static_cast<size_t>(target_mode_dim) * right_stride);
             const size_t total_pairs = group_count * pair_group_span;
-            dim3 gd((total_pairs + bd.x - 1) / bd.x);
-            apply_jc_single_pair_kernel<<<gd, bd>>>(
-                h_v0[pair_idx],
-                h_v1[pair_idx],
-                current_dim,
-                theta,
-                phi,
-                target_mode_dim,
-                target_mode_right_stride);
-            CHECK_CUDA(cudaGetLastError());
-            CHECK_CUDA(cudaDeviceSynchronize());
-            std::cout << "[hybrid-debug] JaynesCummings pair[" << pair_idx << "] complete"
-                      << std::endl;
-        }
-        return;
-    }
 
-    CHECK_CUDA(cudaMemcpy(aux, staged, upload_bytes, cudaMemcpyHostToDevice));
-    const size_t max_pairs =
-        static_cast<size_t>(state_pool->max_total_dim / state_pool->d_trunc) *
-        static_cast<size_t>(state_pool->d_trunc - 1);
-    dim3 gd((max_pairs + bd.x - 1) / bd.x, n);
-    apply_jc_pointer_batch_kernel<<<gd, bd>>>(
-        d_v0, d_v1, d_dims, static_cast<int>(n), theta, phi, target_mode_dim, target_mode_right_stride);
-    CHECK_CUDA(cudaGetLastError());
+            if (hybrid_debug_logging_enabled()) {
+                std::cout << "[hybrid-debug] JaynesCummings launching pair[" << pair_idx << "]"
+                          << " device=" << device_id
+                          << " ids=(" << id0 << "," << id1 << ")"
+                          << " ptrs=(" << static_cast<const void*>(v0)
+                          << "," << static_cast<const void*>(v1) << ")"
+                          << " total_pairs=" << total_pairs
+                          << std::endl;
+            }
+        }
+
+        if (hybrid_debug_logging_enabled()) {
+            for (size_t local_idx = 0; local_idx < local_n; ++local_idx) {
+                const size_t pair_idx = pair_indices[local_idx];
+                const int64_t current_dim = h_dims[local_idx];
+                const size_t group_count =
+                    static_cast<size_t>(current_dim) /
+                    (static_cast<size_t>(target_mode_dim) * right_stride);
+                const size_t total_pairs = group_count * pair_group_span;
+                dim3 gd((total_pairs + bd.x - 1) / bd.x);
+                apply_jc_single_pair_kernel<<<gd, bd>>>(
+                    h_v0[local_idx],
+                    h_v1[local_idx],
+                    current_dim,
+                    theta,
+                    phi,
+                    target_mode_dim,
+                    target_mode_right_stride);
+                CHECK_CUDA(cudaGetLastError());
+                CHECK_CUDA(cudaDeviceSynchronize());
+                std::cout << "[hybrid-debug] JaynesCummings pair[" << pair_idx << "] complete"
+                          << std::endl;
+            }
+            continue;
+        }
+
+        CHECK_CUDA(cudaMemcpy(aux, staged, upload_bytes, cudaMemcpyHostToDevice));
+        const size_t max_pairs =
+            static_cast<size_t>(state_pool->max_total_dim / state_pool->d_trunc) *
+            static_cast<size_t>(state_pool->d_trunc - 1);
+        dim3 gd((max_pairs + bd.x - 1) / bd.x, local_n);
+        apply_jc_pointer_batch_kernel<<<gd, bd>>>(
+            d_v0, d_v1, d_dims, static_cast<int>(local_n), theta, phi, target_mode_dim, target_mode_right_stride);
+        CHECK_CUDA(cudaGetLastError());
+    }
 }
 
 void apply_jaynes_cummings(CVStatePool* state_pool,
@@ -514,86 +542,114 @@ void apply_anti_jaynes_cummings_on_mode(CVStatePool* state_pool,
         return (offset + mask) & ~mask;
     };
 
-    size_t upload_bytes = 0;
-    upload_bytes = align_offset(upload_bytes, alignof(cuDoubleComplex*));
-    const size_t v0_offset = upload_bytes;
-    upload_bytes += n * sizeof(cuDoubleComplex*);
-    upload_bytes = align_offset(upload_bytes, alignof(cuDoubleComplex*));
-    const size_t v1_offset = upload_bytes;
-    upload_bytes += n * sizeof(cuDoubleComplex*);
-    upload_bytes = align_offset(upload_bytes, alignof(int64_t));
-    const size_t dims_offset = upload_bytes;
-    upload_bytes += n * sizeof(int64_t);
-
-    char* aux = static_cast<char*>(state_pool->scratch_aux.ensure(upload_bytes));
-    char* staged = static_cast<char*>(state_pool->host_transfer_staging.ensure(upload_bytes));
-    auto* d_v0 = reinterpret_cast<cuDoubleComplex**>(aux + v0_offset);
-    auto* d_v1 = reinterpret_cast<cuDoubleComplex**>(aux + v1_offset);
-    auto* d_dims = reinterpret_cast<int64_t*>(aux + dims_offset);
-    auto* h_v0 = reinterpret_cast<cuDoubleComplex**>(staged + v0_offset);
-    auto* h_v1 = reinterpret_cast<cuDoubleComplex**>(staged + v1_offset);
-    auto* h_dims = reinterpret_cast<int64_t*>(staged + dims_offset);
-
+    std::vector<std::pair<int, std::vector<size_t>>> grouped_pairs;
     for (size_t pair_idx = 0; pair_idx < n; ++pair_idx) {
         const int id0 = qubit0_states[pair_idx];
         const int id1 = qubit1_states[pair_idx];
-        const int64_t current_dim = state_pool->get_state_dim(id0);
-        cuDoubleComplex* v0 = state_pool->get_state_ptr(id0);
-        cuDoubleComplex* v1 = state_pool->get_state_ptr(id1);
-        if (!v0 || !v1 || current_dim <= 0) {
-            throw std::runtime_error("AntiJaynesCummings encountered invalid paired state pointers");
+        const int dev0 = state_pool->get_state_device_id(id0);
+        const int dev1 = state_pool->get_state_device_id(id1);
+        if (dev0 < 0 || dev1 < 0 || dev0 != dev1) {
+            throw std::runtime_error(
+                "AntiJaynesCummings requires each low/high pair to be co-located on one GPU");
         }
-
-        h_v0[pair_idx] = v0;
-        h_v1[pair_idx] = v1;
-        h_dims[pair_idx] = current_dim;
-
-        const size_t group_count =
-            static_cast<size_t>(current_dim) /
-            (static_cast<size_t>(target_mode_dim) * right_stride);
-        const size_t total_pairs = group_count * pair_group_span;
-        if (hybrid_debug_logging_enabled()) {
-            std::cout << "[hybrid-debug] AntiJaynesCummings launching pair[" << pair_idx << "]"
-                      << " ids=(" << id0 << "," << id1 << ")"
-                      << " ptrs=(" << static_cast<const void*>(v0)
-                      << "," << static_cast<const void*>(v1) << ")"
-                      << " total_pairs=" << total_pairs
-                      << std::endl;
+        auto it = std::find_if(grouped_pairs.begin(), grouped_pairs.end(),
+                               [&](const auto& entry) { return entry.first == dev0; });
+        if (it == grouped_pairs.end()) {
+            grouped_pairs.push_back({dev0, {pair_idx}});
+        } else {
+            it->second.push_back(pair_idx);
         }
     }
 
-    if (hybrid_debug_logging_enabled()) {
-        for (size_t pair_idx = 0; pair_idx < n; ++pair_idx) {
-            const int64_t current_dim = h_dims[pair_idx];
+    for (const auto& [device_id, pair_indices] : grouped_pairs) {
+        CHECK_CUDA(cudaSetDevice(device_id));
+        state_pool->activate_device_view(device_id);
+
+        const size_t local_n = pair_indices.size();
+        size_t upload_bytes = 0;
+        upload_bytes = align_offset(upload_bytes, alignof(cuDoubleComplex*));
+        const size_t v0_offset = upload_bytes;
+        upload_bytes += local_n * sizeof(cuDoubleComplex*);
+        upload_bytes = align_offset(upload_bytes, alignof(cuDoubleComplex*));
+        const size_t v1_offset = upload_bytes;
+        upload_bytes += local_n * sizeof(cuDoubleComplex*);
+        upload_bytes = align_offset(upload_bytes, alignof(int64_t));
+        const size_t dims_offset = upload_bytes;
+        upload_bytes += local_n * sizeof(int64_t);
+
+        char* aux = static_cast<char*>(state_pool->scratch_aux.ensure(upload_bytes));
+        char* staged = static_cast<char*>(state_pool->host_transfer_staging.ensure(upload_bytes));
+        auto* d_v0 = reinterpret_cast<cuDoubleComplex**>(aux + v0_offset);
+        auto* d_v1 = reinterpret_cast<cuDoubleComplex**>(aux + v1_offset);
+        auto* d_dims = reinterpret_cast<int64_t*>(aux + dims_offset);
+        auto* h_v0 = reinterpret_cast<cuDoubleComplex**>(staged + v0_offset);
+        auto* h_v1 = reinterpret_cast<cuDoubleComplex**>(staged + v1_offset);
+        auto* h_dims = reinterpret_cast<int64_t*>(staged + dims_offset);
+
+        for (size_t local_idx = 0; local_idx < local_n; ++local_idx) {
+            const size_t pair_idx = pair_indices[local_idx];
+            const int id0 = qubit0_states[pair_idx];
+            const int id1 = qubit1_states[pair_idx];
+            const int64_t current_dim = state_pool->get_state_dim(id0);
+            cuDoubleComplex* v0 = state_pool->get_state_ptr(id0);
+            cuDoubleComplex* v1 = state_pool->get_state_ptr(id1);
+            if (!v0 || !v1 || current_dim <= 0) {
+                throw std::runtime_error("AntiJaynesCummings encountered invalid paired state pointers");
+            }
+
+            h_v0[local_idx] = v0;
+            h_v1[local_idx] = v1;
+            h_dims[local_idx] = current_dim;
+
             const size_t group_count =
                 static_cast<size_t>(current_dim) /
                 (static_cast<size_t>(target_mode_dim) * right_stride);
             const size_t total_pairs = group_count * pair_group_span;
-            dim3 gd((total_pairs + bd.x - 1) / bd.x);
-            apply_ajc_single_pair_kernel<<<gd, bd>>>(
-                h_v0[pair_idx],
-                h_v1[pair_idx],
-                current_dim,
-                theta,
-                phi,
-                target_mode_dim,
-                target_mode_right_stride);
-            CHECK_CUDA(cudaGetLastError());
-            CHECK_CUDA(cudaDeviceSynchronize());
-            std::cout << "[hybrid-debug] AntiJaynesCummings pair[" << pair_idx << "] complete"
-                      << std::endl;
+            if (hybrid_debug_logging_enabled()) {
+                std::cout << "[hybrid-debug] AntiJaynesCummings launching pair[" << pair_idx << "]"
+                          << " device=" << device_id
+                          << " ids=(" << id0 << "," << id1 << ")"
+                          << " ptrs=(" << static_cast<const void*>(v0)
+                          << "," << static_cast<const void*>(v1) << ")"
+                          << " total_pairs=" << total_pairs
+                          << std::endl;
+            }
         }
-        return;
-    }
 
-    CHECK_CUDA(cudaMemcpy(aux, staged, upload_bytes, cudaMemcpyHostToDevice));
-    const size_t max_pairs =
-        static_cast<size_t>(state_pool->max_total_dim / state_pool->d_trunc) *
-        static_cast<size_t>(state_pool->d_trunc - 1);
-    dim3 gd((max_pairs + bd.x - 1) / bd.x, n);
-    apply_ajc_pointer_batch_kernel<<<gd, bd>>>(
-        d_v0, d_v1, d_dims, static_cast<int>(n), theta, phi, target_mode_dim, target_mode_right_stride);
-    CHECK_CUDA(cudaGetLastError());
+        if (hybrid_debug_logging_enabled()) {
+            for (size_t local_idx = 0; local_idx < local_n; ++local_idx) {
+                const size_t pair_idx = pair_indices[local_idx];
+                const int64_t current_dim = h_dims[local_idx];
+                const size_t group_count =
+                    static_cast<size_t>(current_dim) /
+                    (static_cast<size_t>(target_mode_dim) * right_stride);
+                const size_t total_pairs = group_count * pair_group_span;
+                dim3 gd((total_pairs + bd.x - 1) / bd.x);
+                apply_ajc_single_pair_kernel<<<gd, bd>>>(
+                    h_v0[local_idx],
+                    h_v1[local_idx],
+                    current_dim,
+                    theta,
+                    phi,
+                    target_mode_dim,
+                    target_mode_right_stride);
+                CHECK_CUDA(cudaGetLastError());
+                CHECK_CUDA(cudaDeviceSynchronize());
+                std::cout << "[hybrid-debug] AntiJaynesCummings pair[" << pair_idx << "] complete"
+                          << std::endl;
+            }
+            continue;
+        }
+
+        CHECK_CUDA(cudaMemcpy(aux, staged, upload_bytes, cudaMemcpyHostToDevice));
+        const size_t max_pairs =
+            static_cast<size_t>(state_pool->max_total_dim / state_pool->d_trunc) *
+            static_cast<size_t>(state_pool->d_trunc - 1);
+        dim3 gd((max_pairs + bd.x - 1) / bd.x, local_n);
+        apply_ajc_pointer_batch_kernel<<<gd, bd>>>(
+            d_v0, d_v1, d_dims, static_cast<int>(local_n), theta, phi, target_mode_dim, target_mode_right_stride);
+        CHECK_CUDA(cudaGetLastError());
+    }
 }
 
 void apply_anti_jaynes_cummings(CVStatePool* state_pool,

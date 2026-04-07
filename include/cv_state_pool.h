@@ -291,6 +291,7 @@ struct CVStatePool {
     int recommend_device_for_storage(size_t required_elements, int preferred_device = -1);
     void activate_device_view(int device_id);
     void reserve_total_storage_elements_on_device(int device_id, size_t required_elements);
+    void synchronize_all_devices();
     std::vector<std::pair<int, std::vector<int>>> bucket_state_ids_by_device(
         const std::vector<int>& state_ids) const;
     bool spans_multiple_devices(const std::vector<int>& state_ids) const;

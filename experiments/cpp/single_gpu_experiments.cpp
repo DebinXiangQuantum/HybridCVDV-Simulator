@@ -2089,7 +2089,6 @@ std::vector<ExperimentResult> run_scaling_suite(const std::string& name_filter) 
 
     for (int nq : {3, 5, 7, 9}) {
         for (int cutoff : {4, 8, 16, 32}) {
-            if (cutoff == 32 && nq > 5) continue;
             const std::string name = "sc26_qft_nq" + std::to_string(nq) + "_c" + std::to_string(cutoff);
             append_filtered_scaling_case(results, name_filter, name, [nq, cutoff, name, qaoa_max_states]() {
                 int n = nq / 2 + 1;

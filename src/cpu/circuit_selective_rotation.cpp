@@ -70,12 +70,22 @@ void QuantumCircuit::execute_selective_qubit_rotation(const GateParams& gate) {
 
                 std::pair<HDDNode*, HDDNode*> result;
                 if (low_node->is_terminal() && high_node->is_terminal()) {
+                    int pair_device = execution_device_id_;
+                    const int low_owner = state_pool_.get_state_device_id(low_node->tensor_id);
+                    const int high_owner = state_pool_.get_state_device_id(high_node->tensor_id);
+                    if (low_owner >= 0 && high_owner >= 0 && low_owner == high_owner) {
+                        pair_device = low_owner;
+                    } else if (low_owner >= 0 && high_owner < 0) {
+                        pair_device = low_owner;
+                    } else if (high_owner >= 0 && low_owner < 0) {
+                        pair_device = high_owner;
+                    }
                     HDDNode* low_copy = nullptr;
                     HDDNode* high_copy = nullptr;
                     try {
-                        low_copy = duplicate_scaled_terminal_node(low_node, low_weight);
+                        low_copy = duplicate_scaled_terminal_node(low_node, low_weight, pair_device);
                         low_ids.push_back(low_copy->tensor_id);
-                        high_copy = duplicate_scaled_terminal_node(high_node, high_weight);
+                        high_copy = duplicate_scaled_terminal_node(high_node, high_weight, pair_device);
                         high_ids.push_back(high_copy->tensor_id);
                         if (low_node->tensor_id >= 0 && low_node->tensor_id != shared_zero_state_id_) {
                             replaced_state_ids.insert(low_node->tensor_id);
@@ -238,14 +248,24 @@ std::pair<HDDNode*, HDDNode*> QuantumCircuit::apply_selective_qubit_rotation_pai
     }
 
     if (low_node->is_terminal() && high_node->is_terminal()) {
+        int pair_device = execution_device_id_;
+        const int low_owner = state_pool_.get_state_device_id(low_node->tensor_id);
+        const int high_owner = state_pool_.get_state_device_id(high_node->tensor_id);
+        if (low_owner >= 0 && high_owner >= 0 && low_owner == high_owner) {
+            pair_device = low_owner;
+        } else if (low_owner >= 0 && high_owner < 0) {
+            pair_device = low_owner;
+        } else if (high_owner >= 0 && low_owner < 0) {
+            pair_device = high_owner;
+        }
         std::vector<int> low_ids;
         std::vector<int> high_ids;
         HDDNode* low_copy = nullptr;
         HDDNode* high_copy = nullptr;
         try {
-            low_copy = duplicate_scaled_terminal_node(low_node, low_weight);
+            low_copy = duplicate_scaled_terminal_node(low_node, low_weight, pair_device);
             low_ids.push_back(low_copy->tensor_id);
-            high_copy = duplicate_scaled_terminal_node(high_node, high_weight);
+            high_copy = duplicate_scaled_terminal_node(high_node, high_weight, pair_device);
             high_ids.push_back(high_copy->tensor_id);
 
             const std::vector<double> expanded_thetas =

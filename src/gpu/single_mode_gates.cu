@@ -4,6 +4,23 @@
 #include "cv_state_pool.h"
 #include "fock_ell_operator.h"
 
+namespace {
+
+int max_batch_launch_y() {
+    int device = 0;
+    if (cudaGetDevice(&device) != cudaSuccess) {
+        return 65535;
+    }
+
+    int max_grid_y = 65535;
+    if (cudaDeviceGetAttribute(&max_grid_y, cudaDevAttrMaxGridDimY, device) != cudaSuccess || max_grid_y <= 0) {
+        return 65535;
+    }
+    return max_grid_y;
+}
+
+}  // namespace
+
 /**
  * 位移门内核 D(α) = exp(α a† - α* a)
  * 使用ELL格式SpMV实现
@@ -378,33 +395,40 @@ void apply_single_mode_gate(CVStatePool* state_pool, FockELLOperator* ell_op,
     }
 
     dim3 block_dim(256);
-    dim3 grid_dim((ell_op->dim + block_dim.x - 1) / block_dim.x, batch_size);
+    const unsigned int grid_x = static_cast<unsigned int>((ell_op->dim + block_dim.x - 1) / block_dim.x);
+    const int max_launch_batch = max_batch_launch_y();
 
     // 选择合适的内核版本
     size_t shared_mem_size = ell_op->dim * ell_op->max_bandwidth *
                            (sizeof(cuDoubleComplex) + sizeof(int));
 
-    // 清除之前的CUDA错误
-    cudaGetLastError();
+    cudaError_t err = cudaSuccess;
+    for (int batch_offset = 0; batch_offset < batch_size; batch_offset += max_launch_batch) {
+        const int launch_batch = std::min(max_launch_batch, batch_size - batch_offset);
+        const int* launch_targets = target_indices + batch_offset;
+        dim3 grid_dim(grid_x, static_cast<unsigned int>(launch_batch));
 
-    if (shared_mem_size < 48 * 1024) {  // 48KB shared memory limit
-        apply_ell_spmv_shared_kernel<<<grid_dim, block_dim, shared_mem_size, stream>>>(
-            state_pool->data, state_pool->state_offsets, state_pool->state_dims,
-            ell_op->ell_val, ell_op->ell_col, ell_op->dim, ell_op->max_bandwidth,
-            target_indices, batch_size
-        );
-    } else {
-        apply_ell_spmv_kernel<<<grid_dim, block_dim, 0, stream>>>(
-            state_pool->data, state_pool->state_offsets, state_pool->state_dims,
-            ell_op->ell_val, ell_op->ell_col, ell_op->dim, ell_op->max_bandwidth,
-            target_indices, batch_size
-        );
-    }
+        cudaGetLastError();
 
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Single-mode gate kernel launch failed: " +
-                                std::string(cudaGetErrorString(err)));
+        if (shared_mem_size < 48 * 1024) {  // 48KB shared memory limit
+            apply_ell_spmv_shared_kernel<<<grid_dim, block_dim, shared_mem_size, stream>>>(
+                state_pool->data, state_pool->state_offsets, state_pool->state_dims,
+                ell_op->ell_val, ell_op->ell_col, ell_op->dim, ell_op->max_bandwidth,
+                launch_targets, launch_batch
+            );
+        } else {
+            apply_ell_spmv_kernel<<<grid_dim, block_dim, 0, stream>>>(
+                state_pool->data, state_pool->state_offsets, state_pool->state_dims,
+                ell_op->ell_val, ell_op->ell_col, ell_op->dim, ell_op->max_bandwidth,
+                launch_targets, launch_batch
+            );
+        }
+
+        err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            throw std::runtime_error("Single-mode gate kernel launch failed: " +
+                                     std::string(cudaGetErrorString(err)));
+        }
     }
 
     if (synchronize) {
@@ -434,37 +458,49 @@ void apply_displacement_gate(CVStatePool* state_pool, const int* target_indices,
                                         sizeof(cuDoubleComplex)));
 
     dim3 block_dim(256);
-    dim3 grid_dim((state_pool->max_total_dim + block_dim.x - 1) / block_dim.x, batch_size);
+    const unsigned int grid_x = static_cast<unsigned int>((state_pool->max_total_dim + block_dim.x - 1) / block_dim.x);
+    const int max_launch_batch = max_batch_launch_y();
+    cudaError_t err = cudaSuccess;
 
-    apply_displacement_batched_kernel<<<grid_dim, block_dim, 0, stream>>>(
-        state_pool->data,
-        state_pool->state_offsets,
-        state_pool->state_dims,
-        target_indices,
-        batch_size,
-        alpha,
-        temp_buffer,
-        buffer_stride);
+    for (int batch_offset = 0; batch_offset < batch_size; batch_offset += max_launch_batch) {
+        const int launch_batch = std::min(max_launch_batch, batch_size - batch_offset);
+        const int* launch_targets = target_indices + batch_offset;
+        cuDoubleComplex* launch_temp_buffer =
+            temp_buffer + static_cast<size_t>(batch_offset) * buffer_stride;
+        dim3 grid_dim(grid_x, static_cast<unsigned int>(launch_batch));
 
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Displacement gate kernel launch failed: " +
-                                 std::string(cudaGetErrorString(err)));
-    }
+        cudaGetLastError();
 
-    copy_back_displacement_batched_kernel<<<grid_dim, block_dim, 0, stream>>>(
-        state_pool->data,
-        state_pool->state_offsets,
-        state_pool->state_dims,
-        target_indices,
-        batch_size,
-        temp_buffer,
-        buffer_stride);
+        apply_displacement_batched_kernel<<<grid_dim, block_dim, 0, stream>>>(
+            state_pool->data,
+            state_pool->state_offsets,
+            state_pool->state_dims,
+            launch_targets,
+            launch_batch,
+            alpha,
+            launch_temp_buffer,
+            buffer_stride);
 
-    err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Displacement gate write-back failed: " +
-                                 std::string(cudaGetErrorString(err)));
+        err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            throw std::runtime_error("Displacement gate kernel launch failed: " +
+                                     std::string(cudaGetErrorString(err)));
+        }
+
+        copy_back_displacement_batched_kernel<<<grid_dim, block_dim, 0, stream>>>(
+            state_pool->data,
+            state_pool->state_offsets,
+            state_pool->state_dims,
+            launch_targets,
+            launch_batch,
+            launch_temp_buffer,
+            buffer_stride);
+
+        err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            throw std::runtime_error("Displacement gate write-back failed: " +
+                                     std::string(cudaGetErrorString(err)));
+        }
     }
 
     if (synchronize) {

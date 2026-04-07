@@ -22,7 +22,14 @@ HDDNode* QuantumCircuit::scale_hdd_node(HDDNode* node, std::complex<double> weig
         if (shared_zero_state_id_ >= 0) {
             return node_manager_.create_terminal_node(shared_zero_state_id_);
         }
-        const int zero_id = state_pool_.allocate_state();
+        int preferred_device = execution_device_id_;
+        if (node->is_terminal()) {
+            const int owner = state_pool_.get_state_device_id(node->tensor_id);
+            if (owner >= 0) {
+                preferred_device = owner;
+            }
+        }
+        const int zero_id = state_pool_.allocate_state(preferred_device);
         if (zero_id < 0) {
             throw std::runtime_error("HDD缩放失败：无法分配零状态");
         }
@@ -79,7 +86,12 @@ HDDNode* QuantumCircuit::scale_hdd_node(HDDNode* node, std::complex<double> weig
             return node_manager_.create_terminal_node(scaled_terminal_id);
         }
 
-        const int scaled_state_id = state_pool_.allocate_state();
+        int preferred_device = execution_device_id_;
+        const int owner = state_pool_.get_state_device_id(node->tensor_id);
+        if (owner >= 0) {
+            preferred_device = owner;
+        }
+        const int scaled_state_id = state_pool_.allocate_state(preferred_device);
         if (scaled_state_id < 0) {
             throw std::runtime_error("HDD缩放失败：无法分配目标终端状态");
         }
@@ -105,12 +117,18 @@ HDDNode* QuantumCircuit::scale_hdd_node(HDDNode* node, std::complex<double> weig
  * 复制并缩放终端节点状态
  */
 HDDNode* QuantumCircuit::duplicate_scaled_terminal_node(HDDNode* terminal_node,
-                                                        std::complex<double> weight) {
+                                                        std::complex<double> weight,
+                                                        int preferred_device) {
     if (!terminal_node || !terminal_node->is_terminal()) {
         throw std::runtime_error("终端节点复制失败：输入节点不是终端节点");
     }
 
-    const int scaled_state_id = state_pool_.allocate_state();
+    int target_device = preferred_device >= 0 ? preferred_device : execution_device_id_;
+    const int owner = state_pool_.get_state_device_id(terminal_node->tensor_id);
+    if (preferred_device < 0 && owner >= 0) {
+        target_device = owner;
+    }
+    const int scaled_state_id = state_pool_.allocate_state(target_device);
     if (scaled_state_id < 0) {
         throw std::runtime_error("终端节点复制失败：无法分配状态");
     }
@@ -339,7 +357,17 @@ HDDNode* QuantumCircuit::hdd_add(HDDNode* n1, std::complex<double> w1, HDDNode* 
                         return result;
                     }
 
-                    const int new_id = state_pool_.allocate_state();
+                    int preferred_device = execution_device_id_;
+                    const int device1 = state_pool_.get_state_device_id(id1);
+                    const int device2 = state_pool_.get_state_device_id(id2);
+                    if (device1 >= 0 && device2 >= 0) {
+                        preferred_device = (device1 == device2) ? device1 : execution_device_id_;
+                    } else if (device1 >= 0) {
+                        preferred_device = device1;
+                    } else if (device2 >= 0) {
+                        preferred_device = device2;
+                    }
+                    const int new_id = state_pool_.allocate_state(preferred_device);
 
                     auto transfer_start = std::chrono::high_resolution_clock::now();
                     const cuDoubleComplex w1_cu =

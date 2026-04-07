@@ -99,9 +99,42 @@ bool QuantumCircuit::try_execute_gaussian_block_with_ede(
                     } else {
                         auto cache_it = terminal_state_cache.find(node->tensor_id);
                         if (cache_it == terminal_state_cache.end()) {
-                            cache_it = terminal_state_cache.emplace(
-                                node->tensor_id,
-                                classify_vacuum_ray_on_device(state_pool_, node->tensor_id)).first;
+                            try {
+                                cache_it = terminal_state_cache.emplace(
+                                    node->tensor_id,
+                                    classify_vacuum_ray_on_device(state_pool_, node->tensor_id)).first;
+                            } catch (const std::exception& ex) {
+                                const int state_id = node->tensor_id;
+                                const int owner_device = state_pool_.get_state_device_id(state_id);
+                                const int64_t state_dim = state_pool_.get_state_dim(state_id);
+                                const size_t state_offset =
+                                    (state_id >= 0 &&
+                                     state_id < static_cast<int>(state_pool_.host_state_offsets.size()))
+                                        ? state_pool_.host_state_offsets[static_cast<size_t>(state_id)]
+                                        : 0;
+                                const size_t state_capacity =
+                                    (state_id >= 0 &&
+                                     state_id < static_cast<int>(state_pool_.host_state_capacities.size()))
+                                        ? state_pool_.host_state_capacities[static_cast<size_t>(state_id)]
+                                        : 0;
+                                std::string download_status = "not_attempted";
+                                try {
+                                    std::vector<cuDoubleComplex> host_state;
+                                    state_pool_.download_state(state_id, host_state);
+                                    download_status = "ok(size=" + std::to_string(host_state.size()) + ")";
+                                } catch (const std::exception& download_ex) {
+                                    download_status = std::string("failed(") + download_ex.what() + ")";
+                                }
+                                throw std::runtime_error(
+                                    "Vacuum classification failed for state_id=" +
+                                    std::to_string(state_id) +
+                                    " owner_device=" + std::to_string(owner_device) +
+                                    " dim=" + std::to_string(state_dim) +
+                                    " offset=" + std::to_string(state_offset) +
+                                    " capacity=" + std::to_string(state_capacity) +
+                                    " download=" + download_status +
+                                    ": " + ex.what());
+                            }
                         }
                         const VacuumRayInfo& info = cache_it->second;
                         if (info.is_zero) {
@@ -681,9 +714,42 @@ bool QuantumCircuit::try_execute_diagonal_non_gaussian_block_with_mixture(
                     } else {
                         auto cache_it = terminal_state_cache.find(node->tensor_id);
                         if (cache_it == terminal_state_cache.end()) {
-                            cache_it = terminal_state_cache.emplace(
-                                node->tensor_id,
-                                classify_vacuum_ray_on_device(state_pool_, node->tensor_id)).first;
+                            try {
+                                cache_it = terminal_state_cache.emplace(
+                                    node->tensor_id,
+                                    classify_vacuum_ray_on_device(state_pool_, node->tensor_id)).first;
+                            } catch (const std::exception& ex) {
+                                const int state_id = node->tensor_id;
+                                const int owner_device = state_pool_.get_state_device_id(state_id);
+                                const int64_t state_dim = state_pool_.get_state_dim(state_id);
+                                const size_t state_offset =
+                                    (state_id >= 0 &&
+                                     state_id < static_cast<int>(state_pool_.host_state_offsets.size()))
+                                        ? state_pool_.host_state_offsets[static_cast<size_t>(state_id)]
+                                        : 0;
+                                const size_t state_capacity =
+                                    (state_id >= 0 &&
+                                     state_id < static_cast<int>(state_pool_.host_state_capacities.size()))
+                                        ? state_pool_.host_state_capacities[static_cast<size_t>(state_id)]
+                                        : 0;
+                                std::string download_status = "not_attempted";
+                                try {
+                                    std::vector<cuDoubleComplex> host_state;
+                                    state_pool_.download_state(state_id, host_state);
+                                    download_status = "ok(size=" + std::to_string(host_state.size()) + ")";
+                                } catch (const std::exception& download_ex) {
+                                    download_status = std::string("failed(") + download_ex.what() + ")";
+                                }
+                                throw std::runtime_error(
+                                    "Vacuum classification failed for state_id=" +
+                                    std::to_string(state_id) +
+                                    " owner_device=" + std::to_string(owner_device) +
+                                    " dim=" + std::to_string(state_dim) +
+                                    " offset=" + std::to_string(state_offset) +
+                                    " capacity=" + std::to_string(state_capacity) +
+                                    " download=" + download_status +
+                                    ": " + ex.what());
+                            }
                         }
                         const VacuumRayInfo& info = cache_it->second;
                         if (info.is_zero) {

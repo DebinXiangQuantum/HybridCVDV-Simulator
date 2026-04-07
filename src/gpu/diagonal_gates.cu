@@ -394,8 +394,8 @@ void combine_states_device(CVStatePool* state_pool,
                            int dst_state_id,
                            cudaStream_t stream,
                            bool synchronize) {
-    const int src1_dim = state_pool->get_state_dim(src1_state_id);
-    const int src2_dim = state_pool->get_state_dim(src2_state_id);
+    const int64_t src1_dim = state_pool->get_state_dim(src1_state_id);
+    const int64_t src2_dim = state_pool->get_state_dim(src2_state_id);
     if (src1_dim != src2_dim) {
         throw std::runtime_error("Combine states requires matching source dimensions");
     }
@@ -405,25 +405,136 @@ void combine_states_device(CVStatePool* state_pool,
 
     state_pool->reserve_state_storage(dst_state_id, src1_dim);
 
-    const cuDoubleComplex* src1_ptr = state_pool->get_state_ptr(src1_state_id);
-    const cuDoubleComplex* src2_ptr = state_pool->get_state_ptr(src2_state_id);
-    cuDoubleComplex* dst_ptr = state_pool->get_state_ptr(dst_state_id);
-    if (!src1_ptr || !src2_ptr || !dst_ptr) {
-        throw std::runtime_error("Combine states requires valid GPU state pointers");
+    const int src1_device = state_pool->get_state_device_id(src1_state_id);
+    const int src2_device = state_pool->get_state_device_id(src2_state_id);
+    const int dst_device = state_pool->get_state_device_id(dst_state_id);
+    const size_t total_elements = static_cast<size_t>(src1_dim);
+
+    size_t src1_temp_offset = 0;
+    size_t src2_temp_offset = 0;
+    bool release_src1_temp = false;
+    bool release_src2_temp = false;
+
+    auto cleanup = [&]() {
+        if (release_src1_temp || release_src2_temp) {
+            cudaSetDevice(dst_device);
+            state_pool->activate_device_view(dst_device);
+        }
+        if (release_src1_temp) {
+            state_pool->release_detached_storage(src1_temp_offset, total_elements);
+            release_src1_temp = false;
+        }
+        if (release_src2_temp) {
+            state_pool->release_detached_storage(src2_temp_offset, total_elements);
+            release_src2_temp = false;
+        }
+    };
+
+    try {
+        constexpr size_t kVectorChunkBytes = 1ULL << 30;
+        const size_t total_bytes = total_elements * sizeof(cuDoubleComplex);
+
+        const cuDoubleComplex* src1_remote_ptr = nullptr;
+        const cuDoubleComplex* src2_remote_ptr = nullptr;
+
+        if (src1_device != dst_device) {
+            src1_remote_ptr = state_pool->get_state_ptr(src1_state_id);
+            if (!src1_remote_ptr) {
+                throw std::runtime_error("Combine states requires valid src1 GPU pointer");
+            }
+            check_kernel_launch(cudaSetDevice(dst_device),
+                                "Combine states failed to set dst device: ");
+            state_pool->activate_device_view(dst_device);
+            src1_temp_offset = state_pool->allocate_detached_storage(total_elements);
+            release_src1_temp = true;
+        }
+
+        if (src2_device != dst_device) {
+            src2_remote_ptr = state_pool->get_state_ptr(src2_state_id);
+            if (!src2_remote_ptr) {
+                throw std::runtime_error("Combine states requires valid src2 GPU pointer");
+            }
+            check_kernel_launch(cudaSetDevice(dst_device),
+                                "Combine states failed to set dst device: ");
+            state_pool->activate_device_view(dst_device);
+            src2_temp_offset = state_pool->allocate_detached_storage(total_elements);
+            release_src2_temp = true;
+        }
+
+        check_kernel_launch(cudaSetDevice(dst_device),
+                            "Combine states failed to restore dst device: ");
+        state_pool->activate_device_view(dst_device);
+
+        cuDoubleComplex* dst_ptr = state_pool->get_state_ptr(dst_state_id);
+        const cuDoubleComplex* src1_ptr =
+            (src1_device == dst_device)
+                ? state_pool->get_state_ptr(src1_state_id)
+                : state_pool->data + src1_temp_offset;
+        const cuDoubleComplex* src2_ptr =
+            (src2_device == dst_device)
+                ? state_pool->get_state_ptr(src2_state_id)
+                : state_pool->data + src2_temp_offset;
+        if (!src1_ptr || !src2_ptr || !dst_ptr) {
+            throw std::runtime_error("Combine states requires valid GPU state pointers");
+        }
+
+        auto stage_remote_source = [&](const cuDoubleComplex* remote_ptr,
+                                       int remote_device,
+                                       size_t temp_offset) {
+            char* dst_bytes = reinterpret_cast<char*>(state_pool->data + temp_offset);
+            const char* src_bytes = reinterpret_cast<const char*>(remote_ptr);
+            for (size_t copied_bytes = 0; copied_bytes < total_bytes; copied_bytes += kVectorChunkBytes) {
+                const size_t chunk_bytes = std::min(kVectorChunkBytes, total_bytes - copied_bytes);
+                cudaError_t err = cudaMemcpyPeer(
+                    dst_bytes + copied_bytes, dst_device,
+                    src_bytes + copied_bytes, remote_device,
+                    chunk_bytes);
+                if (err != cudaSuccess) {
+                    throw std::runtime_error("Cross-device combine staging failed: " +
+                                             std::string(cudaGetErrorString(err)));
+                }
+            }
+        };
+
+        if (src1_device != dst_device) {
+            stage_remote_source(src1_remote_ptr, src1_device, src1_temp_offset);
+            src1_ptr = state_pool->data + src1_temp_offset;
+        }
+        if (src2_device != dst_device) {
+            stage_remote_source(src2_remote_ptr, src2_device, src2_temp_offset);
+            src2_ptr = state_pool->data + src2_temp_offset;
+        }
+
+        dim3 block_dim(256);
+        dim3 grid_dim((total_elements + block_dim.x - 1) / block_dim.x);
+        combine_states_kernel<<<grid_dim, block_dim, 0, stream>>>(
+            src1_ptr, weight1, src2_ptr, weight2, dst_ptr, src1_dim);
+
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            throw std::runtime_error("Combine states kernel launch failed: " +
+                                     std::string(cudaGetErrorString(err)));
+        }
+
+        const bool force_host_sync =
+            !synchronize && stream == nullptr && state_pool->get_device_count() > 1;
+        // Detached cross-device staging must remain alive until the destination
+        // kernel has consumed it. If the caller requested async execution,
+        // force a local sync before releasing the temporary storage.
+        const bool requires_staging_release_sync = (release_src1_temp || release_src2_temp) &&
+                                                   !synchronize;
+        synchronize_if_requested(
+            stream,
+            synchronize || requires_staging_release_sync || force_host_sync,
+            (requires_staging_release_sync || force_host_sync)
+                ? "Combine states staging cleanup synchronization failed: "
+                : "Combine states kernel synchronization failed: ");
+    } catch (...) {
+        cleanup();
+        throw;
     }
 
-    dim3 block_dim(256);
-    dim3 grid_dim((src1_dim + block_dim.x - 1) / block_dim.x);
-    combine_states_kernel<<<grid_dim, block_dim, 0, stream>>>(
-        src1_ptr, weight1, src2_ptr, weight2, dst_ptr, src1_dim);
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        throw std::runtime_error("Combine states kernel launch failed: " +
-                                 std::string(cudaGetErrorString(err)));
-    }
-
-    synchronize_if_requested(stream, synchronize, "Combine states kernel synchronization failed: ");
+    cleanup();
 }
 
 __global__ void zero_state_vector_kernel(cuDoubleComplex* state, int64_t state_dim) {
@@ -528,7 +639,13 @@ void zero_state_device(CVStatePool* state_pool, int state_id,
                                  std::string(cudaGetErrorString(err)));
     }
 
-    synchronize_if_requested(stream, synchronize, "Zero state synchronization failed: ");
+    const bool force_host_sync =
+        !synchronize && stream == nullptr && state_pool->get_device_count() > 1;
+    synchronize_if_requested(stream,
+                             synchronize || force_host_sync,
+                             force_host_sync
+                                 ? "Zero state multi-GPU host-path synchronization failed: "
+                                 : "Zero state synchronization failed: ");
 }
 
 void initialize_vacuum_state_device(CVStatePool* state_pool, int state_id, int64_t state_dim,
@@ -557,8 +674,13 @@ void initialize_vacuum_state_device(CVStatePool* state_pool, int state_id, int64
                                  std::string(cudaGetErrorString(err)));
     }
 
-    synchronize_if_requested(stream, synchronize,
-                             "Initialize vacuum synchronization failed: ");
+    const bool force_host_sync =
+        !synchronize && stream == nullptr && state_pool->get_device_count() > 1;
+    synchronize_if_requested(stream,
+                             synchronize || force_host_sync,
+                             force_host_sync
+                                 ? "Initialize vacuum multi-GPU host-path synchronization failed: "
+                                 : "Initialize vacuum synchronization failed: ");
 }
 
 void copy_state_device(CVStatePool* state_pool, int src_state_id, int dst_state_id,
@@ -594,7 +716,13 @@ void copy_state_device(CVStatePool* state_pool, int src_state_id, int dst_state_
                                          std::string(cudaGetErrorString(err)));
             }
         }
-        synchronize_if_requested(stream, synchronize, "Copy state synchronization failed: ");
+        const bool force_host_sync =
+            !synchronize && stream == nullptr && state_pool->get_device_count() > 1;
+        synchronize_if_requested(stream,
+                                 synchronize || force_host_sync,
+                                 force_host_sync
+                                     ? "Copy state multi-GPU host-path synchronization failed: "
+                                     : "Copy state synchronization failed: ");
         return;
     }
 
@@ -616,7 +744,13 @@ void copy_state_device(CVStatePool* state_pool, int src_state_id, int dst_state_
         copied_elements += elements_this_chunk;
     }
 
-    synchronize_if_requested(stream, synchronize, "Copy state synchronization failed: ");
+    const bool force_host_sync =
+        !synchronize && stream == nullptr && state_pool->get_device_count() > 1;
+    synchronize_if_requested(stream,
+                             synchronize || force_host_sync,
+                             force_host_sync
+                                 ? "Copy state multi-GPU host-path synchronization failed: "
+                                 : "Copy state synchronization failed: ");
 }
 
 void copy_scale_state_device(CVStatePool* state_pool,
@@ -679,7 +813,13 @@ void copy_scale_state_device(CVStatePool* state_pool,
         copied_elements += elements_this_chunk;
     }
 
-    synchronize_if_requested(stream, synchronize, "Copy-scale state kernel synchronization failed: ");
+    const bool force_host_sync =
+        !synchronize && stream == nullptr && state_pool->get_device_count() > 1;
+    synchronize_if_requested(stream,
+                             synchronize || force_host_sync,
+                             force_host_sync
+                                 ? "Copy-scale multi-GPU host-path synchronization failed: "
+                                 : "Copy-scale state kernel synchronization failed: ");
 }
 
 void scale_state_device(CVStatePool* state_pool, int state_id, cuDoubleComplex weight,
@@ -713,7 +853,13 @@ void scale_state_device(CVStatePool* state_pool, int state_id, cuDoubleComplex w
         scaled_elements += elements_this_chunk;
     }
 
-    synchronize_if_requested(stream, synchronize, "Scale state kernel synchronization failed: ");
+    const bool force_host_sync =
+        !synchronize && stream == nullptr && state_pool->get_device_count() > 1;
+    synchronize_if_requested(stream,
+                             synchronize || force_host_sync,
+                             force_host_sync
+                                 ? "Scale state multi-GPU host-path synchronization failed: "
+                                 : "Scale state kernel synchronization failed: ");
 }
 
 void axpy_state_device(CVStatePool* state_pool,
@@ -786,7 +932,15 @@ void axpy_state_device(CVStatePool* state_pool,
         processed_elements += elements_this_chunk;
     }
 
-    synchronize_if_requested(stream, synchronize, "AXPY state kernel synchronization failed: ");
+    const bool force_host_sync =
+        !synchronize && stream == nullptr && state_pool->get_device_count() > 1;
+    const bool requires_staging_release_sync = (src_device != dst_device) && !synchronize;
+    synchronize_if_requested(
+        stream,
+        synchronize || requires_staging_release_sync || force_host_sync,
+        (requires_staging_release_sync || force_host_sync)
+            ? "AXPY staging cleanup synchronization failed: "
+            : "AXPY state kernel synchronization failed: ");
     if (src_device != dst_device) {
         state_pool->release_detached_storage(temp_offset, total_elements);
     }

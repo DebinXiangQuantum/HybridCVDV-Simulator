@@ -358,6 +358,7 @@ void CVStatePool::grow_state_capacity(int min_capacity) {
 
     for (int device_id : device_ids_) {
         check_cuda(cudaSetDevice(device_id), "无法设置CUDA设备扩容元数据");
+        check_cuda(cudaDeviceSynchronize(), "无法在扩容元数据前同步CUDA设备");
         activate_device_view(device_id);
 
         int* new_free_list = nullptr;
@@ -474,6 +475,8 @@ void CVStatePool::ensure_data_capacity(size_t required_elements) {
     if (required_elements <= data_capacity_elements_) {
         return;
     }
+
+    check_cuda(cudaDeviceSynchronize(), "无法在扩容状态池数据前同步CUDA设备");
 
     auto try_repack_live_storage = [&](size_t target_capacity, cuDoubleComplex** out_data) -> bool {
         const size_t live_elements = active_storage_elements_on_device(active_device_id_);
@@ -720,6 +723,34 @@ void CVStatePool::reserve_total_storage_elements_on_device(int device_id,
     if (previous_active >= 0 && previous_active != device_id) {
         check_cuda(cudaSetDevice(previous_active), "无法恢复CUDA设备");
         activate_device_view(previous_active);
+    }
+}
+
+void CVStatePool::synchronize_all_devices() {
+    int current_device = active_device_id_;
+    if (current_device < 0) {
+        cudaError_t err = cudaGetDevice(&current_device);
+        if (err != cudaSuccess) {
+            current_device = device_ids_.empty() ? 0 : device_ids_.front();
+            cudaGetLastError();
+        }
+    }
+
+    for (int device_id : device_ids_) {
+        check_cuda(cudaSetDevice(device_id), "无法设置CUDA设备进行全局同步");
+        cudaError_t err = cudaDeviceSynchronize();
+        if (err != cudaSuccess && err != cudaErrorNotReady) {
+            throw std::runtime_error(
+                "多GPU同步失败(device=" + std::to_string(device_id) + "): " +
+                std::string(cudaGetErrorString(err)));
+        }
+    }
+
+    if (current_device >= 0) {
+        check_cuda(cudaSetDevice(current_device), "无法恢复CUDA设备");
+        if (std::find(device_ids_.begin(), device_ids_.end(), current_device) != device_ids_.end()) {
+            activate_device_view(current_device);
+        }
     }
 }
 

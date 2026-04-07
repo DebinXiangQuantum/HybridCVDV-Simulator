@@ -9,6 +9,12 @@
 
 using namespace circuit_internal;
 
+namespace {
+
+using SingleQubitMatrix = std::array<std::complex<double>, 4>;
+
+}  // namespace
+
 void QuantumCircuit::execute_level0_gate(const GateParams& gate) {
     execute_level0_gate(gate, nullptr);
 }
@@ -402,21 +408,95 @@ void QuantumCircuit::execute_level4_gate(const GateParams& gate) {
 /**
  * 执行Qubit门操作
  */
-void QuantumCircuit::execute_qubit_gate(const GateParams& gate) {
-    ScopedNvtxRange nvtx_range("qc::execute_qubit_gate");
-    if (gate.target_qubits.empty()) {
-        throw std::runtime_error("Qubit门需要指定目标Qubit");
+bool QuantumCircuit::try_get_single_qubit_gate_matrix(
+    const GateParams& gate,
+    std::array<std::complex<double>, 4>* matrix) const {
+    if (!matrix) {
+        throw std::invalid_argument("single-qubit matrix output must not be null");
+    }
+    if (gate.target_qubits.size() != 1 || !gate.target_qumodes.empty()) {
+        return false;
     }
 
-    int target_qubit = gate.target_qubits[0];
-    if (target_qubit >= num_qubits_) {
-        throw std::runtime_error("目标Qubit索引超出范围");
+    matrix->fill(std::complex<double>(0.0, 0.0));
+    switch (gate.type) {
+        case GateType::PAULI_X:
+            (*matrix)[1] = 1.0;
+            (*matrix)[2] = 1.0;
+            return true;
+        case GateType::PAULI_Y:
+            (*matrix)[1] = std::complex<double>(0.0, -1.0);
+            (*matrix)[2] = std::complex<double>(0.0, 1.0);
+            return true;
+        case GateType::PAULI_Z:
+            (*matrix)[0] = 1.0;
+            (*matrix)[3] = -1.0;
+            return true;
+        case GateType::HADAMARD: {
+            const double inv_sqrt2 = 1.0 / std::sqrt(2.0);
+            (*matrix)[0] = inv_sqrt2;
+            (*matrix)[1] = inv_sqrt2;
+            (*matrix)[2] = inv_sqrt2;
+            (*matrix)[3] = -inv_sqrt2;
+            return true;
+        }
+        case GateType::ROTATION_X: {
+            if (gate.params.empty()) {
+                throw std::runtime_error("Rx门需要角度参数");
+            }
+            const double theta = gate.params[0].real();
+            const double cos_half = std::cos(theta / 2.0);
+            const double sin_half = std::sin(theta / 2.0);
+            (*matrix)[0] = cos_half;
+            (*matrix)[1] = std::complex<double>(0.0, -sin_half);
+            (*matrix)[2] = std::complex<double>(0.0, -sin_half);
+            (*matrix)[3] = cos_half;
+            return true;
+        }
+        case GateType::ROTATION_Y: {
+            if (gate.params.empty()) {
+                throw std::runtime_error("Ry门需要角度参数");
+            }
+            const double theta = gate.params[0].real();
+            const double cos_half = std::cos(theta / 2.0);
+            const double sin_half = std::sin(theta / 2.0);
+            (*matrix)[0] = cos_half;
+            (*matrix)[1] = -sin_half;
+            (*matrix)[2] = sin_half;
+            (*matrix)[3] = cos_half;
+            return true;
+        }
+        case GateType::ROTATION_Z: {
+            if (gate.params.empty()) {
+                throw std::runtime_error("Rz门需要角度参数");
+            }
+            const double theta = gate.params[0].real();
+            const double cos_half = std::cos(theta / 2.0);
+            const double sin_half = std::sin(theta / 2.0);
+            (*matrix)[0] = std::complex<double>(cos_half, -sin_half);
+            (*matrix)[3] = std::complex<double>(cos_half, sin_half);
+            return true;
+        }
+        case GateType::PHASE_GATE_S:
+            (*matrix)[0] = 1.0;
+            (*matrix)[3] = std::complex<double>(0.0, 1.0);
+            return true;
+        case GateType::PHASE_GATE_T:
+            (*matrix)[0] = 1.0;
+            (*matrix)[3] = std::complex<double>(std::cos(M_PI / 4.0), std::sin(M_PI / 4.0));
+            return true;
+        default:
+            return false;
     }
+}
 
+void QuantumCircuit::apply_single_qubit_gate_matrix(
+    int target_qubit,
+    const std::array<std::complex<double>, 4>& matrix) {
     auto build_single_qubit_transform =
         [&](HDDNode* root,
             int single_target,
-            const std::vector<std::complex<double>>& matrix) -> HDDNode* {
+            const SingleQubitMatrix& single_qubit_matrix) -> HDDNode* {
             std::unordered_map<HDDNode*, HDDNode*> memo;
             std::function<HDDNode*(HDDNode*)> transform =
                 [&](HDDNode* node) -> HDDNode* {
@@ -435,8 +515,10 @@ void QuantumCircuit::execute_qubit_gate(const GateParams& gate) {
                         HDDNode* high = node->high;
                         transformed = node_manager_.get_or_create_node(
                             node->qubit_level,
-                            hdd_add(low, matrix[0] * node->w_low, high, matrix[1] * node->w_high),
-                            hdd_add(low, matrix[2] * node->w_low, high, matrix[3] * node->w_high),
+                            hdd_add(low, single_qubit_matrix[0] * node->w_low,
+                                    high, single_qubit_matrix[1] * node->w_high),
+                            hdd_add(low, single_qubit_matrix[2] * node->w_low,
+                                    high, single_qubit_matrix[3] * node->w_high),
                             1.0,
                             1.0);
                     } else if (node->qubit_level > single_target) {
@@ -459,14 +541,14 @@ void QuantumCircuit::execute_qubit_gate(const GateParams& gate) {
     auto build_monomial_single_qubit_transform =
         [&](HDDNode* root,
             int single_target,
-            const std::vector<std::complex<double>>& matrix) -> HDDNode* {
+            const SingleQubitMatrix& single_qubit_matrix) -> HDDNode* {
             constexpr double kMatrixTolerance = 1e-14;
             const bool diagonal =
-                std::abs(matrix[1]) < kMatrixTolerance &&
-                std::abs(matrix[2]) < kMatrixTolerance;
+                std::abs(single_qubit_matrix[1]) < kMatrixTolerance &&
+                std::abs(single_qubit_matrix[2]) < kMatrixTolerance;
             const bool anti_diagonal =
-                std::abs(matrix[0]) < kMatrixTolerance &&
-                std::abs(matrix[3]) < kMatrixTolerance;
+                std::abs(single_qubit_matrix[0]) < kMatrixTolerance &&
+                std::abs(single_qubit_matrix[3]) < kMatrixTolerance;
             if (!diagonal && !anti_diagonal) {
                 throw std::invalid_argument("monomial qubit transform requires diagonal or anti-diagonal matrix");
             }
@@ -490,15 +572,15 @@ void QuantumCircuit::execute_qubit_gate(const GateParams& gate) {
                                 node->qubit_level,
                                 node->low,
                                 node->high,
-                                matrix[0] * node->w_low,
-                                matrix[3] * node->w_high);
+                                single_qubit_matrix[0] * node->w_low,
+                                single_qubit_matrix[3] * node->w_high);
                         } else {
                             transformed = node_manager_.get_or_create_node(
                                 node->qubit_level,
                                 node->high,
                                 node->low,
-                                matrix[1] * node->w_high,
-                                matrix[2] * node->w_low);
+                                single_qubit_matrix[1] * node->w_high,
+                                single_qubit_matrix[2] * node->w_low);
                         }
                     } else if (node->qubit_level > single_target) {
                         transformed = node_manager_.get_or_create_node(
@@ -517,104 +599,111 @@ void QuantumCircuit::execute_qubit_gate(const GateParams& gate) {
             return transform(root);
         };
 
-    // 构造对应的单比特门矩阵U
-    std::vector<std::complex<double>> u(4, std::complex<double>(0.0, 0.0));
-    bool use_monomial_single_qubit_transform = false;
+    constexpr double kMatrixTolerance = 1e-14;
+    const bool use_monomial_single_qubit_transform =
+        (std::abs(matrix[1]) < kMatrixTolerance &&
+         std::abs(matrix[2]) < kMatrixTolerance) ||
+        (std::abs(matrix[0]) < kMatrixTolerance &&
+         std::abs(matrix[3]) < kMatrixTolerance);
+    HDDNode* new_root = use_monomial_single_qubit_transform
+        ? build_monomial_single_qubit_transform(root_node_, target_qubit, matrix)
+        : build_single_qubit_transform(root_node_, target_qubit, matrix);
+    if (use_monomial_single_qubit_transform) {
+        replace_root_node_preserving_terminals(new_root);
+        return;
+    }
+
+    state_pool_.synchronize_all_devices();
+    replace_root_node(new_root);
+}
+
+void QuantumCircuit::execute_qubit_gate(const GateParams& gate) {
+    ScopedNvtxRange nvtx_range("qc::execute_qubit_gate");
+    if (gate.target_qubits.empty()) {
+        throw std::runtime_error("Qubit门需要指定目标Qubit");
+    }
+
+    const int target_qubit = gate.target_qubits[0];
+    if (target_qubit >= num_qubits_) {
+        throw std::runtime_error("目标Qubit索引超出范围");
+    }
+
+    SingleQubitMatrix single_qubit_matrix;
+    if (try_get_single_qubit_gate_matrix(gate, &single_qubit_matrix)) {
+        apply_single_qubit_gate_matrix(target_qubit, single_qubit_matrix);
+        return;
+    }
+
+    auto build_monomial_single_qubit_transform =
+        [&](HDDNode* root,
+            int single_target,
+            const SingleQubitMatrix& single_qubit_matrix) -> HDDNode* {
+            constexpr double kMatrixTolerance = 1e-14;
+            const bool diagonal =
+                std::abs(single_qubit_matrix[1]) < kMatrixTolerance &&
+                std::abs(single_qubit_matrix[2]) < kMatrixTolerance;
+            const bool anti_diagonal =
+                std::abs(single_qubit_matrix[0]) < kMatrixTolerance &&
+                std::abs(single_qubit_matrix[3]) < kMatrixTolerance;
+            if (!diagonal && !anti_diagonal) {
+                throw std::invalid_argument(
+                    "monomial qubit transform requires diagonal or anti-diagonal matrix");
+            }
+
+            std::unordered_map<HDDNode*, HDDNode*> memo;
+            std::function<HDDNode*(HDDNode*)> transform =
+                [&](HDDNode* node) -> HDDNode* {
+                    if (!node || node->is_terminal()) {
+                        return node;
+                    }
+
+                    const auto memo_it = memo.find(node);
+                    if (memo_it != memo.end()) {
+                        return memo_it->second;
+                    }
+
+                    HDDNode* transformed = nullptr;
+                    if (node->qubit_level == single_target) {
+                        if (diagonal) {
+                            transformed = node_manager_.get_or_create_node(
+                                node->qubit_level,
+                                node->low,
+                                node->high,
+                                single_qubit_matrix[0] * node->w_low,
+                                single_qubit_matrix[3] * node->w_high);
+                        } else {
+                            transformed = node_manager_.get_or_create_node(
+                                node->qubit_level,
+                                node->high,
+                                node->low,
+                                single_qubit_matrix[1] * node->w_high,
+                                single_qubit_matrix[2] * node->w_low);
+                        }
+                    } else if (node->qubit_level > single_target) {
+                        transformed = node_manager_.get_or_create_node(
+                            node->qubit_level,
+                            transform(node->low),
+                            transform(node->high),
+                            node->w_low,
+                            node->w_high);
+                    } else {
+                        transformed = node;
+                    }
+
+                    memo.emplace(node, transformed);
+                    return transformed;
+                };
+            return transform(root);
+        };
 
     switch (gate.type) {
-        case GateType::PAULI_X: {
-            // X = [[0, 1], [1, 0]]
-            u[1] = 1.0;  // (0,1)
-            u[2] = 1.0;  // (1,0)
-            use_monomial_single_qubit_transform = true;
-            break;
-        }
-        case GateType::PAULI_Y: {
-            // Y = [[0, -i], [i, 0]]
-            u[1] = std::complex<double>(0.0, -1.0);  // (0,1)
-            u[2] = std::complex<double>(0.0, 1.0);   // (1,0)
-            use_monomial_single_qubit_transform = true;
-            break;
-        }
-        case GateType::PAULI_Z: {
-            // Z = [[1, 0], [0, -1]]
-            u[0] = 1.0;   // (0,0)
-            u[3] = -1.0;  // (1,1)
-            use_monomial_single_qubit_transform = true;
-            break;
-        }
-        case GateType::HADAMARD: {
-            // H = 1/√2 * [[1, 1], [1, -1]]
-            double inv_sqrt2 = 1.0 / std::sqrt(2.0);
-            u[0] = inv_sqrt2;  // (0,0)
-            u[1] = inv_sqrt2;  // (0,1)
-            u[2] = inv_sqrt2;  // (1,0)
-            u[3] = -inv_sqrt2; // (1,1)
-            break;
-        }
-        case GateType::ROTATION_X: {
-            if (gate.params.empty()) {
-                throw std::runtime_error("Rx门需要角度参数");
-            }
-            double theta = gate.params[0].real();
-            double cos_half = std::cos(theta / 2.0);
-            double sin_half = std::sin(theta / 2.0);
-            // Rx(θ) = [[cos(θ/2), -i*sin(θ/2)], [-i*sin(θ/2), cos(θ/2)]]
-            u[0] = cos_half;                           // (0,0)
-            u[1] = std::complex<double>(0.0, -sin_half); // (0,1)
-            u[2] = std::complex<double>(0.0, -sin_half); // (1,0)
-            u[3] = cos_half;                           // (1,1)
-            break;
-        }
-        case GateType::ROTATION_Y: {
-            if (gate.params.empty()) {
-                throw std::runtime_error("Ry门需要角度参数");
-            }
-            double theta = gate.params[0].real();
-            double cos_half = std::cos(theta / 2.0);
-            double sin_half = std::sin(theta / 2.0);
-            // Ry(θ) = [[cos(θ/2), -sin(θ/2)], [sin(θ/2), cos(θ/2)]]
-            u[0] = cos_half;     // (0,0)
-            u[1] = -sin_half;    // (0,1)
-            u[2] = sin_half;     // (1,0)
-            u[3] = cos_half;     // (1,1)
-            break;
-        }
-        case GateType::ROTATION_Z: {
-            if (gate.params.empty()) {
-                throw std::runtime_error("Rz门需要角度参数");
-            }
-            double theta = gate.params[0].real();
-            double cos_half = std::cos(theta / 2.0);
-            double sin_half = std::sin(theta / 2.0);
-            // Rz(θ) = [[cos(θ/2)-i*sin(θ/2), 0], [0, cos(θ/2)+i*sin(θ/2)]]
-            // = [[e^(-iθ/2), 0], [0, e^(iθ/2)]]
-            u[0] = std::complex<double>(cos_half, -sin_half); // (0,0)
-            u[3] = std::complex<double>(cos_half, sin_half);  // (1,1)
-            use_monomial_single_qubit_transform = true;
-            break;
-        }
-        case GateType::PHASE_GATE_S: {
-            // S = [[1, 0], [0, i]]
-            u[0] = 1.0;  // (0,0)
-            u[3] = std::complex<double>(0.0, 1.0); // (1,1)
-            use_monomial_single_qubit_transform = true;
-            break;
-        }
-        case GateType::PHASE_GATE_T: {
-            // T = [[1, 0], [0, e^(iπ/4)]]
-            u[0] = 1.0;  // (0,0)
-            u[3] = std::complex<double>(std::cos(M_PI/4.0), std::sin(M_PI/4.0)); // (1,1)
-            use_monomial_single_qubit_transform = true;
-            break;
-        }
         case GateType::CNOT: {
             if (gate.target_qubits.size() < 2) {
                 throw std::runtime_error("CNOT门需要控制位和目标位");
             }
             const int control = gate.target_qubits[0];
             const int target = gate.target_qubits[1];
-            const std::vector<std::complex<double>> px = {0.0, 1.0, 1.0, 0.0};
+            const SingleQubitMatrix px = {0.0, 1.0, 1.0, 0.0};
 
             std::unordered_map<HDDNode*, HDDNode*> control_memo;
             HDDNode* new_root = nullptr;
@@ -662,7 +751,7 @@ void QuantumCircuit::execute_qubit_gate(const GateParams& gate) {
             }
             const int control = gate.target_qubits[0];
             const int target = gate.target_qubits[1];
-            const std::vector<std::complex<double>> pz = {1.0, 0.0, 0.0, -1.0};
+            const SingleQubitMatrix pz = {1.0, 0.0, 0.0, -1.0};
 
             std::unordered_map<HDDNode*, HDDNode*> control_memo;
             HDDNode* new_root = nullptr;
@@ -707,17 +796,6 @@ void QuantumCircuit::execute_qubit_gate(const GateParams& gate) {
         default:
             throw std::runtime_error("不支持的Qubit门类型");
     }
-
-    HDDNode* new_root = use_monomial_single_qubit_transform
-        ? build_monomial_single_qubit_transform(root_node_, target_qubit, u)
-        : build_single_qubit_transform(root_node_, target_qubit, u);
-    if (use_monomial_single_qubit_transform) {
-        replace_root_node_preserving_terminals(new_root);
-        return;
-    }
-
-    CHECK_CUDA(cudaDeviceSynchronize());
-    replace_root_node(new_root);
 }
 
 /**

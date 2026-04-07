@@ -47,6 +47,7 @@ public:
     void download_state(int state_id, std::vector<double>& d, std::vector<double>& sigma) const;
 
 private:
+    int device_id_;
     int num_qumodes_;
     int capacity_;
     int dim_phase_space_;
@@ -61,5 +62,6 @@ private:
     std::vector<bool> active_flags_;
     std::vector<int> ref_counts_;   // 引用计数
 
+    void activate_device() const;
     void deallocate_gpu_memory(int state_id);
 };

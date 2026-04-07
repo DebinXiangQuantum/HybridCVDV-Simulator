@@ -14,7 +14,8 @@
     } while (0)
 
 GaussianStatePool::GaussianStatePool(int num_qumodes, int capacity)
-    : num_qumodes_(num_qumodes), capacity_(capacity) {
+    : device_id_(0), num_qumodes_(num_qumodes), capacity_(capacity) {
+    CHECK_CUDA(cudaGetDevice(&device_id_));
     
     dim_phase_space_ = 2 * num_qumodes_;
     h_d_ptrs_.resize(capacity_, nullptr);
@@ -36,6 +37,7 @@ GaussianStatePool::GaussianStatePool(int num_qumodes, int capacity)
 }
 
 GaussianStatePool::~GaussianStatePool() {
+    activate_device();
     for (int i = 0; i < capacity_; ++i) {
         if (h_d_ptrs_[i]) cudaFree(h_d_ptrs_[i]);
         if (h_sig_ptrs_[i]) cudaFree(h_sig_ptrs_[i]);
@@ -44,7 +46,12 @@ GaussianStatePool::~GaussianStatePool() {
     cudaFree(sig_ptrs_dev_);
 }
 
+void GaussianStatePool::activate_device() const {
+    CHECK_CUDA(cudaSetDevice(device_id_));
+}
+
 int GaussianStatePool::allocate_state() {
+    activate_device();
     if (free_list_.empty()) return -1;
     
     int id = free_list_.back();
@@ -68,6 +75,7 @@ int GaussianStatePool::allocate_state() {
 }
 
 void GaussianStatePool::deallocate_gpu_memory(int state_id) {
+    activate_device();
     if (h_d_ptrs_[state_id]) cudaFree(h_d_ptrs_[state_id]);
     if (h_sig_ptrs_[state_id]) cudaFree(h_sig_ptrs_[state_id]);
     h_d_ptrs_[state_id] = nullptr;
@@ -104,6 +112,7 @@ int GaussianStatePool::get_ref_count(int state_id) const {
 }
 
 int GaussianStatePool::cow_copy(int state_id) {
+    activate_device();
     if (state_id < 0 || state_id >= capacity_ || !active_flags_[state_id]) return -1;
     if (ref_counts_[state_id] <= 1) {
         return state_id;  // sole owner — no copy needed
@@ -134,6 +143,7 @@ double* GaussianStatePool::get_covariance_ptr(int state_id) {
 }
 
 void GaussianStatePool::upload_state(int state_id, const std::vector<double>& d, const std::vector<double>& sigma) {
+    activate_device();
     if (state_id < 0 || state_id >= capacity_ || !active_flags_[state_id]) {
         throw std::runtime_error("Invalid state ID for upload");
     }
@@ -142,6 +152,7 @@ void GaussianStatePool::upload_state(int state_id, const std::vector<double>& d,
 }
 
 void GaussianStatePool::download_state(int state_id, std::vector<double>& d, std::vector<double>& sigma) const {
+    activate_device();
     if (state_id < 0 || state_id >= capacity_ || !active_flags_[state_id]) {
         throw std::runtime_error("Invalid state ID for download");
     }

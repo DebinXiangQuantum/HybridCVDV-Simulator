@@ -442,6 +442,60 @@ TEST_F(GPUGateTest, TestGPUDisplacement) {
     EXPECT_LT(error, 1e-6) << "GPU位移门误差过大: " << error;
 }
 
+TEST_F(GPUGateTest, TestGPUDisplacementLargeBatchLaunchChunking) {
+    constexpr int test_cutoff = 16;
+    constexpr int large_batch_size = 65536;
+    CVStatePool large_pool(test_cutoff, large_batch_size, 1);
+    ASSERT_EQ(cudaSuccess, cudaSetDevice(0));
+    large_pool.activate_device_view(0);
+
+    std::vector<int> state_ids;
+    state_ids.reserve(large_batch_size);
+    for (int i = 0; i < large_batch_size; ++i) {
+        const int state_id_local = large_pool.allocate_state(0);
+        state_ids.push_back(state_id_local);
+        large_pool.reserve_state_storage(state_id_local, test_cutoff);
+    }
+
+    const size_t total_elements = large_pool.get_active_storage_elements_on_device(0);
+    std::vector<cuDoubleComplex> host_data(total_elements, make_cuDoubleComplex(0.0, 0.0));
+    for (int state_id_local : state_ids) {
+        host_data[large_pool.host_state_offsets[static_cast<size_t>(state_id_local)]] =
+            make_cuDoubleComplex(1.0, 0.0);
+    }
+    ASSERT_EQ(cudaSuccess,
+              cudaMemcpy(large_pool.data,
+                         host_data.data(),
+                         host_data.size() * sizeof(cuDoubleComplex),
+                         cudaMemcpyHostToDevice));
+
+    int* d_target_ids = nullptr;
+    ASSERT_EQ(cudaSuccess, cudaMalloc(&d_target_ids, state_ids.size() * sizeof(int)));
+    ASSERT_EQ(cudaSuccess,
+              cudaMemcpy(d_target_ids,
+                         state_ids.data(),
+                         state_ids.size() * sizeof(int),
+                         cudaMemcpyHostToDevice));
+
+    const std::complex<double> alpha(0.15, -0.05);
+    const cuDoubleComplex alpha_cu = make_cuDoubleComplex(alpha.real(), alpha.imag());
+    EXPECT_NO_THROW(apply_displacement_gate(&large_pool, d_target_ids, large_batch_size, alpha_cu));
+
+    cudaFree(d_target_ids);
+
+    std::vector<std::complex<double>> vacuum_state(test_cutoff, std::complex<double>(0.0, 0.0));
+    vacuum_state[0] = std::complex<double>(1.0, 0.0);
+    const auto ref_result = Reference::SingleModeGates::apply_displacement_gate(vacuum_state, alpha);
+
+    for (int sample_index : {0, large_batch_size / 2, large_batch_size - 1}) {
+        std::vector<cuDoubleComplex> gpu_result(test_cutoff);
+        large_pool.download_state(state_ids[static_cast<size_t>(sample_index)], gpu_result);
+        const double error = compare_with_reference(gpu_result, ref_result);
+        EXPECT_LT(error, 1e-6) << "large-batch displacement sample " << sample_index
+                               << " mismatch, error=" << error;
+    }
+}
+
 TEST_F(GPUGateTest, TestGPUCreationOperator) {
     // 测试GPU湮灭算符 a†
     // 获取参考结果（创建算符）

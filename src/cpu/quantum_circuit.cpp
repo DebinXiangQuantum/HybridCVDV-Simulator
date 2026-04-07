@@ -293,6 +293,7 @@ bool QuantumCircuit::has_symbolic_terminals() const {
 }
 
 void QuantumCircuit::ensure_gaussian_state_pool() {
+    activate_execution_device();
     if (gaussian_state_pool_) {
         return;
     }
@@ -320,6 +321,7 @@ void QuantumCircuit::initialize_gaussian_vacuum_state(int gaussian_state_id) {
 
 int QuantumCircuit::duplicate_gaussian_state(int gaussian_state_id) {
     ensure_gaussian_state_pool();
+    activate_execution_device();
 
     const int duplicated_state_id = gaussian_state_pool_->allocate_state();
     if (duplicated_state_id < 0) {
@@ -352,6 +354,7 @@ void QuantumCircuit::apply_symplectic_update_to_gaussian_states(
     }
 
     ensure_gaussian_state_pool();
+    activate_execution_device();
 
     size_t offset = 0;
     offset = align_scratch_offset(offset, alignof(int));
@@ -415,6 +418,7 @@ void QuantumCircuit::release_symbolic_terminal(int terminal_id) {
         return;
     }
     if (gaussian_state_pool_) {
+        activate_execution_device();
         for (const GaussianComponent& comp : it->second.components) {
             if (comp.gaussian_state_id >= 0) {
                 gaussian_state_pool_->release_ref(comp.gaussian_state_id);
@@ -432,6 +436,9 @@ void QuantumCircuit::clear_symbolic_terminals() {
     }
     for (int terminal_id : symbolic_ids) {
         release_symbolic_terminal(terminal_id);
+    }
+    if (gaussian_state_pool_) {
+        activate_execution_device();
     }
     gaussian_state_pool_.reset();
     next_symbolic_terminal_id_ = -2;
@@ -730,6 +737,64 @@ size_t QuantumCircuit::execute_range(size_t start_block, size_t max_blocks) {
             ++exact_block_count_;
         }
 
+        if (current_block.kind == ExecutionBlockKind::QubitOnly) {
+            FALLBACK_DEBUG_LOG << "[fallback] block " << block_index
+                               << " executing fused qubit-only path with "
+                               << current_block.gates.size() << " gates" << std::endl;
+            std::map<int, std::array<std::complex<double>, 4>> pending_single_qubit;
+            const auto identity_matrix = []() {
+                return std::array<std::complex<double>, 4>{1.0, 0.0, 0.0, 1.0};
+            };
+            const auto multiply_single_qubit =
+                [](const std::array<std::complex<double>, 4>& lhs,
+                   const std::array<std::complex<double>, 4>& rhs) {
+                    return std::array<std::complex<double>, 4>{
+                        lhs[0] * rhs[0] + lhs[1] * rhs[2],
+                        lhs[0] * rhs[1] + lhs[1] * rhs[3],
+                        lhs[2] * rhs[0] + lhs[3] * rhs[2],
+                        lhs[2] * rhs[1] + lhs[3] * rhs[3]
+                    };
+                };
+            const auto flush_pending_single_qubit = [&]() {
+                for (const auto& [qubit, matrix] : pending_single_qubit) {
+                    apply_single_qubit_gate_matrix(qubit, matrix);
+                }
+                pending_single_qubit.clear();
+            };
+
+            for (size_t gate_index = 0; gate_index < current_block.gates.size(); ++gate_index) {
+                const GateParams& gate = current_block.gates[gate_index];
+                FALLBACK_DEBUG_LOG << "[fallback] block " << block_index
+                                   << " gate " << (gate_index + 1) << "/"
+                                   << current_block.gates.size() << " "
+                                   << gate_type_name(gate.type) << std::endl;
+                std::array<std::complex<double>, 4> matrix;
+                if (try_get_single_qubit_gate_matrix(gate, &matrix)) {
+                    auto [it, inserted] = pending_single_qubit.emplace(
+                        gate.target_qubits[0], identity_matrix());
+                    it->second = multiply_single_qubit(matrix, it->second);
+                    continue;
+                }
+
+                flush_pending_single_qubit();
+                execute_gate(gate, &exact_batch_context);
+            }
+            flush_pending_single_qubit();
+
+            synchronize_async_cv_pipeline();
+            collect_hdd_garbage_if_needed(false);
+            FALLBACK_DEBUG_LOG << "[fallback] block " << block_index
+                               << " fused qubit-only path complete" << std::endl;
+
+            if (block_index + 1 < total_blocks &&
+                executed_blocks + 1 < max_blocks) {
+                current_block = next_block_future.get();
+                planning_time_ += current_block.compile_time_ms;
+                next_block_future = std::future<CompiledExecutionBlock>();
+            }
+            continue;
+        }
+
         // ── Cross-mode fused diagonal optimization ──────────────────
         // Fuse multiple diagonal gates (PhaseRotation/Kerr/ConditionalParity)
         // into a single kernel pass. This also catches Gaussian blocks that
@@ -899,6 +964,7 @@ void QuantumCircuit::reset() {
 
     node_manager_.clear();
     clear_symbolic_terminals();
+    clear_squeezing_cache();
     state_pool_.reset();  // 重置状态池，释放所有分配的状态
     gate_sequence_.clear();
     is_built_ = false;
@@ -970,7 +1036,7 @@ void QuantumCircuit::set_gaussian_state_pool_capacity(int capacity) {
  * 初始化HDD结构
  */
 void QuantumCircuit::initialize_hdd() {
-    const int vacuum_state_id = state_pool_.allocate_state();
+    const int vacuum_state_id = state_pool_.allocate_state(execution_device_id_);
     if (vacuum_state_id < 0) {
         throw std::runtime_error("初始化HDD失败：无法分配初始状态");
     }
@@ -988,7 +1054,7 @@ void QuantumCircuit::initialize_hdd() {
         return;
     }
 
-    const int zero_state_id = state_pool_.allocate_state();
+    const int zero_state_id = state_pool_.allocate_state(execution_device_id_);
     if (zero_state_id < 0) {
         throw std::runtime_error("初始化HDD失败：无法分配零状态");
     }

@@ -586,7 +586,9 @@ private:
     /**
      * 复制并缩放终端节点状态
      */
-    HDDNode* duplicate_scaled_terminal_node(HDDNode* terminal_node, std::complex<double> weight);
+    HDDNode* duplicate_scaled_terminal_node(HDDNode* terminal_node,
+                                            std::complex<double> weight,
+                                            int preferred_device = -1);
 
     /**
      * 递归应用单qubit门
@@ -688,6 +690,12 @@ private:
      * 执行qubit门操作
      */
     void execute_qubit_gate(const GateParams& gate);
+    bool try_get_single_qubit_gate_matrix(
+        const GateParams& gate,
+        std::array<std::complex<double>, 4>* matrix) const;
+    void apply_single_qubit_gate_matrix(
+        int target_qubit,
+        const std::array<std::complex<double>, 4>& matrix);
 
     /**
      * 执行混合门操作 (CPU+GPU)
