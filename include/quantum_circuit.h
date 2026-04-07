@@ -731,6 +731,14 @@ private:
      * 执行Rabi相互作用 RB(θ)
      */
     void execute_rabi_interaction(const GateParams& gate);
+    bool try_collect_normalized_pairwise_terminal_ids(
+        int control_qubit,
+        std::vector<int>* low_ids,
+        std::vector<int>* high_ids) const;
+    bool try_execute_inplace_pairwise_hybrid_gate(
+        const GateParams& gate,
+        const std::vector<int>& low_ids,
+        const std::vector<int>& high_ids);
 
     /**
      * 执行Jaynes-Cummings相互作用 JC(θ,φ)

@@ -909,6 +909,61 @@ size_t QuantumCircuit::execute_range(size_t start_block, size_t max_blocks) {
                                << current_block.gates.size() << " "
                                << gate_type_name(gate.type) << std::endl;
             execute_gate(gate, &exact_batch_context);
+
+            const auto supports_pairwise_inplace_reuse =
+                [](const GateParams& candidate) {
+                    if (candidate.target_qubits.size() != 1) {
+                        return false;
+                    }
+                    switch (candidate.type) {
+                        case GateType::RABI_INTERACTION:
+                        case GateType::JAYNES_CUMMINGS:
+                        case GateType::ANTI_JAYNES_CUMMINGS:
+                            return true;
+                        default:
+                            return false;
+                    }
+                };
+            if (!supports_pairwise_inplace_reuse(gate)) {
+                continue;
+            }
+
+            const int control_qubit = gate.target_qubits[0];
+            size_t run_end = gate_index + 1;
+            while (run_end < current_block.gates.size()) {
+                const GateParams& next_gate = current_block.gates[run_end];
+                if (!supports_pairwise_inplace_reuse(next_gate) ||
+                    next_gate.target_qubits[0] != control_qubit) {
+                    break;
+                }
+                ++run_end;
+            }
+            if (run_end == gate_index + 1) {
+                continue;
+            }
+
+            std::vector<int> low_ids;
+            std::vector<int> high_ids;
+            if (!try_collect_normalized_pairwise_terminal_ids(
+                    control_qubit, &low_ids, &high_ids)) {
+                continue;
+            }
+
+            for (size_t fast_gate_index = gate_index + 1;
+                 fast_gate_index < run_end;
+                 ++fast_gate_index) {
+                const GateParams& fast_gate = current_block.gates[fast_gate_index];
+                FALLBACK_DEBUG_LOG << "[fallback] block " << block_index
+                                   << " gate " << (fast_gate_index + 1) << "/"
+                                   << current_block.gates.size() << " "
+                                   << gate_type_name(fast_gate.type)
+                                   << " (pairwise fast path)" << std::endl;
+                if (!try_execute_inplace_pairwise_hybrid_gate(
+                        fast_gate, low_ids, high_ids)) {
+                    execute_gate(fast_gate, &exact_batch_context);
+                }
+            }
+            gate_index = run_end - 1;
         }
 
         synchronize_async_cv_pipeline();
