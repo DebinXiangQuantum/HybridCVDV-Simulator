@@ -15,6 +15,24 @@ bool is_unit_pairwise_weight(const std::complex<double>& weight) {
     return std::abs(weight - std::complex<double>(1.0, 0.0)) < 1e-14;
 }
 
+struct WeightedNodeKey {
+    HDDNode* node = nullptr;
+    std::complex<double> weight{1.0, 0.0};
+
+    bool operator==(const WeightedNodeKey& other) const {
+        return node == other.node && weight == other.weight;
+    }
+};
+
+struct WeightedNodeKeyHash {
+    size_t operator()(const WeightedNodeKey& key) const {
+        size_t hash = std::hash<HDDNode*>()(key.node);
+        hash ^= std::hash<double>()(key.weight.real()) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        hash ^= std::hash<double>()(key.weight.imag()) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        return hash;
+    }
+};
+
 }  // namespace
 
 bool QuantumCircuit::try_collect_normalized_pairwise_terminal_ids(
@@ -114,6 +132,65 @@ bool QuantumCircuit::try_collect_normalized_pairwise_terminal_ids(
         return false;
     }
     return true;
+}
+
+bool QuantumCircuit::normalize_root_for_pairwise_fastpath() {
+    if (!root_node_ || has_symbolic_terminals()) {
+        return false;
+    }
+
+    std::unordered_map<WeightedNodeKey, HDDNode*, WeightedNodeKeyHash> memo;
+    std::vector<int> allocated_state_ids;
+
+    try {
+        std::function<HDDNode*(HDDNode*, std::complex<double>)> normalize_recursive =
+            [&](HDDNode* node, std::complex<double> weight) -> HDDNode* {
+                if (!node) {
+                    return nullptr;
+                }
+
+                const WeightedNodeKey key{node, weight};
+                const auto memo_it = memo.find(key);
+                if (memo_it != memo.end()) {
+                    return memo_it->second;
+                }
+
+                HDDNode* result = nullptr;
+                if (node->is_terminal()) {
+                    if (node->tensor_id < 0) {
+                        throw std::runtime_error(
+                            "pairwise fast-path root normalization encountered invalid terminal id");
+                    }
+
+                    const int preferred_device =
+                        state_pool_.get_state_device_id(node->tensor_id);
+                    result =
+                        duplicate_scaled_terminal_node(node, weight, preferred_device);
+                    allocated_state_ids.push_back(result->tensor_id);
+                } else {
+                    HDDNode* new_low =
+                        normalize_recursive(node->low, weight * node->w_low);
+                    HDDNode* new_high =
+                        normalize_recursive(node->high, weight * node->w_high);
+                    result = node_manager_.get_or_create_node(
+                        node->qubit_level, new_low, new_high, 1.0, 1.0);
+                }
+
+                memo.emplace(key, result);
+                return result;
+            };
+
+        HDDNode* new_root = normalize_recursive(root_node_, std::complex<double>(1.0, 0.0));
+        replace_root_node(new_root);
+        return true;
+    } catch (...) {
+        for (int state_id : allocated_state_ids) {
+            if (state_pool_.is_valid_state(state_id)) {
+                state_pool_.free_state(state_id);
+            }
+        }
+        throw;
+    }
 }
 
 bool QuantumCircuit::try_execute_inplace_pairwise_hybrid_gate(

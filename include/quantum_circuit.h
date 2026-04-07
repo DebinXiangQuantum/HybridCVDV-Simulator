@@ -735,6 +735,7 @@ private:
         int control_qubit,
         std::vector<int>* low_ids,
         std::vector<int>* high_ids) const;
+    bool normalize_root_for_pairwise_fastpath();
     bool try_execute_inplace_pairwise_hybrid_gate(
         const GateParams& gate,
         const std::vector<int>& low_ids,
