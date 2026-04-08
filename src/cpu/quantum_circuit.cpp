@@ -253,6 +253,7 @@ QuantumCircuit::QuantumCircuit(int num_qubits, int num_qumodes, int cv_truncatio
       diagonal_mixture_enabled_(true),
       fused_diagonal_enabled_(true),
       eager_symbolic_materialization_enabled_(false),
+      force_dense_fock_(false),
       qubit_only_block_count_(0),
       gaussian_symbolic_block_count_(0),
       diagonal_mixture_block_count_(0),
@@ -935,7 +936,13 @@ size_t QuantumCircuit::execute_range(size_t start_block, size_t max_blocks) {
                     std::vector<int> high_ids;
                     bool have_pairs = try_collect_normalized_pairwise_terminal_ids(
                         control_qubit, &low_ids, &high_ids);
-                    if (!have_pairs && normalize_root_for_pairwise_fastpath()) {
+                    // Only trigger root normalization when the per-terminal state space is small
+                    // enough that the traversal is cheaper than repeated pairwise rebuilds.
+                    // cutoff^nm > 4096 makes normalization overhead outweigh the savings.
+                    const size_t total_state_dim =
+                        static_cast<size_t>(state_pool_.get_max_total_dim());
+                    if (!have_pairs && total_state_dim > 0 && total_state_dim <= 4096 &&
+                        normalize_root_for_pairwise_fastpath()) {
                         const auto& target_states = get_cached_target_states();
                         exact_batch_context = ExactGateBatchContext{};
                         if (!target_states.empty()) {
@@ -1120,6 +1127,10 @@ void QuantumCircuit::set_fused_diagonal_enabled(bool enabled) {
 
 void QuantumCircuit::set_eager_symbolic_materialization_enabled(bool enabled) {
     eager_symbolic_materialization_enabled_ = enabled;
+}
+
+void QuantumCircuit::set_force_dense_fock(bool enabled) {
+    force_dense_fock_ = enabled;
 }
 
 void QuantumCircuit::set_gaussian_state_pool_capacity(int capacity) {

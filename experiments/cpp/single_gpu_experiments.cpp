@@ -101,6 +101,7 @@ struct CliOptions {
     bool diagonal_mixture_enabled = true;
     bool fused_diagonal_enabled = true;
     bool eager_symbolic_materialization_enabled = false;
+    bool force_dense_fock = false;
     int max_states_override = 0; // 0 = use default per-circuit values
     fs::path output_path = fs::path("experiments/results/internal_single_gpu.json");
 };
@@ -112,6 +113,7 @@ bool g_gaussian_symbolic_enabled = true;
 bool g_diagonal_mixture_enabled = true;
 bool g_fused_diagonal_enabled = true;
 bool g_eager_symbolic_materialization_enabled = false;
+bool g_force_dense_fock = false;
 int g_max_states_override = 0;
 int g_scaling_warmup_runs_override = -1;
 int g_scaling_measured_runs_override = -1;
@@ -607,6 +609,7 @@ CircuitRunResult run_circuit_once(int num_qubits,
         circuit.set_fused_diagonal_enabled(g_fused_diagonal_enabled);
         circuit.set_eager_symbolic_materialization_enabled(
             g_eager_symbolic_materialization_enabled);
+        circuit.set_force_dense_fock(g_force_dense_fock);
         setup_fn(circuit);
         circuit.build();
         if (initial_state && !set_terminal_state(circuit, *initial_state)) {
@@ -2073,15 +2076,19 @@ std::vector<ExperimentResult> run_scaling_suite(const std::string& name_filter) 
     }
 
     for (int cutoff : {4, 8, 16, 32}) {
-        for (int nm : {1, 2, 4, 8}) {
+        for (int nm : {1, 2, 4, 6, 7, 8}) {
             double mem_per_state = std::pow(static_cast<double>(cutoff), nm) * 16.0;
             double total_vram_budget = single_circuit_vram_budget_bytes();
-            if (mem_per_state * qaoa_max_states > total_vram_budget) continue;
+            int effective_max_states = qaoa_max_states;
+            if (mem_per_state * effective_max_states > total_vram_budget) {
+                effective_max_states = static_cast<int>(total_vram_budget / mem_per_state);
+            }
+            if (effective_max_states < 1) continue;
 
             const std::string name = "sc26_qaoa_nm" + std::to_string(nm) + "_c" + std::to_string(cutoff);
-            append_filtered_scaling_case(results, name_filter, name, [nm, cutoff, name, qaoa_max_states]() {
+            append_filtered_scaling_case(results, name_filter, name, [nm, cutoff, name, effective_max_states]() {
                 const std::vector<double> params = make_qaoa_angles(2);
-                return run_scaling_case(name, "qaoa_circuit", 1, nm, cutoff, 2, qaoa_max_states, nullptr,
+                return run_scaling_case(name, "qaoa_circuit", 1, nm, cutoff, 2, effective_max_states, nullptr,
                     [nm, params](QuantumCircuit& circuit) { add_cv_qaoa_circuit_gates(circuit, nm, params, 0.5, 1.0, 2); });
             });
         }
@@ -2151,6 +2158,8 @@ CliOptions parse_cli(int argc, char** argv) {
             options.fused_diagonal_enabled = false;
         } else if (arg == "--enable-eager-symbolic-materialization") {
             options.eager_symbolic_materialization_enabled = true;
+        } else if (arg == "--force-dense-fock") {
+            options.force_dense_fock = true;
         } else if (arg == "--output" && i + 1 < argc) {
             options.output_path = fs::path(argv[++i]);
         } else if (arg == "--max-states" && i + 1 < argc) {
@@ -2163,6 +2172,7 @@ CliOptions parse_cli(int argc, char** argv) {
                          "[--disable-gaussian-symbolic] [--disable-diagonal-mixture] "
                          "[--disable-fused-diagonal] "
                          "[--enable-eager-symbolic-materialization] "
+                         "[--force-dense-fock] "
                          "[--use-interaction-picture] "
                          "[--max-states N] [--output path]\n";
             std::exit(0);
@@ -2215,6 +2225,8 @@ void write_report(const fs::path& output_path,
         << (g_fused_diagonal_enabled ? "true" : "false") << ",\n";
     out << "  \"eager_symbolic_materialization_enabled\": "
         << (g_eager_symbolic_materialization_enabled ? "true" : "false") << ",\n";
+    out << "  \"force_dense_fock\": "
+        << (g_force_dense_fock ? "true" : "false") << ",\n";
     out << "  \"use_interaction_picture\": " << (use_interaction_picture ? "true" : "false") << ",\n";
     out << "  \"device\": {\n";
     out << "    \"available\": " << (device.available ? "true" : "false") << ",\n";
@@ -2266,6 +2278,7 @@ int main(int argc, char** argv) {
         g_fused_diagonal_enabled = options.fused_diagonal_enabled;
         g_eager_symbolic_materialization_enabled =
             options.eager_symbolic_materialization_enabled;
+        g_force_dense_fock = options.force_dense_fock;
         g_max_states_override = options.max_states_override;
         g_scaling_warmup_runs_override =
             parse_nonnegative_env_override("HYBRIDCVDV_SCALING_WARMUP_RUNS", 0);

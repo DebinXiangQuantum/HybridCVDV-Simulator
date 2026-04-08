@@ -1,0 +1,142 @@
+{
+  "schema_version": "1.0",
+  "generated_at_utc": "2026-04-07T02:48:36Z",
+  "simulator": "HybridCVDV-Simulator",
+  "single_gpu_only": true,
+  "num_gpus": 1,
+  "requested_suite": "scaling",
+  "gaussian_symbolic_mode_limit": 4,
+  "symbolic_branch_limit": 64,
+  "gaussian_symbolic_enabled": true,
+  "diagonal_mixture_enabled": true,
+  "fused_diagonal_enabled": true,
+  "eager_symbolic_materialization_enabled": false,
+  "use_interaction_picture": false,
+  "device": {
+    "available": true,
+    "device_index": 0,
+    "name": "NVIDIA L20",
+    "compute_capability": "8.9",
+    "multiprocessor_count": 92,
+    "total_global_mem_bytes": 47676129280,
+    "shared_mem_per_block_bytes": 49152
+  },
+  "results": [
+    {
+      "name": "sc26_gkp_c4",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "4",
+        "depth": "9",
+        "measured_runs": "5",
+        "num_qubits": "1",
+        "num_qumodes": "1",
+        "warmup_runs": "2",
+        "workload": "gkp_state_circuit"
+      },
+      "metrics": {
+        "median_active_states": 2,
+        "median_compute_ms": 15.085376,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 12,
+        "median_gaussian_symbolic_blocks": 5,
+        "median_hdd_nodes": 3,
+        "median_memory_bytes": 3264,
+        "median_qubit_only_blocks": 17,
+        "median_symbolic_materializations": 0,
+        "median_total_ms": 28.836457,
+        "median_transfer_ms": 1.644732,
+        "throughput_ops_per_sec": 34.6783240396003
+      }
+    },
+    {
+      "name": "sc26_gkp_c8",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "8",
+        "depth": "9",
+        "measured_runs": "5",
+        "num_qubits": "1",
+        "num_qumodes": "1",
+        "warmup_runs": "2",
+        "workload": "gkp_state_circuit"
+      },
+      "metrics": {
+        "median_active_states": 2,
+        "median_compute_ms": 29.406626,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 12,
+        "median_gaussian_symbolic_blocks": 5,
+        "median_hdd_nodes": 3,
+        "median_memory_bytes": 3968,
+        "median_qubit_only_blocks": 17,
+        "median_symbolic_materializations": 0,
+        "median_total_ms": 43.182022,
+        "median_transfer_ms": 1.657489,
+        "throughput_ops_per_sec": 23.1577854320949
+      }
+    },
+    {
+      "name": "sc26_gkp_c16",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "depth": "9",
+        "measured_runs": "5",
+        "num_qubits": "1",
+        "num_qumodes": "1",
+        "warmup_runs": "2",
+        "workload": "gkp_state_circuit"
+      },
+      "metrics": {
+        "median_active_states": 2,
+        "median_compute_ms": 81.714839,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 12,
+        "median_gaussian_symbolic_blocks": 5,
+        "median_hdd_nodes": 3,
+        "median_memory_bytes": 5376,
+        "median_qubit_only_blocks": 17,
+        "median_symbolic_materializations": 0,
+        "median_total_ms": 95.609558,
+        "median_transfer_ms": 1.651048,
+        "throughput_ops_per_sec": 10.4592053443025
+      }
+    },
+    {
+      "name": "sc26_gkp_c32",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "32",
+        "depth": "9",
+        "measured_runs": "5",
+        "num_qubits": "1",
+        "num_qumodes": "1",
+        "warmup_runs": "2",
+        "workload": "gkp_state_circuit"
+      },
+      "metrics": {
+        "median_active_states": 2,
+        "median_compute_ms": 279.859487,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 12,
+        "median_gaussian_symbolic_blocks": 5,
+        "median_hdd_nodes": 3,
+        "median_memory_bytes": 8192,
+        "median_qubit_only_blocks": 17,
+        "median_symbolic_materializations": 0,
+        "median_total_ms": 294.193293,
+        "median_transfer_ms": 1.680901,
+        "throughput_ops_per_sec": 3.39912575777178
+      }
+    }
+  ]
+}

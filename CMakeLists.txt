@@ -132,6 +132,7 @@ if(CUDA_FOUND)
         src/gpu/hybrid_gates.cu
         src/gpu/hybrid_interaction_gates.cu
         src/gpu/squeezing_gate.cu
+        src/gpu/dense_fock_baseline.cu
         src/gpu/qubit_gates.cu
         src/gpu/snap_gates.cu
         src/gpu/gaussian_kernels.cu

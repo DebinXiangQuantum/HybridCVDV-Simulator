@@ -5,13 +5,193 @@
 #include "gaussian_kernels.h"
 #include "gaussian_state.h"
 #include "squeezing_gate_gpu.h"
+#include "squeezing_matrix.h"
 #include "two_mode_gates.h"
+#include "dense_fock_baseline.h"
 
 using namespace circuit_internal;
 
 namespace {
 
 using SingleQubitMatrix = std::array<std::complex<double>, 4>;
+
+// Build a D×D dense diagonal matrix on host for a Level-0 gate (ablation baseline).
+std::vector<cuDoubleComplex> build_dense_level0_matrix(
+    GateType type, int D, double param, int target_fock = -1,
+    const std::vector<std::complex<double>>* multi_params = nullptr) {
+    std::vector<cuDoubleComplex> mat(static_cast<size_t>(D) * D,
+                                     make_cuDoubleComplex(0.0, 0.0));
+    for (int n = 0; n < D; ++n) {
+        double phase = 0.0;
+        switch (type) {
+            case GateType::PHASE_ROTATION:
+                phase = param * n;
+                break;
+            case GateType::KERR_GATE:
+                phase = param * static_cast<double>(n) * static_cast<double>(n);
+                break;
+            case GateType::CONDITIONAL_PARITY:
+                phase = param * (n % 2 == 0 ? 0.0 : M_PI);
+                break;
+            case GateType::SNAP_GATE:
+                phase = (n == target_fock) ? param : 0.0;
+                break;
+            case GateType::MULTI_SNAP_GATE:
+                phase = (multi_params && n < static_cast<int>(multi_params->size()))
+                            ? (*multi_params)[n].real()
+                            : 0.0;
+                break;
+            default:
+                break;
+        }
+        mat[static_cast<size_t>(n) * D + n] =
+            make_cuDoubleComplex(std::cos(phase), std::sin(phase));
+    }
+    return mat;
+}
+
+// Build a D×D dense matrix for creation operator â† (ablation baseline).
+std::vector<cuDoubleComplex> build_dense_creation_matrix(int D) {
+    std::vector<cuDoubleComplex> mat(static_cast<size_t>(D) * D,
+                                     make_cuDoubleComplex(0.0, 0.0));
+    for (int n = 1; n < D; ++n) {
+        // â†|n-1⟩ = √n |n⟩  →  row n, col n-1
+        mat[static_cast<size_t>(n) * D + (n - 1)] =
+            make_cuDoubleComplex(std::sqrt(static_cast<double>(n)), 0.0);
+    }
+    return mat;
+}
+
+// Build a D×D dense matrix for annihilation operator â (ablation baseline).
+std::vector<cuDoubleComplex> build_dense_annihilation_matrix(int D) {
+    std::vector<cuDoubleComplex> mat(static_cast<size_t>(D) * D,
+                                     make_cuDoubleComplex(0.0, 0.0));
+    for (int n = 0; n + 1 < D; ++n) {
+        // â|n+1⟩ = √(n+1) |n⟩  →  row n, col n+1
+        mat[static_cast<size_t>(n) * D + (n + 1)] =
+            make_cuDoubleComplex(std::sqrt(static_cast<double>(n + 1)), 0.0);
+    }
+    return mat;
+}
+
+// Upload a host matrix to device scratch_aux and return device pointer.
+// Uses scratch_aux to avoid conflict with scratch_temp used by kernel temp buffers.
+cuDoubleComplex* upload_dense_matrix_to_gpu(
+    CVStatePool& pool, const std::vector<cuDoubleComplex>& host_mat) {
+    const size_t bytes = host_mat.size() * sizeof(cuDoubleComplex);
+    cuDoubleComplex* d_mat = static_cast<cuDoubleComplex*>(
+        pool.scratch_aux.ensure(bytes));
+    CHECK_CUDA(cudaMemcpy(d_mat, host_mat.data(), bytes, cudaMemcpyHostToDevice));
+    return d_mat;
+}
+
+// Build a D×D dense displacement matrix <n|D(α)|m> on host.
+std::vector<cuDoubleComplex> build_dense_displacement_matrix(int D, std::complex<double> alpha) {
+    std::vector<cuDoubleComplex> mat(static_cast<size_t>(D) * D,
+                                     make_cuDoubleComplex(0.0, 0.0));
+    const double ar = alpha.real(), ai = alpha.imag();
+    const double norm_sq = ar * ar + ai * ai;
+    const double exp_factor = std::exp(-norm_sq / 2.0);
+
+    for (int n = 0; n < D; ++n) {
+        for (int m = 0; m < D; ++m) {
+            int mn = std::min(n, m), mx = std::max(n, m);
+            int diff = mx - mn;
+
+            // sqrt(min!/max!) = prod_{k=mn+1}^{mx} 1/sqrt(k)
+            double sqrt_fact_ratio = 1.0;
+            for (int k = mn + 1; k <= mx; ++k)
+                sqrt_fact_ratio /= std::sqrt(static_cast<double>(k));
+
+            // alpha^{n-m} or (-conj(alpha))^{m-n}
+            std::complex<double> power(1.0, 0.0);
+            std::complex<double> base = (n >= m) ? alpha : std::complex<double>(-ar, ai);
+            for (int k = 0; k < diff; ++k) power *= base;
+
+            // Associated Laguerre L_{mn}^{|n-m|}(|alpha|^2)
+            double laguerre = 0.0, x_pow = 1.0, fact_j = 1.0;
+            for (int j = 0; j <= mn; ++j) {
+                if (j > 0) { x_pow *= norm_sq; fact_j *= j; }
+                double binom = 1.0;
+                for (int k = 0; k < mn - j; ++k)
+                    binom *= static_cast<double>(mx - k) / static_cast<double>(k + 1);
+                laguerre += binom * ((j % 2 == 0) ? 1.0 : -1.0) * x_pow / fact_j;
+            }
+
+            double scale = exp_factor * sqrt_fact_ratio * laguerre;
+            auto val = std::complex<double>(scale, 0.0) * power;
+            mat[static_cast<size_t>(n) * D + m] =
+                make_cuDoubleComplex(val.real(), val.imag());
+        }
+    }
+    return mat;
+}
+
+// Build a D×D dense squeezing matrix on host using the existing trusted implementation.
+std::vector<cuDoubleComplex> build_dense_squeezing_cucomplex(int D, double r, double theta) {
+    auto cmat = generate_squeezing_matrix(r, theta, D);
+    std::vector<cuDoubleComplex> mat(static_cast<size_t>(D) * D);
+    for (size_t i = 0; i < mat.size(); ++i) {
+        mat[i] = make_cuDoubleComplex(cmat[i].real(), cmat[i].imag());
+    }
+    return mat;
+}
+
+// Build ELL format from a dense D×D matrix on CPU, upload to GPU scratch buffers.
+// Returns (d_ell_val, d_ell_col, actual_bandwidth).
+struct ELLOnGPU {
+    cuDoubleComplex* d_val;
+    int*             d_col;
+    int              bandwidth;
+};
+
+ELLOnGPU build_and_upload_ell(
+    CVStatePool& pool,
+    const std::vector<cuDoubleComplex>& dense_matrix,
+    int D, double tolerance = 1e-12)
+{
+    // Determine max non-zeros per row
+    int max_nnz = 0;
+    for (int row = 0; row < D; ++row) {
+        int nnz = 0;
+        for (int col = 0; col < D; ++col) {
+            auto& v = dense_matrix[static_cast<size_t>(row) * D + col];
+            if (std::sqrt(v.x * v.x + v.y * v.y) > tolerance) ++nnz;
+        }
+        max_nnz = std::max(max_nnz, nnz);
+    }
+    if (max_nnz == 0) max_nnz = 1;
+
+    // Build ELL arrays on host
+    const size_t total = static_cast<size_t>(D) * max_nnz;
+    std::vector<cuDoubleComplex> h_val(total, make_cuDoubleComplex(0.0, 0.0));
+    std::vector<int>             h_col(total, -1);
+
+    for (int row = 0; row < D; ++row) {
+        int k = 0;
+        for (int col = 0; col < D && k < max_nnz; ++col) {
+            auto& v = dense_matrix[static_cast<size_t>(row) * D + col];
+            if (std::sqrt(v.x * v.x + v.y * v.y) > tolerance) {
+                h_val[static_cast<size_t>(row) * max_nnz + k] = v;
+                h_col[static_cast<size_t>(row) * max_nnz + k] = col;
+                ++k;
+            }
+        }
+    }
+
+    // Upload to GPU — use scratch_aux (split in half for val and col)
+    const size_t val_bytes = total * sizeof(cuDoubleComplex);
+    const size_t col_bytes = total * sizeof(int);
+    // Ensure scratch_aux has room for both arrays
+    auto* base = static_cast<char*>(pool.scratch_aux.ensure(val_bytes + col_bytes));
+    auto* d_val = reinterpret_cast<cuDoubleComplex*>(base);
+    auto* d_col = reinterpret_cast<int*>(base + val_bytes);
+
+    CHECK_CUDA(cudaMemcpy(d_val, h_val.data(), val_bytes, cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(d_col, h_col.data(), col_bytes, cudaMemcpyHostToDevice));
+
+    return {d_val, d_col, max_nnz};
+}
 
 }  // namespace
 
@@ -73,6 +253,46 @@ void QuantumCircuit::execute_level0_gate(const GateParams& gate,
     // 统计计算时延
     auto compute_start = std::chrono::high_resolution_clock::now();
 
+    // Ablation: force dense D×D gemv for all Level-0 gates
+    if (force_dense_fock_) {
+        const int D = cv_truncation_;
+        int target_fock = -1;
+        if (gate.type == GateType::SNAP_GATE && gate.params.size() >= 2) {
+            target_fock = static_cast<int>(std::llround(gate.params[1].real()));
+        }
+        const std::vector<std::complex<double>>* multi_params =
+            (gate.type == GateType::MULTI_SNAP_GATE) ? &gate.params : nullptr;
+
+        // Cross-Kerr is a two-mode diagonal gate — build D²×D² diagonal tensor
+        if (gate.type == GateType::CROSS_KERR_GATE) {
+            if (gate.target_qumodes.size() < 2) {
+                throw std::runtime_error("Cross-Kerr门缺少两个目标qumode");
+            }
+            const int D2 = D * D;
+            std::vector<cuDoubleComplex> tensor(
+                static_cast<size_t>(D2) * D2, make_cuDoubleComplex(0.0, 0.0));
+            for (int m = 0; m < D; ++m) {
+                for (int n = 0; n < D; ++n) {
+                    double phase = param * static_cast<double>(m) * static_cast<double>(n);
+                    int idx = m * D + n;
+                    tensor[static_cast<size_t>(idx) * D2 + idx] =
+                        make_cuDoubleComplex(std::cos(phase), std::sin(phase));
+                }
+            }
+            cuDoubleComplex* d_tensor = upload_dense_matrix_to_gpu(state_pool_, tensor);
+            apply_dense_two_mode_gate_gpu(
+                &state_pool_, d_target_ids, static_cast<int>(target_states.size()),
+                d_tensor, D, gate.target_qumodes[0], gate.target_qumodes[1], num_qumodes_);
+        } else {
+            auto host_mat = build_dense_level0_matrix(
+                gate.type, D, param, target_fock, multi_params);
+            cuDoubleComplex* d_mat = upload_dense_matrix_to_gpu(state_pool_, host_mat);
+            apply_dense_single_mode_gate_gpu(
+                &state_pool_, d_target_ids, static_cast<int>(target_states.size()),
+                d_mat, D, target_qumode, num_qumodes_);
+        }
+    } else {
+
     switch (gate.type) {
         case GateType::PHASE_ROTATION:
             apply_phase_rotation_on_mode(&state_pool_, d_target_ids, target_states.size(), param,
@@ -122,6 +342,8 @@ void QuantumCircuit::execute_level0_gate(const GateParams& gate,
         default:
             throw std::runtime_error("未实现的Level0门类型");
     }
+
+    }  // end if/else force_dense_fock_
 
     // 检查GPU内核执行错误
     CHECK_CUDA(cudaGetLastError());
@@ -183,6 +405,23 @@ void QuantumCircuit::execute_level1_gate(const GateParams& gate,
     auto compute_start = std::chrono::high_resolution_clock::now();
     const int target_qumode = gate.target_qumodes.empty() ? 0 : gate.target_qumodes[0];
 
+    // Ablation: force dense D×D gemv for Level-1 (ladder) gates
+    if (force_dense_fock_) {
+        const int D = cv_truncation_;
+        std::vector<cuDoubleComplex> host_mat;
+        if (gate.type == GateType::CREATION_OPERATOR) {
+            host_mat = build_dense_creation_matrix(D);
+        } else if (gate.type == GateType::ANNIHILATION_OPERATOR) {
+            host_mat = build_dense_annihilation_matrix(D);
+        }
+        if (!host_mat.empty()) {
+            cuDoubleComplex* d_mat = upload_dense_matrix_to_gpu(state_pool_, host_mat);
+            apply_dense_single_mode_gate_gpu(
+                &state_pool_, d_target_ids, static_cast<int>(target_states.size()),
+                d_mat, D, target_qumode, num_qumodes_);
+        }
+    } else {
+
     switch (gate.type) {
         case GateType::CREATION_OPERATOR:
             apply_creation_operator_on_mode(&state_pool_, d_target_ids, target_states.size(),
@@ -199,6 +438,8 @@ void QuantumCircuit::execute_level1_gate(const GateParams& gate,
         default:
             break;
     }
+
+    }  // end if/else force_dense_fock_
 
     // 检查GPU内核执行错误
     CHECK_CUDA(cudaGetLastError());
@@ -240,6 +481,56 @@ void QuantumCircuit::execute_level2_gate(const GateParams& gate,
     }
 
     const int target_qumode = gate.target_qumodes.empty() ? 0 : gate.target_qumodes[0];
+
+    // === ELL sparse path (default) — O(K_eff × D) ===
+    if (!force_dense_fock_) {
+        // ELL path requires synchronous operation (CPU matrix build + upload)
+        if (async_cv_pipeline_enabled_) {
+            synchronize_async_cv_pipeline();
+        }
+
+        auto transfer_start = std::chrono::high_resolution_clock::now();
+        int* d_target_ids = nullptr;
+        if (batch_context && batch_context->d_target_ids) {
+            d_target_ids = batch_context->d_target_ids;
+        } else {
+            d_target_ids = state_pool_.upload_vector_to_buffer(
+                target_states, state_pool_.scratch_target_ids);
+        }
+        auto transfer_end = std::chrono::high_resolution_clock::now();
+        transfer_time_ += std::chrono::duration<double, std::milli>(transfer_end - transfer_start).count();
+
+        auto compute_start = std::chrono::high_resolution_clock::now();
+        const int D = cv_truncation_;
+
+        if (gate.type == GateType::DISPLACEMENT && !gate.params.empty()) {
+            std::complex<double> alpha = gate.params[0];
+            auto dense_mat = build_dense_displacement_matrix(D, alpha);
+            auto ell = build_and_upload_ell(state_pool_, dense_mat, D);
+            apply_ell_gate_on_mode(
+                &state_pool_, d_target_ids, static_cast<int>(target_states.size()),
+                ell.d_val, ell.d_col, D, ell.bandwidth,
+                target_qumode, num_qumodes_);
+        } else if (gate.type == GateType::SQUEEZING && !gate.params.empty()) {
+            double r = std::abs(gate.params[0]);
+            double theta = std::arg(gate.params[0]);
+            auto dense_mat = build_dense_squeezing_cucomplex(D, r, theta);
+            auto ell = build_and_upload_ell(state_pool_, dense_mat, D);
+            apply_ell_gate_on_mode(
+                &state_pool_, d_target_ids, static_cast<int>(target_states.size()),
+                ell.d_val, ell.d_col, D, ell.bandwidth,
+                target_qumode, num_qumodes_);
+        } else {
+            throw std::runtime_error("Level 2 ELL path only supports displacement and squeezing gates");
+        }
+
+        CHECK_CUDA(cudaGetLastError());
+        auto compute_end = std::chrono::high_resolution_clock::now();
+        computation_time_ += std::chrono::duration<double, std::milli>(compute_end - compute_start).count();
+        return;
+    }
+
+    // === Dense path (force_dense_fock_ ablation) — O(D²) ===
     const bool displacement_uses_direct_kernel =
         gate.type == GateType::DISPLACEMENT &&
         num_qumodes_ == 1 &&
@@ -382,10 +673,25 @@ void QuantumCircuit::execute_level3_gate(const GateParams& gate,
         // 统计计算时延
         auto compute_start = std::chrono::high_resolution_clock::now();
 
-        apply_beam_splitter_recursive(&state_pool_, d_target_ids, static_cast<int>(target_states.size()),
-                                      theta, phi, target_qumode1, target_qumode2, num_qumodes_,
-                                      async_cv_pipeline_enabled_ ? compute_stream_ : nullptr,
-                                      !async_cv_pipeline_enabled_);
+        // Ablation: force dense D⁴ tensor contraction for beam splitter
+        if (force_dense_fock_) {
+            const int D = cv_truncation_;
+            std::vector<cuDoubleComplex> host_tensor;
+            build_bs_matrix_recursive(host_tensor, D, theta, phi);
+            const size_t bytes = host_tensor.size() * sizeof(cuDoubleComplex);
+            cuDoubleComplex* d_tensor = static_cast<cuDoubleComplex*>(
+                state_pool_.scratch_aux.ensure(bytes));
+            CHECK_CUDA(cudaMemcpy(d_tensor, host_tensor.data(), bytes,
+                                  cudaMemcpyHostToDevice));
+            apply_dense_two_mode_gate_gpu(
+                &state_pool_, d_target_ids, static_cast<int>(target_states.size()),
+                d_tensor, D, target_qumode1, target_qumode2, num_qumodes_);
+        } else {
+            apply_beam_splitter_recursive(&state_pool_, d_target_ids, static_cast<int>(target_states.size()),
+                                          theta, phi, target_qumode1, target_qumode2, num_qumodes_,
+                                          async_cv_pipeline_enabled_ ? compute_stream_ : nullptr,
+                                          !async_cv_pipeline_enabled_);
+        }
 
         // 检查GPU内核执行错误
         CHECK_CUDA(cudaGetLastError());

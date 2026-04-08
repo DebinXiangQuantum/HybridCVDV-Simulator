@@ -92,6 +92,12 @@ void apply_annihilation_operator_on_mode(CVStatePool* pool, const int* targets, 
 void apply_single_mode_gate(CVStatePool* pool, FockELLOperator* ell_op,
                            const int* targets, int batch_size,
                            cudaStream_t stream = nullptr, bool synchronize = true);
+void apply_ell_gate_on_mode(CVStatePool* pool,
+                            const int* d_target_ids, int batch_size,
+                            const cuDoubleComplex* d_ell_val, const int* d_ell_col,
+                            int ell_dim, int ell_bandwidth,
+                            int target_qumode, int num_qumodes,
+                            cudaStream_t stream = nullptr, bool synchronize = true);
 void apply_displacement_gate(CVStatePool* pool, const int* targets, int batch_size,
                             cuDoubleComplex alpha,
                             cudaStream_t stream = nullptr, bool synchronize = true);

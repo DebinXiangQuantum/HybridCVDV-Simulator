@@ -61,4 +61,8 @@ void apply_sum_gate(CVStatePool* state_pool, const int* target_indices,
                    cudaStream_t stream = nullptr,
                    bool synchronize = true);
 
+// Build D⁴ beam splitter tensor on host (exposed for dense ablation baseline)
+void build_bs_matrix_recursive(
+    std::vector<cuDoubleComplex>& Z, int cutoff, double theta, double phi);
+
 #endif // TWO_MODE_GATES_H

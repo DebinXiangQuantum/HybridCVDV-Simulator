@@ -441,6 +441,152 @@ void apply_single_mode_gate(CVStatePool* state_pool, FockELLOperator* ell_op,
 }
 
 /**
+ * Multi-mode ELL SpMV kernel — applies a D×D ELL operator on a single target mode
+ * within a multi-mode tensor product state (D^nm dimensional).
+ * Each thread handles one flat_index in the full state vector.
+ */
+__global__ void apply_ell_spmv_multimode_kernel(
+    const cuDoubleComplex* __restrict__ state_data,
+    const size_t*          __restrict__ state_offsets,
+    const int64_t*         __restrict__ state_dims,
+    const cuDoubleComplex* __restrict__ ell_val,
+    const int*             __restrict__ ell_col,
+    int ell_dim,           // D (truncation dim of target mode)
+    int ell_bandwidth,     // K_eff
+    const int* __restrict__ target_indices,
+    int batch_size,
+    cuDoubleComplex* __restrict__ temp_buffer,
+    size_t buffer_stride,
+    int target_mode_right_stride
+) {
+    int batch_id = blockIdx.y;
+    if (batch_id >= batch_size) return;
+
+    int state_idx = target_indices[batch_id];
+    size_t flat_index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    int64_t current_dim = state_dims[state_idx];
+    if (flat_index >= static_cast<size_t>(current_dim)) return;
+
+    size_t offset = state_offsets[state_idx];
+    const cuDoubleComplex* psi_in = &state_data[offset];
+    cuDoubleComplex* psi_out = &temp_buffer[batch_id * buffer_stride];
+
+    const size_t right_stride = static_cast<size_t>(target_mode_right_stride);
+    const size_t mode_block = static_cast<size_t>(ell_dim) * right_stride;
+    if (mode_block == 0) return;
+
+    // Decompose flat_index into (group_base, n, intra_offset)
+    const size_t group_start =
+        (flat_index / mode_block) * mode_block + (flat_index % right_stride);
+    const int n = static_cast<int>((flat_index / right_stride) % ell_dim);
+
+    cuDoubleComplex sum = make_cuDoubleComplex(0.0, 0.0);
+    for (int k = 0; k < ell_bandwidth; ++k) {
+        int col = ell_col[n * ell_bandwidth + k];
+        if (col == -1) break;
+        cuDoubleComplex val = ell_val[n * ell_bandwidth + k];
+        size_t src_idx = group_start + static_cast<size_t>(col) * right_stride;
+        sum = cuCadd(sum, cuCmul(val, psi_in[src_idx]));
+    }
+    psi_out[flat_index] = sum;
+}
+
+__global__ void copy_back_multimode_kernel(
+    cuDoubleComplex* __restrict__ state_data,
+    const size_t*    __restrict__ state_offsets,
+    const int64_t*   __restrict__ state_dims,
+    const int*       __restrict__ target_indices,
+    int batch_size,
+    const cuDoubleComplex* __restrict__ temp_buffer,
+    size_t buffer_stride
+) {
+    int batch_id = blockIdx.y;
+    if (batch_id >= batch_size) return;
+
+    int state_idx = target_indices[batch_id];
+    size_t flat_index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    int64_t current_dim = state_dims[state_idx];
+    if (flat_index >= static_cast<size_t>(current_dim)) return;
+
+    size_t offset = state_offsets[state_idx];
+    state_data[offset + flat_index] = temp_buffer[batch_id * buffer_stride + flat_index];
+}
+
+/**
+ * Host interface: apply a D×D ELL operator on a specific mode within multi-mode states.
+ * The ELL val/col arrays must already reside on the GPU.
+ */
+void apply_ell_gate_on_mode(
+    CVStatePool* state_pool,
+    const int* d_target_ids,
+    int batch_size,
+    const cuDoubleComplex* d_ell_val,
+    const int* d_ell_col,
+    int ell_dim,
+    int ell_bandwidth,
+    int target_qumode,
+    int num_qumodes,
+    cudaStream_t stream,
+    bool synchronize
+) {
+    if (!state_pool || !d_target_ids || batch_size <= 0) return;
+
+    int right_stride = 1;
+    for (int m = target_qumode + 1; m < num_qumodes; ++m) {
+        right_stride *= state_pool->d_trunc;
+    }
+
+    const size_t buffer_stride = state_pool->max_total_dim;
+    cuDoubleComplex* temp_buffer = static_cast<cuDoubleComplex*>(
+        state_pool->scratch_temp.ensure(
+            static_cast<size_t>(batch_size) * buffer_stride * sizeof(cuDoubleComplex)));
+
+    dim3 block_dim(256);
+    const unsigned int grid_x = static_cast<unsigned int>(
+        (state_pool->max_total_dim + block_dim.x - 1) / block_dim.x);
+    const int max_launch_batch = max_batch_launch_y();
+
+    for (int batch_offset = 0; batch_offset < batch_size; batch_offset += max_launch_batch) {
+        const int launch_batch = std::min(max_launch_batch, batch_size - batch_offset);
+        const int* launch_targets = d_target_ids + batch_offset;
+        cuDoubleComplex* launch_temp =
+            temp_buffer + static_cast<size_t>(batch_offset) * buffer_stride;
+        dim3 grid_dim(grid_x, static_cast<unsigned int>(launch_batch));
+
+        apply_ell_spmv_multimode_kernel<<<grid_dim, block_dim, 0, stream>>>(
+            state_pool->data, state_pool->state_offsets, state_pool->state_dims,
+            d_ell_val, d_ell_col, ell_dim, ell_bandwidth,
+            launch_targets, launch_batch,
+            launch_temp, buffer_stride, right_stride);
+
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            throw std::runtime_error("ELL multimode SpMV kernel launch failed: " +
+                                     std::string(cudaGetErrorString(err)));
+        }
+
+        copy_back_multimode_kernel<<<grid_dim, block_dim, 0, stream>>>(
+            state_pool->data, state_pool->state_offsets, state_pool->state_dims,
+            launch_targets, launch_batch,
+            launch_temp, buffer_stride);
+
+        err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            throw std::runtime_error("ELL multimode copy-back kernel failed: " +
+                                     std::string(cudaGetErrorString(err)));
+        }
+    }
+
+    if (synchronize) {
+        cudaError_t err = stream != nullptr ? cudaStreamSynchronize(stream) : cudaDeviceSynchronize();
+        if (err != cudaSuccess) {
+            throw std::runtime_error("ELL multimode gate synchronization failed: " +
+                                     std::string(cudaGetErrorString(err)));
+        }
+    }
+}
+
+/**
  * 主机端接口：应用Displacement门 D(α)
  * @param target_indices 设备端指针或主机端指针（根据调用者不同）
  * 注意：这个函数需要特殊处理，因为它直接访问target_indices
