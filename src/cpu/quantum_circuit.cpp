@@ -253,6 +253,7 @@ QuantumCircuit::QuantumCircuit(int num_qubits, int num_qumodes, int cv_truncatio
       diagonal_mixture_enabled_(true),
       fused_diagonal_enabled_(true),
       eager_symbolic_materialization_enabled_(false),
+      force_dense_fock_(false),
       qubit_only_block_count_(0),
       gaussian_symbolic_block_count_(0),
       diagonal_mixture_block_count_(0),
@@ -902,13 +903,125 @@ size_t QuantumCircuit::execute_range(size_t start_block, size_t max_blocks) {
                            << " executing exact path with " << current_block.gates.size()
                            << " gates"
                            << " kind=" << static_cast<int>(current_block.kind) << std::endl;
+        const auto supports_pairwise_inplace_reuse =
+            [](const GateParams& candidate) {
+                if (candidate.target_qubits.size() != 1) {
+                    return false;
+                }
+                switch (candidate.type) {
+                    case GateType::RABI_INTERACTION:
+                    case GateType::JAYNES_CUMMINGS:
+                    case GateType::ANTI_JAYNES_CUMMINGS:
+                        return true;
+                    default:
+                        return false;
+                }
+            };
         for (size_t gate_index = 0; gate_index < current_block.gates.size(); ++gate_index) {
             const GateParams& gate = current_block.gates[gate_index];
+            if (supports_pairwise_inplace_reuse(gate)) {
+                const int control_qubit = gate.target_qubits[0];
+                size_t run_end = gate_index + 1;
+                while (run_end < current_block.gates.size()) {
+                    const GateParams& next_gate = current_block.gates[run_end];
+                    if (!supports_pairwise_inplace_reuse(next_gate) ||
+                        next_gate.target_qubits[0] != control_qubit) {
+                        break;
+                    }
+                    ++run_end;
+                }
+
+                if (run_end > gate_index + 1) {
+                    std::vector<int> low_ids;
+                    std::vector<int> high_ids;
+                    bool have_pairs = try_collect_normalized_pairwise_terminal_ids(
+                        control_qubit, &low_ids, &high_ids);
+                    // Only trigger root normalization when the per-terminal state space is small
+                    // enough that the traversal is cheaper than repeated pairwise rebuilds.
+                    // cutoff^nm > 4096 makes normalization overhead outweigh the savings.
+                    const size_t total_state_dim =
+                        static_cast<size_t>(state_pool_.get_max_total_dim());
+                    if (!have_pairs && total_state_dim > 0 && total_state_dim <= 4096 &&
+                        normalize_root_for_pairwise_fastpath()) {
+                        const auto& target_states = get_cached_target_states();
+                        exact_batch_context = ExactGateBatchContext{};
+                        if (!target_states.empty()) {
+                            auto transfer_start = std::chrono::high_resolution_clock::now();
+                            exact_batch_context = prepare_exact_gate_batch_context(target_states);
+                            auto transfer_end = std::chrono::high_resolution_clock::now();
+                            transfer_time_ += std::chrono::duration<double, std::milli>(
+                                transfer_end - transfer_start).count();
+                        }
+                        have_pairs = try_collect_normalized_pairwise_terminal_ids(
+                            control_qubit, &low_ids, &high_ids);
+                    }
+
+                    if (have_pairs) {
+                        for (size_t fast_gate_index = gate_index;
+                             fast_gate_index < run_end;
+                             ++fast_gate_index) {
+                            const GateParams& fast_gate = current_block.gates[fast_gate_index];
+                            FALLBACK_DEBUG_LOG << "[fallback] block " << block_index
+                                               << " gate " << (fast_gate_index + 1) << "/"
+                                               << current_block.gates.size() << " "
+                                               << gate_type_name(fast_gate.type)
+                                               << " (pairwise fast path)" << std::endl;
+                            if (!try_execute_inplace_pairwise_hybrid_gate(
+                                    fast_gate, low_ids, high_ids)) {
+                                execute_gate(fast_gate, &exact_batch_context);
+                            }
+                        }
+                        gate_index = run_end - 1;
+                        continue;
+                    }
+                }
+            }
+
             FALLBACK_DEBUG_LOG << "[fallback] block " << block_index
                                << " gate " << (gate_index + 1) << "/"
                                << current_block.gates.size() << " "
                                << gate_type_name(gate.type) << std::endl;
             execute_gate(gate, &exact_batch_context);
+            if (!supports_pairwise_inplace_reuse(gate)) {
+                continue;
+            }
+
+            const int control_qubit = gate.target_qubits[0];
+            size_t run_end = gate_index + 1;
+            while (run_end < current_block.gates.size()) {
+                const GateParams& next_gate = current_block.gates[run_end];
+                if (!supports_pairwise_inplace_reuse(next_gate) ||
+                    next_gate.target_qubits[0] != control_qubit) {
+                    break;
+                }
+                ++run_end;
+            }
+            if (run_end == gate_index + 1) {
+                continue;
+            }
+
+            std::vector<int> low_ids;
+            std::vector<int> high_ids;
+            if (!try_collect_normalized_pairwise_terminal_ids(
+                    control_qubit, &low_ids, &high_ids)) {
+                continue;
+            }
+
+            for (size_t fast_gate_index = gate_index + 1;
+                 fast_gate_index < run_end;
+                 ++fast_gate_index) {
+                const GateParams& fast_gate = current_block.gates[fast_gate_index];
+                FALLBACK_DEBUG_LOG << "[fallback] block " << block_index
+                                   << " gate " << (fast_gate_index + 1) << "/"
+                                   << current_block.gates.size() << " "
+                                   << gate_type_name(fast_gate.type)
+                                   << " (pairwise fast path)" << std::endl;
+                if (!try_execute_inplace_pairwise_hybrid_gate(
+                        fast_gate, low_ids, high_ids)) {
+                    execute_gate(fast_gate, &exact_batch_context);
+                }
+            }
+            gate_index = run_end - 1;
         }
 
         synchronize_async_cv_pipeline();
@@ -1014,6 +1127,10 @@ void QuantumCircuit::set_fused_diagonal_enabled(bool enabled) {
 
 void QuantumCircuit::set_eager_symbolic_materialization_enabled(bool enabled) {
     eager_symbolic_materialization_enabled_ = enabled;
+}
+
+void QuantumCircuit::set_force_dense_fock(bool enabled) {
+    force_dense_fock_ = enabled;
 }
 
 void QuantumCircuit::set_gaussian_state_pool_capacity(int capacity) {

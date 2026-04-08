@@ -1,0 +1,217 @@
+{
+  "schema_version": "1.0",
+  "generated_at_utc": "2026-04-07T11:32:22Z",
+  "simulator": "HybridCVDV-Simulator",
+  "single_gpu_only": true,
+  "num_gpus": 1,
+  "requested_suite": "scaling",
+  "gaussian_symbolic_mode_limit": 4,
+  "symbolic_branch_limit": 64,
+  "gaussian_symbolic_enabled": true,
+  "diagonal_mixture_enabled": true,
+  "fused_diagonal_enabled": true,
+  "eager_symbolic_materialization_enabled": false,
+  "use_interaction_picture": false,
+  "device": {
+    "available": true,
+    "device_index": 0,
+    "name": "NVIDIA L20",
+    "compute_capability": "8.9",
+    "multiprocessor_count": 92,
+    "total_global_mem_bytes": 47676129280,
+    "shared_mem_per_block_bytes": 49152
+  },
+  "warmup_runs": 1,
+  "measured_runs": 5,
+  "scheduler_devices": [
+    0,
+    1
+  ],
+  "incremental_results": true,
+  "expected_total_cases": 184,
+  "run_status": "running",
+  "completed_case_count": 6,
+  "remaining_case_count": 178,
+  "results": [
+    {
+      "name": "sc26_vqe_nq5_nm6_c16",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "depth": "2",
+        "measured_runs": "5",
+        "num_qubits": "5",
+        "num_qumodes": "6",
+        "source_circuit": "circuit/src/vqe_circuit.cpp",
+        "warmup_runs": "1",
+        "workload": "vqe_circuit"
+      },
+      "metrics": {
+        "median_active_states": 32,
+        "median_compute_ms": 215315.265079,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 3,
+        "median_gaussian_symbolic_blocks": 1,
+        "median_hdd_nodes": 63,
+        "median_memory_bytes": 17716742296,
+        "median_qubit_only_blocks": 2,
+        "median_symbolic_materializations": 1,
+        "median_total_ms": 258980.100406,
+        "median_transfer_ms": 6.86735599999998,
+        "throughput_ops_per_sec": 0.00386130053402679
+      }
+    },
+    {
+      "name": "sc26_vqe_nq9_nm5_c16",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "depth": "2",
+        "measured_runs": "5",
+        "num_qubits": "9",
+        "num_qumodes": "5",
+        "source_circuit": "circuit/src/vqe_circuit.cpp",
+        "warmup_runs": "1",
+        "workload": "vqe_circuit"
+      },
+      "metrics": {
+        "median_active_states": 512,
+        "median_compute_ms": 177984.52993,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 3,
+        "median_gaussian_symbolic_blocks": 1,
+        "median_hdd_nodes": 1023,
+        "median_memory_bytes": 17213464576,
+        "median_qubit_only_blocks": 2,
+        "median_symbolic_materializations": 1,
+        "median_total_ms": 233772.521042,
+        "median_transfer_ms": 1.23649100000012,
+        "throughput_ops_per_sec": 0.00427766272760663
+      }
+    },
+    {
+      "name": "sc26_vqe_nq3_nm5_c32",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "32",
+        "depth": "2",
+        "measured_runs": "5",
+        "num_qubits": "3",
+        "num_qumodes": "5",
+        "source_circuit": "circuit/src/vqe_circuit.cpp",
+        "warmup_runs": "1",
+        "workload": "vqe_circuit"
+      },
+      "metrics": {
+        "median_active_states": 8,
+        "median_compute_ms": 322563.75903,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 3,
+        "median_gaussian_symbolic_blocks": 1,
+        "median_hdd_nodes": 15,
+        "median_memory_bytes": 9126806504,
+        "median_qubit_only_blocks": 2,
+        "median_symbolic_materializations": 1,
+        "median_total_ms": 405506.796961,
+        "median_transfer_ms": 6.811633,
+        "throughput_ops_per_sec": 0.00246604990962994
+      }
+    },
+    {
+      "name": "sc26_vqe_nq4_nm5_c32",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "32",
+        "depth": "2",
+        "measured_runs": "5",
+        "num_qubits": "4",
+        "num_qumodes": "5",
+        "source_circuit": "circuit/src/vqe_circuit.cpp",
+        "warmup_runs": "1",
+        "workload": "vqe_circuit"
+      },
+      "metrics": {
+        "median_active_states": 16,
+        "median_compute_ms": 723974.954931,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 3,
+        "median_gaussian_symbolic_blocks": 1,
+        "median_hdd_nodes": 31,
+        "median_memory_bytes": 18790483140,
+        "median_qubit_only_blocks": 2,
+        "median_symbolic_materializations": 1,
+        "median_total_ms": 813139.916248,
+        "median_transfer_ms": 6.86909999999999,
+        "throughput_ops_per_sec": 0.00122980065302194
+      }
+    },
+    {
+      "name": "sc26_vqe_nq8_nm4_c32",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "32",
+        "depth": "2",
+        "measured_runs": "5",
+        "num_qubits": "8",
+        "num_qumodes": "4",
+        "source_circuit": "circuit/src/vqe_circuit.cpp",
+        "warmup_runs": "1",
+        "workload": "vqe_circuit"
+      },
+      "metrics": {
+        "median_active_states": 256,
+        "median_compute_ms": 286721.390704998,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 3,
+        "median_gaussian_symbolic_blocks": 1,
+        "median_hdd_nodes": 511,
+        "median_memory_bytes": 8640286720,
+        "median_qubit_only_blocks": 2,
+        "median_symbolic_materializations": 1,
+        "median_total_ms": 335595.263887,
+        "median_transfer_ms": 2.96010099999996,
+        "throughput_ops_per_sec": 0.00297977983484509
+      }
+    },
+    {
+      "name": "sc26_vqe_nq9_nm4_c32",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "32",
+        "depth": "2",
+        "measured_runs": "5",
+        "num_qubits": "9",
+        "num_qumodes": "4",
+        "source_circuit": "circuit/src/vqe_circuit.cpp",
+        "warmup_runs": "1",
+        "workload": "vqe_circuit"
+      },
+      "metrics": {
+        "median_active_states": 512,
+        "median_compute_ms": 571995.710623998,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 3,
+        "median_gaussian_symbolic_blocks": 1,
+        "median_hdd_nodes": 1023,
+        "median_memory_bytes": 17213464576,
+        "median_qubit_only_blocks": 2,
+        "median_symbolic_materializations": 1,
+        "median_total_ms": 678237.450061,
+        "median_transfer_ms": 9.72830000000024,
+        "throughput_ops_per_sec": 0.00147440988389842
+      }
+    }
+  ]
+}

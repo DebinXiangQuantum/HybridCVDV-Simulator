@@ -1,0 +1,18 @@
+NCU Kernel Name,Paper Terminology,Track,Source Evidence
+copy_back_two_mode_tensor_gate_kernel,State Copy,Fock Track,Source: src/gpu/two_mode_gates.cu. Memory write-back for two-mode tensor gates.
+apply_annihilation_operator_kernel,Ladder (L1),Fock Track,Source: src/gpu/ladder_gates.cu. Implements annihilation operator (a). Level 1 in Sec III.D.
+apply_bs_subspace_gate_on_modes_kernel,Subspace (L3),Fock Track,Source: src/gpu/two_mode_gates.cu. BS projection in Fock subspace. Level 3 in Sec III.D.
+apply_ckgate_multimode_kernel,Level 0 Ops,Fock Track,Source: src/gpu/two_mode_special_gates.cu. Implements Cross-Kerr (diagonal). Level 0 in Sec III.D.
+apply_conditional_parity_kernel,Level 0 Ops,Fock Track,Source: src/gpu/diagonal_gates.cu. Diagonal phase gate. Level 0 in Sec III.D.
+apply_controlled_displacement_inplace_shared_kernel,ELL Ops (L2),Gaussian Track,Source: src/gpu/hybrid_gates.cu. Shared-memory D(alpha). High-density compute in Sec III.B.
+apply_creation_operator_kernel,Ladder (L1),Fock Track,Source: src/gpu/ladder_gates.cu. Implements creation operator (a-dagger). Level 1 in Sec III.D.
+apply_fused_diagonal_kernel,Level 0 Ops,Fock Track,Source: src/gpu/diagonal_gates.cu. Fused diagonal optimization. Part of Sec III.D Level 0 path.
+apply_multisnap_kernel,Level 0 Ops,Fock Track,Source: src/gpu/snap_gates.cu. Selective phase gate. Level 0 in Sec III.D.
+apply_phase_rotation_kernel,Level 0 Ops,Fock Track,Source: src/gpu/diagonal_gates.cu. Basic diagonal rotation. Level 0 in Sec III.D.
+apply_squeezing_ell_cached_kernel,ELL Ops (L2),Fock Track,Source: src/gpu/single_mode_gates.cu. Level 2 non-Gaussian ELLPACK SpMV as described in Sec III.D.
+axpy_state_vector_kernel,State Conversion,State Conversion,Source: src/gpu/diagonal_gates.cu. Vector accumulation for Gaussian-to-Fock summing (Sec III.C).
+copy_back_ladder_kernel,State Copy,Fock Track,Source: src/gpu/ladder_gates.cu. Memory synchronization for Level 1 operators.
+copy_result_kernel,State Copy,Fock Track,Source: src/gpu/squeezing_gate.cu. Memory write-back for Level 2 squeezing gates.
+fused_copy_displacement_kernel,Gaussian (L2),Gaussian Track,Source: src/gpu/gaussian_kernels.cu. Fused EDE Gaussian vector update (Sec III.B).
+fused_covariance_kernel,Gaussian (L2),Gaussian Track,Source: src/gpu/gaussian_kernels.cu. EDE covariance matrix update (Sec III.B).
+inspect_scaled_vacuum_kernel,State Conversion,State Conversion,Source: src/gpu/diagonal_gates.cu. Vacuum state classifier for Sec III.C materialization.

@@ -1,0 +1,57 @@
+{
+  "schema_version": "1.0",
+  "generated_at_utc": "2026-04-07T16:15:11Z",
+  "simulator": "HybridCVDV-Simulator",
+  "single_gpu_only": false,
+  "num_gpus": 2,
+  "requested_suite": "scaling",
+  "gaussian_symbolic_mode_limit": 4,
+  "symbolic_branch_limit": 64,
+  "gaussian_symbolic_enabled": true,
+  "diagonal_mixture_enabled": true,
+  "fused_diagonal_enabled": true,
+  "eager_symbolic_materialization_enabled": false,
+  "force_dense_fock": true,
+  "use_interaction_picture": false,
+  "device": {
+    "available": true,
+    "device_index": 0,
+    "name": "NVIDIA L20",
+    "compute_capability": "8.9",
+    "multiprocessor_count": 92,
+    "total_global_mem_bytes": 47676129280,
+    "shared_mem_per_block_bytes": 49152
+  },
+  "results": [
+    {
+      "name": "sc26_cv_qaoa_nm2_c16",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "depth": "2",
+        "measured_runs": "3",
+        "num_qubits": "0",
+        "num_qumodes": "2",
+        "pure_cv": "true",
+        "warmup_runs": "1",
+        "workload": "cv_qaoa_circuit"
+      },
+      "metrics": {
+        "median_active_states": 1,
+        "median_compute_ms": 0.198891,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 0,
+        "median_gaussian_symbolic_blocks": 1,
+        "median_hdd_nodes": 1,
+        "median_memory_bytes": 6656,
+        "median_qubit_only_blocks": 0,
+        "median_symbolic_materializations": 0,
+        "median_total_ms": 0.313481,
+        "median_transfer_ms": 0,
+        "throughput_ops_per_sec": 3189.98599596148
+      }
+    }
+  ]
+}

@@ -1,0 +1,97 @@
+{
+  "schema_version": "1.0",
+  "generated_at_utc": "2026-04-06T06:19:34Z",
+  "simulator": "HybridCVDV-Simulator",
+  "single_gpu_only": false,
+  "num_gpus": 2,
+  "requested_suite": "scaling",
+  "gaussian_symbolic_mode_limit": 16,
+  "symbolic_branch_limit": 64,
+  "gaussian_symbolic_enabled": true,
+  "diagonal_mixture_enabled": true,
+  "fused_diagonal_enabled": true,
+  "eager_symbolic_materialization_enabled": false,
+  "use_interaction_picture": false,
+  "device": {
+    "available": true,
+    "device_index": 0,
+    "name": "NVIDIA L20",
+    "compute_capability": "8.9",
+    "multiprocessor_count": 92,
+    "total_global_mem_bytes": 47676129280,
+    "shared_mem_per_block_bytes": 49152
+  },
+  "results": [
+    {
+      "name": "sc26_vqe_nq9_nm6_c4",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "4",
+        "depth": "2",
+        "measured_runs": "10",
+        "num_qubits": "9",
+        "num_qumodes": "6",
+        "source_circuit": "circuit/src/vqe_circuit.cpp",
+        "warmup_runs": "2",
+        "workload": "vqe_circuit"
+      },
+      "metrics": {
+        "median_active_states": 512,
+        "median_compute_ms": 311.841056499999,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 3,
+        "median_gaussian_symbolic_blocks": 1,
+        "median_hdd_nodes": 1023,
+        "median_memory_bytes": 67321856,
+        "median_qubit_only_blocks": 2,
+        "median_symbolic_materializations": 1,
+        "median_total_ms": 3281.0144655,
+        "median_transfer_ms": 1.72274949999998,
+        "throughput_ops_per_sec": 0.304783782733981,
+        "gpu_sample_count": 184.0,
+        "gpu_avg_util_pct": 16.39673913043478,
+        "gpu_peak_util_pct": 100.0,
+        "gpu_avg_memory_util_pct": 0.08695652173913043,
+        "gpu_peak_memory_util_pct": 11.0,
+        "gpu_avg_memory_used_mb": 635.8097826086956,
+        "gpu_peak_memory_used_mb": 4403.0,
+        "gpu_avg_power_draw_w": 86.87548913043479,
+        "gpu_peak_power_draw_w": 94.07,
+        "gpu_peak_temperature_c": 36.0,
+        "gpu_peak_sm_clock_mhz": 2520.0,
+        "runner_wall_time_ms": 40061.711779912
+      }
+    }
+  ],
+  "telemetry_summary": {
+    "gpu_sample_count": 184.0,
+    "gpu_avg_util_pct": 16.39673913043478,
+    "gpu_peak_util_pct": 100.0,
+    "gpu_avg_memory_util_pct": 0.08695652173913043,
+    "gpu_peak_memory_util_pct": 11.0,
+    "gpu_avg_memory_used_mb": 635.8097826086956,
+    "gpu_peak_memory_used_mb": 4403.0,
+    "gpu_avg_power_draw_w": 86.87548913043479,
+    "gpu_peak_power_draw_w": 94.07,
+    "gpu_peak_temperature_c": 36.0,
+    "gpu_peak_sm_clock_mhz": 2520.0
+  },
+  "telemetry_samples_path": "/root/sandboxes/HybridCVDV-Simulator/experiments/results/sc26_multigpu_4cutoff_filtered_20260406/telemetry/sc26_vqe_nq9_nm6_c4__hybridcvdv.json",
+  "runner": {
+    "command": [
+      "build-codex-fix/hybridcvdv_single_gpu_experiments",
+      "--suite",
+      "scaling",
+      "--name-filter",
+      "sc26_vqe_nq9_nm6_c4",
+      "--gaussian-symbolic-mode-limit",
+      "16",
+      "--output",
+      "/root/sandboxes/HybridCVDV-Simulator/experiments/results/sc26_multigpu_4cutoff_filtered_20260406/sc26_vqe_nq9_nm6_c4__hybridcvdv.json"
+    ],
+    "returncode": 0,
+    "wall_time_ms": 40061.711779912
+  }
+}

@@ -1,0 +1,594 @@
+{
+  "schema_version": "1.0",
+  "generated_at_utc": "2026-04-08T00:00:00Z",
+  "note": "Recovered from bench_transfer.log (c4/c8/c32 cases, timing-only). c16 cases for nq=2,4,8 replaced with full-metrics runner output (watch_id=292). nq=16 cases not available (run cancelled).",
+  "simulator": "HybridCVDV-Simulator",
+  "single_gpu_only": true,
+  "num_gpus": 1,
+  "requested_suite": "scaling",
+  "gaussian_symbolic_enabled": true,
+  "diagonal_mixture_enabled": true,
+  "fused_diagonal_enabled": true,
+  "eager_symbolic_materialization_enabled": false,
+  "use_interaction_picture": false,
+  "device": {
+    "name": "NVIDIA L20",
+    "compute_capability": "8.9",
+    "multiprocessor_count": 92,
+    "total_global_mem_bytes": 47676129280
+  },
+  "warmup_runs": 2,
+  "measured_runs": 5,
+  "results": [
+    {
+      "name": "sc26_transfer_CVtoDV_nq2_c4",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "4",
+        "measured_runs": "5",
+        "num_modes": "1",
+        "num_qubits": "2",
+        "source_circuit": "circuit/src/state_transfer_circuit.cpp",
+        "warmup_runs": "2",
+        "workload": "state_transfer_CVtoDV_circuit"
+      },
+      "metrics": {
+        "median_compute_ms": 0.157988,
+        "median_total_ms": 0.930813,
+        "median_transfer_ms": 0,
+        "median_planning_ms": 0,
+        "throughput_ops_per_sec": 1074.32964516
+      }
+    },
+    {
+      "name": "sc26_transfer_DVtoCV_nq2_c4",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "4",
+        "measured_runs": "5",
+        "num_modes": "1",
+        "num_qubits": "2",
+        "source_circuit": "circuit/src/state_transfer_circuit.cpp",
+        "warmup_runs": "2",
+        "workload": "state_transfer_DVtoCV_circuit"
+      },
+      "metrics": {
+        "median_compute_ms": 0.162942,
+        "median_total_ms": 1.16074,
+        "median_transfer_ms": 0,
+        "median_planning_ms": 0,
+        "throughput_ops_per_sec": 861.51937557
+      }
+    },
+    {
+      "name": "sc26_transfer_CVtoDV_nq2_c8",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "8",
+        "measured_runs": "5",
+        "num_modes": "1",
+        "num_qubits": "2",
+        "source_circuit": "circuit/src/state_transfer_circuit.cpp",
+        "warmup_runs": "2",
+        "workload": "state_transfer_CVtoDV_circuit"
+      },
+      "metrics": {
+        "median_compute_ms": 0.155021,
+        "median_total_ms": 0.916468,
+        "median_transfer_ms": 0,
+        "median_planning_ms": 0,
+        "throughput_ops_per_sec": 1091.14557191
+      }
+    },
+    {
+      "name": "sc26_transfer_DVtoCV_nq2_c8",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "8",
+        "measured_runs": "5",
+        "num_modes": "1",
+        "num_qubits": "2",
+        "source_circuit": "circuit/src/state_transfer_circuit.cpp",
+        "warmup_runs": "2",
+        "workload": "state_transfer_DVtoCV_circuit"
+      },
+      "metrics": {
+        "median_compute_ms": 0.16378,
+        "median_total_ms": 1.15385,
+        "median_transfer_ms": 0,
+        "median_planning_ms": 0,
+        "throughput_ops_per_sec": 866.66377779
+      }
+    },
+    {
+      "name": "sc26_transfer_CVtoDV_nq2_c16",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "depth": "8",
+        "measured_runs": "10",
+        "num_qubits": "2",
+        "num_qumodes": "1",
+        "warmup_runs": "2",
+        "workload": "state_transfer_CVtoDV_circuit"
+      },
+      "metrics": {
+        "median_active_states": 4,
+        "median_compute_ms": 0.1619265,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 0,
+        "median_gaussian_symbolic_blocks": 2,
+        "median_hdd_nodes": 7,
+        "median_memory_bytes": 7936,
+        "median_qubit_only_blocks": 3,
+        "median_symbolic_materializations": 0,
+        "median_total_ms": 1.0568695,
+        "median_transfer_ms": 0,
+        "throughput_ops_per_sec": 946.190612937548
+      }
+    },
+    {
+      "name": "sc26_transfer_DVtoCV_nq2_c16",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "depth": "8",
+        "measured_runs": "10",
+        "num_qubits": "2",
+        "num_qumodes": "1",
+        "warmup_runs": "2",
+        "workload": "state_transfer_DVtoCV_circuit"
+      },
+      "metrics": {
+        "median_active_states": 4,
+        "median_compute_ms": 0.170947,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 0,
+        "median_gaussian_symbolic_blocks": 2,
+        "median_hdd_nodes": 7,
+        "median_memory_bytes": 7936,
+        "median_qubit_only_blocks": 2,
+        "median_symbolic_materializations": 0,
+        "median_total_ms": 1.293156,
+        "median_transfer_ms": 0,
+        "throughput_ops_per_sec": 773.301906343859
+      }
+    },
+    {
+      "name": "sc26_transfer_CVtoDV_nq2_c32",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "32",
+        "measured_runs": "5",
+        "num_modes": "1",
+        "num_qubits": "2",
+        "source_circuit": "circuit/src/state_transfer_circuit.cpp",
+        "warmup_runs": "2",
+        "workload": "state_transfer_CVtoDV_circuit"
+      },
+      "metrics": {
+        "median_compute_ms": 0.165029,
+        "median_total_ms": 0.918689,
+        "median_transfer_ms": 0,
+        "median_planning_ms": 0,
+        "throughput_ops_per_sec": 1088.50764513
+      }
+    },
+    {
+      "name": "sc26_transfer_DVtoCV_nq2_c32",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "32",
+        "measured_runs": "5",
+        "num_modes": "1",
+        "num_qubits": "2",
+        "source_circuit": "circuit/src/state_transfer_circuit.cpp",
+        "warmup_runs": "2",
+        "workload": "state_transfer_DVtoCV_circuit"
+      },
+      "metrics": {
+        "median_compute_ms": 0.162171,
+        "median_total_ms": 1.15179,
+        "median_transfer_ms": 0,
+        "median_planning_ms": 0,
+        "throughput_ops_per_sec": 868.2138237
+      }
+    },
+    {
+      "name": "sc26_transfer_CVtoDV_nq4_c4",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "4",
+        "measured_runs": "5",
+        "num_modes": "1",
+        "num_qubits": "4",
+        "source_circuit": "circuit/src/state_transfer_circuit.cpp",
+        "warmup_runs": "2",
+        "workload": "state_transfer_CVtoDV_circuit"
+      },
+      "metrics": {
+        "median_compute_ms": 0.589826,
+        "median_total_ms": 3.4137,
+        "median_transfer_ms": 0,
+        "median_planning_ms": 0,
+        "throughput_ops_per_sec": 292.93728213
+      }
+    },
+    {
+      "name": "sc26_transfer_DVtoCV_nq4_c4",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "4",
+        "measured_runs": "5",
+        "num_modes": "1",
+        "num_qubits": "4",
+        "source_circuit": "circuit/src/state_transfer_circuit.cpp",
+        "warmup_runs": "2",
+        "workload": "state_transfer_DVtoCV_circuit"
+      },
+      "metrics": {
+        "median_compute_ms": 0.624915,
+        "median_total_ms": 8.67391,
+        "median_transfer_ms": 0,
+        "median_planning_ms": 0,
+        "throughput_ops_per_sec": 115.288261
+      }
+    },
+    {
+      "name": "sc26_transfer_CVtoDV_nq4_c8",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "8",
+        "measured_runs": "5",
+        "num_modes": "1",
+        "num_qubits": "4",
+        "source_circuit": "circuit/src/state_transfer_circuit.cpp",
+        "warmup_runs": "2",
+        "workload": "state_transfer_CVtoDV_circuit"
+      },
+      "metrics": {
+        "median_compute_ms": 0.591083,
+        "median_total_ms": 3.42906,
+        "median_transfer_ms": 0,
+        "median_planning_ms": 0,
+        "throughput_ops_per_sec": 291.62511009
+      }
+    },
+    {
+      "name": "sc26_transfer_DVtoCV_nq4_c8",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "8",
+        "measured_runs": "5",
+        "num_modes": "1",
+        "num_qubits": "4",
+        "source_circuit": "circuit/src/state_transfer_circuit.cpp",
+        "warmup_runs": "2",
+        "workload": "state_transfer_DVtoCV_circuit"
+      },
+      "metrics": {
+        "median_compute_ms": 0.624467,
+        "median_total_ms": 8.64158,
+        "median_transfer_ms": 0,
+        "median_planning_ms": 0,
+        "throughput_ops_per_sec": 115.71957906
+      }
+    },
+    {
+      "name": "sc26_transfer_CVtoDV_nq4_c16",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "depth": "8",
+        "measured_runs": "10",
+        "num_qubits": "4",
+        "num_qumodes": "1",
+        "warmup_runs": "2",
+        "workload": "state_transfer_CVtoDV_circuit"
+      },
+      "metrics": {
+        "median_active_states": 16,
+        "median_compute_ms": 0.590764,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 0,
+        "median_gaussian_symbolic_blocks": 2,
+        "median_hdd_nodes": 31,
+        "median_memory_bytes": 11776,
+        "median_qubit_only_blocks": 3,
+        "median_symbolic_materializations": 0,
+        "median_total_ms": 4.0081225,
+        "median_transfer_ms": 0,
+        "throughput_ops_per_sec": 249.493372520426
+      }
+    },
+    {
+      "name": "sc26_transfer_DVtoCV_nq4_c16",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "depth": "8",
+        "measured_runs": "10",
+        "num_qubits": "4",
+        "num_qumodes": "1",
+        "warmup_runs": "2",
+        "workload": "state_transfer_DVtoCV_circuit"
+      },
+      "metrics": {
+        "median_active_states": 16,
+        "median_compute_ms": 0.6186305,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 0,
+        "median_gaussian_symbolic_blocks": 2,
+        "median_hdd_nodes": 31,
+        "median_memory_bytes": 11776,
+        "median_qubit_only_blocks": 2,
+        "median_symbolic_materializations": 0,
+        "median_total_ms": 9.254498,
+        "median_transfer_ms": 0,
+        "throughput_ops_per_sec": 108.055563899846
+      }
+    },
+    {
+      "name": "sc26_transfer_CVtoDV_nq4_c32",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "32",
+        "measured_runs": "5",
+        "num_modes": "1",
+        "num_qubits": "4",
+        "source_circuit": "circuit/src/state_transfer_circuit.cpp",
+        "warmup_runs": "2",
+        "workload": "state_transfer_CVtoDV_circuit"
+      },
+      "metrics": {
+        "median_compute_ms": 0.601198,
+        "median_total_ms": 3.44703,
+        "median_transfer_ms": 0,
+        "median_planning_ms": 0,
+        "throughput_ops_per_sec": 290.10481487
+      }
+    },
+    {
+      "name": "sc26_transfer_DVtoCV_nq4_c32",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "32",
+        "measured_runs": "5",
+        "num_modes": "1",
+        "num_qubits": "4",
+        "source_circuit": "circuit/src/state_transfer_circuit.cpp",
+        "warmup_runs": "2",
+        "workload": "state_transfer_DVtoCV_circuit"
+      },
+      "metrics": {
+        "median_compute_ms": 0.630695,
+        "median_total_ms": 8.68164,
+        "median_transfer_ms": 0,
+        "median_planning_ms": 0,
+        "throughput_ops_per_sec": 115.18561009
+      }
+    },
+    {
+      "name": "sc26_transfer_CVtoDV_nq8_c4",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "4",
+        "measured_runs": "5",
+        "num_modes": "1",
+        "num_qubits": "8",
+        "source_circuit": "circuit/src/state_transfer_circuit.cpp",
+        "warmup_runs": "2",
+        "workload": "state_transfer_CVtoDV_circuit"
+      },
+      "metrics": {
+        "median_compute_ms": 1070.51,
+        "median_total_ms": 2099.77,
+        "median_transfer_ms": 199.71,
+        "median_planning_ms": 0,
+        "throughput_ops_per_sec": 0.47624264
+      }
+    },
+    {
+      "name": "sc26_transfer_DVtoCV_nq8_c4",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "4",
+        "measured_runs": "5",
+        "num_modes": "1",
+        "num_qubits": "8",
+        "source_circuit": "circuit/src/state_transfer_circuit.cpp",
+        "warmup_runs": "2",
+        "workload": "state_transfer_DVtoCV_circuit"
+      },
+      "metrics": {
+        "median_compute_ms": 353.13,
+        "median_total_ms": 1339.91,
+        "median_transfer_ms": 191.886,
+        "median_planning_ms": 0,
+        "throughput_ops_per_sec": 0.74631878
+      }
+    },
+    {
+      "name": "sc26_transfer_CVtoDV_nq8_c8",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "8",
+        "measured_runs": "5",
+        "num_modes": "1",
+        "num_qubits": "8",
+        "source_circuit": "circuit/src/state_transfer_circuit.cpp",
+        "warmup_runs": "2",
+        "workload": "state_transfer_CVtoDV_circuit"
+      },
+      "metrics": {
+        "median_compute_ms": 1945.92,
+        "median_total_ms": 2982.35,
+        "median_transfer_ms": 204.407,
+        "median_planning_ms": 0,
+        "throughput_ops_per_sec": 0.33530605
+      }
+    },
+    {
+      "name": "sc26_transfer_DVtoCV_nq8_c8",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "8",
+        "measured_runs": "5",
+        "num_modes": "1",
+        "num_qubits": "8",
+        "source_circuit": "circuit/src/state_transfer_circuit.cpp",
+        "warmup_runs": "2",
+        "workload": "state_transfer_DVtoCV_circuit"
+      },
+      "metrics": {
+        "median_compute_ms": 355.413,
+        "median_total_ms": 1343.61,
+        "median_transfer_ms": 192.212,
+        "median_planning_ms": 0,
+        "throughput_ops_per_sec": 0.74426359
+      }
+    },
+    {
+      "name": "sc26_transfer_CVtoDV_nq8_c16",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "depth": "8",
+        "measured_runs": "10",
+        "num_qubits": "8",
+        "num_qumodes": "1",
+        "warmup_runs": "2",
+        "workload": "state_transfer_CVtoDV_circuit"
+      },
+      "metrics": {
+        "median_active_states": 256,
+        "median_compute_ms": 5230.17351700001,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 0,
+        "median_gaussian_symbolic_blocks": 2,
+        "median_hdd_nodes": 511,
+        "median_memory_bytes": 345088,
+        "median_qubit_only_blocks": 3,
+        "median_symbolic_materializations": 0,
+        "median_total_ms": 6579.3358005,
+        "median_transfer_ms": 204.245669999995,
+        "throughput_ops_per_sec": 0.151991026195076
+      }
+    },
+    {
+      "name": "sc26_transfer_DVtoCV_nq8_c16",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "depth": "8",
+        "measured_runs": "10",
+        "num_qubits": "8",
+        "num_qumodes": "1",
+        "warmup_runs": "2",
+        "workload": "state_transfer_DVtoCV_circuit"
+      },
+      "metrics": {
+        "median_active_states": 256,
+        "median_compute_ms": 455.139687499999,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 1,
+        "median_gaussian_symbolic_blocks": 1,
+        "median_hdd_nodes": 511,
+        "median_memory_bytes": 345088,
+        "median_qubit_only_blocks": 2,
+        "median_symbolic_materializations": 0,
+        "median_total_ms": 1744.6209765,
+        "median_transfer_ms": 194.590804999999,
+        "throughput_ops_per_sec": 0.573190402654774
+      }
+    },
+    {
+      "name": "sc26_transfer_CVtoDV_nq8_c32",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "32",
+        "measured_runs": "5",
+        "num_modes": "1",
+        "num_qubits": "8",
+        "source_circuit": "circuit/src/state_transfer_circuit.cpp",
+        "warmup_runs": "2",
+        "workload": "state_transfer_CVtoDV_circuit"
+      },
+      "metrics": {
+        "median_compute_ms": 17259.3,
+        "median_total_ms": 18339.9,
+        "median_transfer_ms": 220.41,
+        "median_planning_ms": 0,
+        "throughput_ops_per_sec": 0.05452592
+      }
+    },
+    {
+      "name": "sc26_transfer_DVtoCV_nq8_c32",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "32",
+        "measured_runs": "5",
+        "num_modes": "1",
+        "num_qubits": "8",
+        "source_circuit": "circuit/src/state_transfer_circuit.cpp",
+        "warmup_runs": "2",
+        "workload": "state_transfer_DVtoCV_circuit"
+      },
+      "metrics": {
+        "median_compute_ms": 413.402,
+        "median_total_ms": 1403.48,
+        "median_transfer_ms": 192.314,
+        "median_planning_ms": 0,
+        "throughput_ops_per_sec": 0.71251461
+      }
+    }
+  ]
+}

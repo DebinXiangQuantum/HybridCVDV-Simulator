@@ -9,6 +9,237 @@
 
 using namespace circuit_internal;
 
+namespace {
+
+bool is_unit_pairwise_weight(const std::complex<double>& weight) {
+    return std::abs(weight - std::complex<double>(1.0, 0.0)) < 1e-14;
+}
+
+struct WeightedNodeKey {
+    HDDNode* node = nullptr;
+    std::complex<double> weight{1.0, 0.0};
+
+    bool operator==(const WeightedNodeKey& other) const {
+        return node == other.node && weight == other.weight;
+    }
+};
+
+struct WeightedNodeKeyHash {
+    size_t operator()(const WeightedNodeKey& key) const {
+        size_t hash = std::hash<HDDNode*>()(key.node);
+        hash ^= std::hash<double>()(key.weight.real()) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        hash ^= std::hash<double>()(key.weight.imag()) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        return hash;
+    }
+};
+
+}  // namespace
+
+bool QuantumCircuit::try_collect_normalized_pairwise_terminal_ids(
+    int control_qubit,
+    std::vector<int>* low_ids,
+    std::vector<int>* high_ids) const {
+    if (!low_ids || !high_ids) {
+        return false;
+    }
+
+    low_ids->clear();
+    high_ids->clear();
+    if (!root_node_) {
+        return false;
+    }
+
+    std::unordered_set<WeightedNodePairKey, WeightedNodePairKeyHash> visited_pairs;
+    std::unordered_set<HDDNode*> visited_nodes;
+
+    std::function<bool(HDDNode*, HDDNode*)> collect_pairs =
+        [&](HDDNode* low_node, HDDNode* high_node) -> bool {
+            if (!low_node || !high_node) {
+                return false;
+            }
+
+            const WeightedNodePairKey key{
+                low_node,
+                high_node,
+                std::complex<double>(1.0, 0.0),
+                std::complex<double>(1.0, 0.0)
+            };
+            if (!visited_pairs.insert(key).second) {
+                return true;
+            }
+
+            if (low_node->is_terminal() && high_node->is_terminal()) {
+                const int low_id = low_node->tensor_id;
+                const int high_id = high_node->tensor_id;
+                if (low_id < 0 ||
+                    high_id < 0 ||
+                    low_id == shared_zero_state_id_ ||
+                    high_id == shared_zero_state_id_ ||
+                    is_symbolic_terminal_id(low_id) ||
+                    is_symbolic_terminal_id(high_id) ||
+                    !state_pool_.is_valid_state(low_id) ||
+                    !state_pool_.is_valid_state(high_id)) {
+                    return false;
+                }
+
+                low_ids->push_back(low_id);
+                high_ids->push_back(high_id);
+                return true;
+            }
+
+            if (low_node->is_terminal() || high_node->is_terminal()) {
+                return false;
+            }
+            if (low_node->qubit_level != high_node->qubit_level) {
+                return false;
+            }
+            if (!is_unit_pairwise_weight(low_node->w_low) ||
+                !is_unit_pairwise_weight(low_node->w_high) ||
+                !is_unit_pairwise_weight(high_node->w_low) ||
+                !is_unit_pairwise_weight(high_node->w_high)) {
+                return false;
+            }
+
+            return collect_pairs(low_node->low, high_node->low) &&
+                   collect_pairs(low_node->high, high_node->high);
+        };
+
+    std::function<bool(HDDNode*)> walk =
+        [&](HDDNode* node) -> bool {
+            if (!node || node->is_terminal()) {
+                return true;
+            }
+            if (node->qubit_level < control_qubit) {
+                return true;
+            }
+            if (!visited_nodes.insert(node).second) {
+                return true;
+            }
+            if (node->qubit_level == control_qubit) {
+                if (!is_unit_pairwise_weight(node->w_low) ||
+                    !is_unit_pairwise_weight(node->w_high)) {
+                    return false;
+                }
+                return collect_pairs(node->low, node->high);
+            }
+            return walk(node->low) && walk(node->high);
+        };
+
+    const bool ok = walk(root_node_);
+    if (!ok || low_ids->empty() || low_ids->size() != high_ids->size()) {
+        low_ids->clear();
+        high_ids->clear();
+        return false;
+    }
+    return true;
+}
+
+bool QuantumCircuit::normalize_root_for_pairwise_fastpath() {
+    if (!root_node_ || has_symbolic_terminals()) {
+        return false;
+    }
+
+    std::unordered_map<WeightedNodeKey, HDDNode*, WeightedNodeKeyHash> memo;
+    std::vector<int> allocated_state_ids;
+
+    try {
+        std::function<HDDNode*(HDDNode*, std::complex<double>)> normalize_recursive =
+            [&](HDDNode* node, std::complex<double> weight) -> HDDNode* {
+                if (!node) {
+                    return nullptr;
+                }
+
+                const WeightedNodeKey key{node, weight};
+                const auto memo_it = memo.find(key);
+                if (memo_it != memo.end()) {
+                    return memo_it->second;
+                }
+
+                HDDNode* result = nullptr;
+                if (node->is_terminal()) {
+                    if (node->tensor_id < 0) {
+                        throw std::runtime_error(
+                            "pairwise fast-path root normalization encountered invalid terminal id");
+                    }
+
+                    const int preferred_device =
+                        state_pool_.get_state_device_id(node->tensor_id);
+                    result =
+                        duplicate_scaled_terminal_node(node, weight, preferred_device);
+                    allocated_state_ids.push_back(result->tensor_id);
+                } else {
+                    HDDNode* new_low =
+                        normalize_recursive(node->low, weight * node->w_low);
+                    HDDNode* new_high =
+                        normalize_recursive(node->high, weight * node->w_high);
+                    result = node_manager_.get_or_create_node(
+                        node->qubit_level, new_low, new_high, 1.0, 1.0);
+                }
+
+                memo.emplace(key, result);
+                return result;
+            };
+
+        HDDNode* new_root = normalize_recursive(root_node_, std::complex<double>(1.0, 0.0));
+        replace_root_node(new_root);
+        return true;
+    } catch (...) {
+        for (int state_id : allocated_state_ids) {
+            if (state_pool_.is_valid_state(state_id)) {
+                state_pool_.free_state(state_id);
+            }
+        }
+        throw;
+    }
+}
+
+bool QuantumCircuit::try_execute_inplace_pairwise_hybrid_gate(
+    const GateParams& gate,
+    const std::vector<int>& low_ids,
+    const std::vector<int>& high_ids) {
+    if (low_ids.empty() || low_ids.size() != high_ids.size() ||
+        gate.target_qumodes.empty()) {
+        return false;
+    }
+
+    const int target_qumode = gate.target_qumodes[0];
+    switch (gate.type) {
+        case GateType::RABI_INTERACTION: {
+            const double theta =
+                gate.params.empty() ? 0.0 : gate.params[0].real();
+            apply_rabi_interaction_on_mode(
+                &state_pool_, low_ids, high_ids, theta, target_qumode, num_qumodes_);
+            CHECK_CUDA(cudaGetLastError());
+            break;
+        }
+        case GateType::JAYNES_CUMMINGS: {
+            const double theta =
+                gate.params.empty() ? 0.0 : gate.params[0].real();
+            const double phi =
+                gate.params.size() > 1 ? gate.params[1].real() : 0.0;
+            apply_jaynes_cummings_on_mode(
+                &state_pool_, low_ids, high_ids, theta, phi, target_qumode, num_qumodes_);
+            CHECK_CUDA(cudaGetLastError());
+            break;
+        }
+        case GateType::ANTI_JAYNES_CUMMINGS: {
+            const double theta =
+                gate.params.empty() ? 0.0 : gate.params[0].real();
+            const double phi =
+                gate.params.size() > 1 ? gate.params[1].real() : 0.0;
+            apply_anti_jaynes_cummings_on_mode(
+                &state_pool_, low_ids, high_ids, theta, phi, target_qumode, num_qumodes_);
+            CHECK_CUDA(cudaGetLastError());
+            break;
+        }
+        default:
+            return false;
+    }
+
+    state_pool_.synchronize_all_devices();
+    return true;
+}
+
 void QuantumCircuit::execute_rabi_interaction(const GateParams& gate) {
     const int control_qubit = gate.target_qubits[0];
     const int target_qumode = gate.target_qumodes[0];

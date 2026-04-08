@@ -1,0 +1,461 @@
+{
+  "schema_version": "1.0",
+  "generated_at_utc": "2026-04-07T02:48:36Z",
+  "simulator": "HybridCVDV-Simulator",
+  "single_gpu_only": true,
+  "num_gpus": 1,
+  "requested_suite": "scaling",
+  "gaussian_symbolic_mode_limit": 4,
+  "symbolic_branch_limit": 64,
+  "gaussian_symbolic_enabled": true,
+  "diagonal_mixture_enabled": true,
+  "fused_diagonal_enabled": true,
+  "eager_symbolic_materialization_enabled": false,
+  "use_interaction_picture": false,
+  "device": {
+    "available": true,
+    "device_index": 0,
+    "name": "NVIDIA L20",
+    "compute_capability": "8.9",
+    "multiprocessor_count": 92,
+    "total_global_mem_bytes": 47676129280,
+    "shared_mem_per_block_bytes": 49152
+  },
+  "results": [
+    {
+      "name": "sc26_qaoa_nm1_c4",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "4",
+        "depth": "2",
+        "measured_runs": "5",
+        "num_qubits": "1",
+        "num_qumodes": "1",
+        "warmup_runs": "2",
+        "workload": "qaoa_circuit"
+      },
+      "metrics": {
+        "median_active_states": 1,
+        "median_compute_ms": 0.099284,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 0,
+        "median_gaussian_symbolic_blocks": 1,
+        "median_hdd_nodes": 3,
+        "median_memory_bytes": 2944,
+        "median_qubit_only_blocks": 0,
+        "median_symbolic_materializations": 0,
+        "median_total_ms": 0.205566,
+        "median_transfer_ms": 0,
+        "throughput_ops_per_sec": 4864.61768969577
+      }
+    },
+    {
+      "name": "sc26_qaoa_nm2_c4",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "4",
+        "depth": "2",
+        "measured_runs": "5",
+        "num_qubits": "1",
+        "num_qumodes": "2",
+        "warmup_runs": "2",
+        "workload": "qaoa_circuit"
+      },
+      "metrics": {
+        "median_active_states": 1,
+        "median_compute_ms": 0.192006,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 0,
+        "median_gaussian_symbolic_blocks": 1,
+        "median_hdd_nodes": 3,
+        "median_memory_bytes": 4096,
+        "median_qubit_only_blocks": 0,
+        "median_symbolic_materializations": 0,
+        "median_total_ms": 0.290477,
+        "median_transfer_ms": 0,
+        "throughput_ops_per_sec": 3442.6133566513
+      }
+    },
+    {
+      "name": "sc26_qaoa_nm4_c4",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "4",
+        "depth": "2",
+        "measured_runs": "5",
+        "num_qubits": "1",
+        "num_qumodes": "4",
+        "warmup_runs": "2",
+        "workload": "qaoa_circuit"
+      },
+      "metrics": {
+        "median_active_states": 1,
+        "median_compute_ms": 0.396656,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 0,
+        "median_gaussian_symbolic_blocks": 1,
+        "median_hdd_nodes": 3,
+        "median_memory_bytes": 27136,
+        "median_qubit_only_blocks": 0,
+        "median_symbolic_materializations": 0,
+        "median_total_ms": 0.499899,
+        "median_transfer_ms": 0,
+        "throughput_ops_per_sec": 2000.40408162449
+      }
+    },
+    {
+      "name": "sc26_qaoa_nm8_c4",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "4",
+        "depth": "2",
+        "measured_runs": "5",
+        "num_qubits": "1",
+        "num_qumodes": "8",
+        "warmup_runs": "2",
+        "workload": "qaoa_circuit"
+      },
+      "metrics": {
+        "median_active_states": 1,
+        "median_compute_ms": 0.866692,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 0,
+        "median_gaussian_symbolic_blocks": 1,
+        "median_hdd_nodes": 3,
+        "median_memory_bytes": 6294016,
+        "median_qubit_only_blocks": 0,
+        "median_symbolic_materializations": 0,
+        "median_total_ms": 0.980712,
+        "median_transfer_ms": 0,
+        "throughput_ops_per_sec": 1019.66734372578
+      }
+    },
+    {
+      "name": "sc26_qaoa_nm1_c8",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "8",
+        "depth": "2",
+        "measured_runs": "5",
+        "num_qubits": "1",
+        "num_qumodes": "1",
+        "warmup_runs": "2",
+        "workload": "qaoa_circuit"
+      },
+      "metrics": {
+        "median_active_states": 1,
+        "median_compute_ms": 0.095361,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 0,
+        "median_gaussian_symbolic_blocks": 1,
+        "median_hdd_nodes": 3,
+        "median_memory_bytes": 3328,
+        "median_qubit_only_blocks": 0,
+        "median_symbolic_materializations": 0,
+        "median_total_ms": 0.19099,
+        "median_transfer_ms": 0,
+        "throughput_ops_per_sec": 5235.87622388607
+      }
+    },
+    {
+      "name": "sc26_qaoa_nm2_c8",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "8",
+        "depth": "2",
+        "measured_runs": "5",
+        "num_qubits": "1",
+        "num_qumodes": "2",
+        "warmup_runs": "2",
+        "workload": "qaoa_circuit"
+      },
+      "metrics": {
+        "median_active_states": 1,
+        "median_compute_ms": 0.193106,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 0,
+        "median_gaussian_symbolic_blocks": 1,
+        "median_hdd_nodes": 3,
+        "median_memory_bytes": 8704,
+        "median_qubit_only_blocks": 0,
+        "median_symbolic_materializations": 0,
+        "median_total_ms": 0.299911,
+        "median_transfer_ms": 0,
+        "throughput_ops_per_sec": 3334.32251567965
+      }
+    },
+    {
+      "name": "sc26_qaoa_nm4_c8",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "8",
+        "depth": "2",
+        "measured_runs": "5",
+        "num_qubits": "1",
+        "num_qumodes": "4",
+        "warmup_runs": "2",
+        "workload": "qaoa_circuit"
+      },
+      "metrics": {
+        "median_active_states": 1,
+        "median_compute_ms": 0.397755,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 0,
+        "median_gaussian_symbolic_blocks": 1,
+        "median_hdd_nodes": 3,
+        "median_memory_bytes": 395776,
+        "median_qubit_only_blocks": 0,
+        "median_symbolic_materializations": 0,
+        "median_total_ms": 0.500268,
+        "median_transfer_ms": 0,
+        "throughput_ops_per_sec": 1998.92857428418
+      }
+    },
+    {
+      "name": "sc26_qaoa_nm1_c16",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "depth": "2",
+        "measured_runs": "5",
+        "num_qubits": "1",
+        "num_qumodes": "1",
+        "warmup_runs": "2",
+        "workload": "qaoa_circuit"
+      },
+      "metrics": {
+        "median_active_states": 1,
+        "median_compute_ms": 0.096628,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 0,
+        "median_gaussian_symbolic_blocks": 1,
+        "median_hdd_nodes": 3,
+        "median_memory_bytes": 4096,
+        "median_qubit_only_blocks": 0,
+        "median_symbolic_materializations": 0,
+        "median_total_ms": 0.190951,
+        "median_transfer_ms": 0,
+        "throughput_ops_per_sec": 5236.94560384601
+      }
+    },
+    {
+      "name": "sc26_qaoa_nm2_c16",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "depth": "2",
+        "measured_runs": "5",
+        "num_qubits": "1",
+        "num_qumodes": "2",
+        "warmup_runs": "2",
+        "workload": "qaoa_circuit"
+      },
+      "metrics": {
+        "median_active_states": 1,
+        "median_compute_ms": 0.189056,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 0,
+        "median_gaussian_symbolic_blocks": 1,
+        "median_hdd_nodes": 3,
+        "median_memory_bytes": 27136,
+        "median_qubit_only_blocks": 0,
+        "median_symbolic_materializations": 0,
+        "median_total_ms": 0.294512,
+        "median_transfer_ms": 0,
+        "throughput_ops_per_sec": 3395.44738414734
+      }
+    },
+    {
+      "name": "sc26_qaoa_nm6_c16",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "depth": "2",
+        "measured_runs": "10",
+        "num_qubits": "1",
+        "num_qumodes": "6",
+        "warmup_runs": "2",
+        "workload": "qaoa_circuit"
+      },
+      "metrics": {
+        "median_active_states": 1,
+        "median_compute_ms": 4.6878105,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 0,
+        "median_gaussian_symbolic_blocks": 1,
+        "median_hdd_nodes": 3,
+        "median_memory_bytes": 1610617656,
+        "median_qubit_only_blocks": 0,
+        "median_symbolic_materializations": 0,
+        "median_total_ms": 5.50032,
+        "median_transfer_ms": 0,
+        "throughput_ops_per_sec": 181.807603921226
+      }
+    },
+    {
+      "name": "sc26_qaoa_nm7_c16",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "depth": "2",
+        "measured_runs": "10",
+        "num_qubits": "1",
+        "num_qumodes": "7",
+        "warmup_runs": "2",
+        "workload": "qaoa_circuit"
+      },
+      "metrics": {
+        "median_active_states": 1,
+        "median_compute_ms": 4.5062845,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 0,
+        "median_gaussian_symbolic_blocks": 1,
+        "median_hdd_nodes": 3,
+        "median_memory_bytes": 25769804056,
+        "median_qubit_only_blocks": 0,
+        "median_symbolic_materializations": 0,
+        "median_total_ms": 19.5848885,
+        "median_transfer_ms": 0,
+        "throughput_ops_per_sec": 51.059774989273
+      }
+    },
+    {
+      "name": "sc26_qaoa_nm4_c16",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "16",
+        "depth": "2",
+        "measured_runs": "5",
+        "num_qubits": "1",
+        "num_qumodes": "4",
+        "warmup_runs": "2",
+        "workload": "qaoa_circuit"
+      },
+      "metrics": {
+        "median_active_states": 1,
+        "median_compute_ms": 0.394326,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 0,
+        "median_gaussian_symbolic_blocks": 1,
+        "median_hdd_nodes": 3,
+        "median_memory_bytes": 6294016,
+        "median_qubit_only_blocks": 0,
+        "median_symbolic_materializations": 0,
+        "median_total_ms": 0.49996,
+        "median_transfer_ms": 0,
+        "throughput_ops_per_sec": 2000.16001280102
+      }
+    },
+    {
+      "name": "sc26_qaoa_nm1_c32",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "32",
+        "depth": "2",
+        "measured_runs": "5",
+        "num_qubits": "1",
+        "num_qumodes": "1",
+        "warmup_runs": "2",
+        "workload": "qaoa_circuit"
+      },
+      "metrics": {
+        "median_active_states": 1,
+        "median_compute_ms": 0.096426,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 0,
+        "median_gaussian_symbolic_blocks": 1,
+        "median_hdd_nodes": 3,
+        "median_memory_bytes": 5632,
+        "median_qubit_only_blocks": 0,
+        "median_symbolic_materializations": 0,
+        "median_total_ms": 0.19149,
+        "median_transfer_ms": 0,
+        "throughput_ops_per_sec": 5222.20481487284
+      }
+    },
+    {
+      "name": "sc26_qaoa_nm2_c32",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "32",
+        "depth": "2",
+        "measured_runs": "5",
+        "num_qubits": "1",
+        "num_qumodes": "2",
+        "warmup_runs": "2",
+        "workload": "qaoa_circuit"
+      },
+      "metrics": {
+        "median_active_states": 1,
+        "median_compute_ms": 0.189995,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 0,
+        "median_gaussian_symbolic_blocks": 1,
+        "median_hdd_nodes": 3,
+        "median_memory_bytes": 100864,
+        "median_qubit_only_blocks": 0,
+        "median_symbolic_materializations": 0,
+        "median_total_ms": 0.293966,
+        "median_transfer_ms": 0,
+        "throughput_ops_per_sec": 3401.7539443337
+      }
+    },
+    {
+      "name": "sc26_qaoa_nm4_c32",
+      "category": "scaling",
+      "status": "ok",
+      "note": "",
+      "params": {
+        "cutoff": "32",
+        "depth": "2",
+        "measured_runs": "5",
+        "num_qubits": "1",
+        "num_qumodes": "4",
+        "warmup_runs": "2",
+        "workload": "qaoa_circuit"
+      },
+      "metrics": {
+        "median_active_states": 1,
+        "median_compute_ms": 0.393813,
+        "median_diagonal_mixture_blocks": 0,
+        "median_exact_blocks": 0,
+        "median_gaussian_symbolic_blocks": 1,
+        "median_hdd_nodes": 3,
+        "median_memory_bytes": 100665856,
+        "median_qubit_only_blocks": 0,
+        "median_symbolic_materializations": 0,
+        "median_total_ms": 0.541943,
+        "median_transfer_ms": 0,
+        "throughput_ops_per_sec": 1845.21250389801
+      }
+    }
+  ]
+}

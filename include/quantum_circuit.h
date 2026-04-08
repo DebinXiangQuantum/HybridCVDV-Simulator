@@ -114,6 +114,7 @@ private:
     bool diagonal_mixture_enabled_;
     bool fused_diagonal_enabled_;
     bool eager_symbolic_materialization_enabled_;
+    bool force_dense_fock_; // ablation: force all Fock gates through dense D×D/D²×D² MatVec
     size_t qubit_only_block_count_;
     size_t gaussian_symbolic_block_count_;
     size_t diagonal_mixture_block_count_;
@@ -213,6 +214,12 @@ public:
     void set_eager_symbolic_materialization_enabled(bool enabled);
 
     /**
+     * 启用或禁用强制使用dense MatVec执行所有Fock门（消融实验用）
+     * 开启后L0/L1/L3专用kernel退化为通用dense D×D gemv或D²×D² tensor contraction
+     */
+    void set_force_dense_fock(bool enabled);
+
+    /**
      * 获取显式设置的Gaussian symbolic branch池容量；0表示自动推导
      */
     int get_gaussian_state_pool_capacity() const { return gaussian_state_pool_capacity_override_; }
@@ -227,6 +234,7 @@ public:
     bool is_eager_symbolic_materialization_enabled() const {
         return eager_symbolic_materialization_enabled_;
     }
+    bool is_force_dense_fock() const { return force_dense_fock_; }
 
     /**
      * 获取最终状态的振幅
@@ -731,6 +739,15 @@ private:
      * 执行Rabi相互作用 RB(θ)
      */
     void execute_rabi_interaction(const GateParams& gate);
+    bool try_collect_normalized_pairwise_terminal_ids(
+        int control_qubit,
+        std::vector<int>* low_ids,
+        std::vector<int>* high_ids) const;
+    bool normalize_root_for_pairwise_fastpath();
+    bool try_execute_inplace_pairwise_hybrid_gate(
+        const GateParams& gate,
+        const std::vector<int>& low_ids,
+        const std::vector<int>& high_ids);
 
     /**
      * 执行Jaynes-Cummings相互作用 JC(θ,φ)
