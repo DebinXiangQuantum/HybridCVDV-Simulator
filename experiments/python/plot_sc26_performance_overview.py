@@ -69,6 +69,8 @@ CSV_FIELDS = [
     "compute_ms",
     "communication_ms",
     "memory_bytes",
+    "cpu_memory_bytes",
+    "gpu_memory_bytes",
     "memory_kind",
     "status",
     "source",
@@ -199,6 +201,8 @@ def make_row(
     compute_ms: Optional[float],
     communication_ms: Optional[float],
     memory_bytes: Optional[float],
+    cpu_memory_bytes: Optional[float] = None,
+    gpu_memory_bytes: Optional[float] = None,
     memory_kind: str,
     status: str,
     source: str,
@@ -218,6 +222,8 @@ def make_row(
         "compute_ms": compute_ms,
         "communication_ms": communication_ms,
         "memory_bytes": memory_bytes,
+        "cpu_memory_bytes": cpu_memory_bytes,
+        "gpu_memory_bytes": gpu_memory_bytes,
         "memory_kind": memory_kind,
         "status": status,
         "source": source,
@@ -259,6 +265,8 @@ def read_existing_rows(csv_path: pathlib.Path) -> List[Dict[str, Any]]:
                     "compute_ms": optional_float(row.get("compute_ms")),
                     "communication_ms": optional_float(row.get("communication_ms")),
                     "memory_bytes": optional_float(row.get("memory_bytes")),
+                    "cpu_memory_bytes": optional_float(row.get("cpu_memory_bytes")),
+                    "gpu_memory_bytes": optional_float(row.get("gpu_memory_bytes")),
                 }
             )
     return rows
@@ -394,7 +402,9 @@ def parse_atlas_csv(
             runtime_ms = float(row[2])
             communication_ms = float(row[3])
             compute_ms = float(row[4])
-            memory_bytes = float(row[5])
+            cpu_memory_bytes = float(row[5])
+            gpu_memory_bytes = float(row[6]) if len(row) > 6 else 0.0
+            memory_bytes = cpu_memory_bytes + gpu_memory_bytes
             
             note = ""
             if len(row) > 7:
@@ -409,6 +419,8 @@ def parse_atlas_csv(
             compute_value = compute_ms if status == "ok" else None
             communication_value = communication_ms if status == "ok" else None
             memory_value = memory_bytes if status == "ok" else None
+            cpu_mem_value = cpu_memory_bytes if status == "ok" else None
+            gpu_mem_value = gpu_memory_bytes if status == "ok" else None
 
             match = jch_pattern.match(case_id)
             if match:
@@ -453,6 +465,8 @@ def parse_atlas_csv(
                     compute_ms=compute_value,
                     communication_ms=communication_value,
                     memory_bytes=memory_value,
+                    cpu_memory_bytes=cpu_mem_value,
+                    gpu_memory_bytes=gpu_mem_value,
                     memory_kind="reported",
                     status=status,
                     source="atlas_csv",
@@ -1180,6 +1194,93 @@ def plot_runtime_bars_with_breakdown(
     }
 
 
+def memory_breakdown_values(row: Optional[Mapping[str, Any]], *, scale: float = 1.0) -> Optional[Dict[str, float]]:
+    """Return {"total", "gpu", "cpu"} memory breakdown in scaled units. GPU on bottom, CPU on top."""
+    if row is None or row.get("status") != "ok":
+        return None
+    total = optional_float(row.get("memory_bytes"))
+    if total is None or total <= 0.0:
+        return None
+    gpu = optional_float(row.get("gpu_memory_bytes"))
+    cpu = optional_float(row.get("cpu_memory_bytes"))
+    if gpu is not None and cpu is not None:
+        return {"total": total / scale, "gpu": gpu / scale, "cpu": cpu / scale}
+    # Non-atlas backends: treat the single memory value as GPU memory
+    return {"total": total / scale, "gpu": total / scale, "cpu": 0.0}
+
+
+def plot_memory_bars_with_breakdown(
+    ax: plt.Axes,
+    cases: Sequence[CaseKey],
+    lookup: Mapping[Tuple[str, CaseKey], Mapping[str, Any]],
+    backend_keys: Sequence[str],
+    ylabel: str,
+    *,
+    scale: float = BYTES_PER_MIB,
+) -> Dict[str, float]:
+    """Stacked memory bars: GPU memory (solid, bottom) + CPU memory (hatch //, top)."""
+    all_values: List[float] = []
+    memory_series: Dict[str, List[Optional[Dict[str, float]]]] = {}
+    for backend_key in backend_keys:
+        values: List[Optional[Dict[str, float]]] = []
+        for case in cases:
+            value = memory_breakdown_values(lookup.get((backend_key, case)), scale=scale)
+            values.append(value)
+            if value is not None and value["total"] > 0.0:
+                all_values.append(value["total"])
+        memory_series[backend_key] = values
+
+    if not all_values:
+        return {"base": 1.0, "ymax": 1.0, "bar_width": 0.2, "offset_start": -0.3}
+
+    base = min(all_values) / 4.0
+    ymax = (max(all_values) + base) * 1.8
+    x_positions = list(range(len(cases)))
+    group_width = 0.80
+    bar_width = min(0.22, group_width / max(1, len(backend_keys)))
+    offset_start = -0.5 * group_width + 0.5 * bar_width
+
+    # GPU (solid, bottom) then CPU (hatch //, top)
+    segment_styles = [
+        ("gpu", 0.95, None),
+        ("cpu", 0.75, "////"),
+    ]
+
+    for index, backend_key in enumerate(backend_keys):
+        for case_index, value in enumerate(memory_series[backend_key]):
+            if value is None:
+                continue
+            x = x_positions[case_index] + offset_start + index * bar_width
+            bottom = base
+            for segment_key, alpha, hatch in segment_styles:
+                segment_value = value[segment_key]
+                if segment_value <= 0.0:
+                    continue
+                ax.bar(
+                    x,
+                    segment_value,
+                    width=bar_width * 0.94,
+                    bottom=bottom,
+                    color=BACKEND_COLORS[backend_key],
+                    edgecolor="black",
+                    linewidth=0.2,
+                    hatch=hatch,
+                    alpha=alpha,
+                    zorder=3,
+                )
+                bottom += segment_value
+
+    ax.set_yscale("log")
+    ax.set_ylim(base, ymax)
+    ax.set_ylabel(ylabel)
+    return {
+        "base": base,
+        "ymax": ymax,
+        "bar_width": bar_width,
+        "offset_start": offset_start,
+    }
+
+
 def add_speedup_lines(
     ax: plt.Axes,
     cases: Sequence[CaseKey],
@@ -1450,6 +1551,24 @@ def backend_patch_handles(backend_keys: Sequence[str]) -> List[Patch]:
     ]
 
 
+_BREAKDOWN_GRAY = "#999999"
+
+
+def runtime_breakdown_handles() -> List[Patch]:
+    return [
+        Patch(facecolor=_BREAKDOWN_GRAY, edgecolor="black", linewidth=0.25, alpha=0.95, hatch="////////", label="Compute"),
+        Patch(facecolor=_BREAKDOWN_GRAY, edgecolor="black", linewidth=0.25, alpha=0.75, hatch="xxxxx", label="Communication"),
+        Patch(facecolor=_BREAKDOWN_GRAY, edgecolor="black", linewidth=0.25, alpha=0.35, label="Other"),
+    ]
+
+
+def memory_breakdown_handles() -> List[Patch]:
+    return [
+        Patch(facecolor=_BREAKDOWN_GRAY, edgecolor="black", linewidth=0.25, alpha=0.95, label="GPU Memory"),
+        Patch(facecolor=_BREAKDOWN_GRAY, edgecolor="black", linewidth=0.25, alpha=0.75, hatch="////", label="CPU Memory"),
+    ]
+
+
 def serialize_speedup_series(
     cases: Sequence[CaseKey],
     speedup_series: Mapping[str, Sequence[Optional[float]]],
@@ -1563,7 +1682,7 @@ def render_hybrid_figure(
 
     runtime_geometry = plot_runtime_bars_with_breakdown(ax_runtime, cases, lookup, HYBRID_BACKENDS, "Runtime (ms)")
     _, speedup_series = add_speedup_lines(ax_runtime, cases, lookup, HYBRID_BACKENDS)
-    plot_grouped_bars(ax_memory, cases, lookup, HYBRID_BACKENDS, "memory_bytes", "Memory (MB)", scale=BYTES_PER_MIB)
+    plot_memory_bars_with_breakdown(ax_memory, cases, lookup, HYBRID_BACKENDS, "Memory (MB)")
     annotate_oom_missing_bars(ax_runtime, cases, lookup, HYBRID_BACKENDS, runtime_geometry)
 
     ax_runtime.text(0.01, 0.98, "(a)", transform=ax_runtime.transAxes, ha="left", va="top", fontweight="bold")
@@ -1587,17 +1706,18 @@ def render_hybrid_figure(
     )
     ax_memory.set_xlabel("Hybrid benchmark instances", labelpad=2.0)
 
+    all_handles = backend_patch_handles(HYBRID_BACKENDS) + runtime_breakdown_handles() + memory_breakdown_handles()
     fig.legend(
-        handles=backend_patch_handles(HYBRID_BACKENDS),
+        handles=all_handles,
         loc="upper center",
         bbox_to_anchor=(0.5, 1.02),
-        ncol=4,
+        ncol=min(len(all_handles), 5),
         handlelength=0.75,
         handleheight=0.75,
         borderpad=0.2,
         columnspacing=0.8,
     )
-    fig.subplots_adjust(top=0.90, bottom=0.15, hspace=0.12, right=0.91)
+    fig.subplots_adjust(top=0.86, bottom=0.15, hspace=0.12, right=0.91)
     figure_paths = save_figure(fig, output_dir, "sc26_hybrid_performance_overview")
     plt.close(fig)
 
@@ -1638,7 +1758,7 @@ def render_pure_cv_figure(
 
     runtime_geometry = plot_runtime_bars_with_breakdown(ax_runtime, cases, lookup, PURE_CV_BACKENDS, "Runtime (ms)")
     _, speedup_series = add_speedup_lines(ax_runtime, cases, lookup, PURE_CV_BACKENDS)
-    plot_grouped_bars(ax_memory, cases, lookup, PURE_CV_BACKENDS, "memory_bytes", "Memory (MB)", scale=BYTES_PER_MIB)
+    plot_memory_bars_with_breakdown(ax_memory, cases, lookup, PURE_CV_BACKENDS, "Memory (MB)")
     annotate_oom_missing_bars(ax_runtime, cases, lookup, PURE_CV_BACKENDS, runtime_geometry)
 
     ax_runtime.text(0.01, 0.98, "(a)", transform=ax_runtime.transAxes, ha="left", va="top", fontweight="bold")
@@ -1662,17 +1782,18 @@ def render_pure_cv_figure(
     )
     ax_memory.set_xlabel("Pure-CV benchmark instances", labelpad=2.0)
 
+    all_handles = backend_patch_handles(PURE_CV_BACKENDS) + runtime_breakdown_handles() + memory_breakdown_handles()
     fig.legend(
-        handles=backend_patch_handles(PURE_CV_BACKENDS),
+        handles=all_handles,
         loc="upper center",
         bbox_to_anchor=(0.5, 1.1),
-        ncol=3,
+        ncol=min(len(all_handles), 5),
         handlelength=0.75,
         handleheight=0.75,
         borderpad=0.2,
         columnspacing=0.8,
     )
-    fig.subplots_adjust(top=0.88, bottom=0.20, hspace=0.12, right=0.88)
+    fig.subplots_adjust(top=0.84, bottom=0.20, hspace=0.12, right=0.88)
     figure_paths = save_figure(fig, output_dir, "sc26_pure_cv_performance_overview")
     plt.close(fig)
 

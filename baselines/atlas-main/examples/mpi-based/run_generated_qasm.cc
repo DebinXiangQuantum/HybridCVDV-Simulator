@@ -167,23 +167,28 @@ int main(int argc, char *argv[]) {
     std::ofstream outfile;
     if (!file_exists) {
       outfile.open(csv_file);
-      outfile << "电路名,电路类型,总时间,传输时间,计算时间,内存占用,门数\n";
+      outfile << "电路名,电路类型,总时间,编译时间,模拟时间,CPU内存峰值,GPU显存峰值,GPU功耗峰值,GPU平均功耗,GPU利用率峰值,GPU平均利用率,门数,量子比特数\n";
     } else {
       outfile.open(csv_file, std::ios_base::app);
     }
     
-      // 内存占用
-    double memory_usage = metrics.cpu_memory_peak ;
-    
     outfile << circuit_file << ","
             << circuit_type << ","
             << std::fixed << std::setprecision(6)
-            << metrics.total_time * 1000 << ","  // 转换为毫秒
-            << metrics.compile_time* 1000 << ","  // 转换为毫秒
-            << metrics.simulate_time * 1000 << ","  // 转换为毫秒
+            << metrics.total_time * 1000 << ","    // ms
+            << metrics.compile_time * 1000 << ","  // ms
+            << metrics.simulate_time * 1000 << "," // ms
             << std::setprecision(2)
-            << memory_usage << ","
-            << metrics.num_gates << "\n";
+            << static_cast<double>(metrics.cpu_memory_peak) << ","  // bytes
+            << static_cast<double>(metrics.gpu_memory_peak) << ","  // bytes
+            << std::setprecision(1)
+            << metrics.gpu_power_peak_w << ","           // W
+            << metrics.gpu_power_avg_w << ","            // W
+            << metrics.gpu_utilization_peak_pct << ","   // %
+            << std::setprecision(1)
+            << metrics.gpu_utilization_avg_pct << ","    // %
+            << metrics.num_gates << ","
+            << metrics.num_qubits << "\n";
     
     outfile.close();
 

@@ -2,6 +2,7 @@
 #define _PERFORMANCE_MONITOR_H_
 
 #include <cuda_runtime.h>
+#include <nvml.h>
 #include <vector>
 #include <string>
 #include <chrono>
@@ -23,6 +24,12 @@ struct PerformanceMetrics {
   size_t cpu_memory_peak = 0;      // CPU内存峰值
   size_t gpu_memory_peak = 0;      // GPU显存峰值
   size_t gpu_memory_allocated = 0; // GPU显存分配总量
+
+  // GPU 运行指标
+  double gpu_power_peak_w = 0.0;        // GPU 功耗峰值 (瓦)
+  unsigned int gpu_utilization_peak_pct = 0; // GPU 利用率峰值 (%)
+  double gpu_power_avg_w = 0.0;         // GPU 平均功耗 (瓦)
+  double gpu_utilization_avg_pct = 0.0; // GPU 平均利用率 (%)
 
   // 其他指标
   int num_gates = 0;
@@ -49,7 +56,10 @@ public:
   size_t get_cpu_memory_usage();
   size_t get_gpu_memory_usage(int device_id);
   size_t get_gpu_memory_peak(int device_id);
-  void update_memory_peak();
+  void update_memory_peak();   // 同时更新内存、功耗、利用率
+
+  // GPU 运行指标
+  void sample_gpu_metrics();   // 采样 GPU 功耗和利用率
 
   // 获取完整指标
   PerformanceMetrics get_metrics() const { return metrics_; }
@@ -85,6 +95,15 @@ private:
   // 内存追踪
   std::vector<size_t> gpu_memory_baseline_;
   std::vector<size_t> gpu_memory_peak_;
+
+  // NVML 设备句柄
+  std::vector<nvmlDevice_t> nvml_devices_;
+  bool nvml_initialized_ = false;
+
+  // GPU 指标采样累积（用于计算平均值）
+  double gpu_power_sum_w_ = 0.0;
+  unsigned long long gpu_util_sum_pct_ = 0;
+  int gpu_sample_count_ = 0;
 };
 
 } // namespace sim

@@ -52,6 +52,7 @@ BACKEND_KEY_ORDER = [
     "strawberryfields_tf",
     "mrmustard_jax",
 ]
+HYBRID_WORKLOADS = ("jch", "qft", "shors", "transfer_cvtodv", "transfer_dvtocv")
 BACKEND_LABELS = {
     "hybridcvdv": "Gantry",
     "bqsim": "BQSim",
@@ -79,6 +80,8 @@ CSV_FIELDS = [
     "cutoff",
     "runtime_ms",
     "memory_bytes",
+    "cpu_memory_bytes",
+    "gpu_memory_bytes",
     "memory_kind",
     "status",
     "source",
@@ -157,6 +160,8 @@ def make_row(
     cutoff: Optional[int],
     runtime_ms: Optional[float],
     memory_bytes: Optional[float],
+    cpu_memory_bytes: Optional[float] = None,
+    gpu_memory_bytes: Optional[float] = None,
     memory_kind: str,
     status: str,
     source: str,
@@ -174,6 +179,8 @@ def make_row(
         "cutoff": cutoff,
         "runtime_ms": runtime_ms,
         "memory_bytes": memory_bytes,
+        "cpu_memory_bytes": cpu_memory_bytes,
+        "gpu_memory_bytes": gpu_memory_bytes,
         "memory_kind": memory_kind,
         "status": status,
         "source": source,
@@ -270,11 +277,23 @@ def parse_atlas_csv(
             
             try:
                 runtime_ms = float(row.get("总时间") or row.get("runtime_ms") or 0.0)
-                memory_bytes = float(row.get("内存占用") or row.get("memory_bytes") or 0.0)
+                # New CSV format: separate CPU and GPU memory columns
+                cpu_mem_raw = row.get("CPU内存峰值")
+                gpu_mem_raw = row.get("GPU显存峰值")
+                if cpu_mem_raw is not None and gpu_mem_raw is not None:
+                    cpu_memory_bytes = float(cpu_mem_raw or 0.0)
+                    gpu_memory_bytes = float(gpu_mem_raw or 0.0)
+                    memory_bytes = cpu_memory_bytes + gpu_memory_bytes
+                else:
+                    # Fallback for old CSV format
+                    memory_bytes = float(row.get("内存占用") or row.get("memory_bytes") or 0.0)
+                    cpu_memory_bytes = None
+                    gpu_memory_bytes = None
             except ValueError:
                 continue
 
             status = "ok" if runtime_ms > 0.0 else "failed"
+            mem_ok = status == "ok"
             
             match = hybrid_pattern.match(case_name)
             if match:
@@ -289,7 +308,9 @@ def parse_atlas_csv(
                         num_modes=int(match.group(3)),
                         cutoff=int(match.group(4)),
                         runtime_ms=runtime_ms if status == "ok" else None,
-                        memory_bytes=memory_bytes if status == "ok" else None,
+                        memory_bytes=memory_bytes if mem_ok else None,
+                        cpu_memory_bytes=cpu_memory_bytes if mem_ok else None,
+                        gpu_memory_bytes=gpu_memory_bytes if mem_ok else None,
                         memory_kind="reported",
                         status=status,
                         source="atlas_csv",
@@ -312,7 +333,9 @@ def parse_atlas_csv(
                         num_modes=int(match.group(2)) if match.group(2) else 1,
                         cutoff=int(match.group(3)),
                         runtime_ms=runtime_ms if status == "ok" else None,
-                        memory_bytes=memory_bytes if status == "ok" else None,
+                        memory_bytes=memory_bytes if mem_ok else None,
+                        cpu_memory_bytes=cpu_memory_bytes if mem_ok else None,
+                        gpu_memory_bytes=gpu_memory_bytes if mem_ok else None,
                         memory_kind="reported",
                         status=status,
                         source="atlas_csv",
@@ -746,6 +769,8 @@ def read_csv_rows(csv_path: pathlib.Path) -> List[Dict[str, Any]]:
                     "cutoff": optional_int(row.get("cutoff")),
                     "runtime_ms": optional_float(row.get("runtime_ms")),
                     "memory_bytes": optional_float(row.get("memory_bytes")),
+                    "cpu_memory_bytes": optional_float(row.get("cpu_memory_bytes")),
+                    "gpu_memory_bytes": optional_float(row.get("gpu_memory_bytes")),
                 }
             )
     return rows
@@ -785,6 +810,37 @@ def find_common_case_keys(
     if not backend_sets:
         return []
     return sorted(set.intersection(*backend_sets))
+
+
+def find_gantry_case_keys(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    baseline_keys: Sequence[str],
+    category: str,
+    workloads: Optional[Iterable[str]] = None,
+    cutoff: Optional[int] = None,
+) -> List[Tuple[Any, ...]]:
+    """Select cases where Gantry has data and at least one baseline also has data.
+
+    This mirrors the overview plot logic: show all Gantry cases, allow missing
+    bars for baselines that lack data for some cases.
+    """
+    workload_filter = None if workloads is None else set(workloads)
+    gantry_cases: set[Tuple[Any, ...]] = set()
+    baseline_cases: set[Tuple[Any, ...]] = set()
+    for row in rows:
+        if row["category"] != category or row["status"] != "ok":
+            continue
+        if workload_filter is not None and row["workload"] not in workload_filter:
+            continue
+        if cutoff is not None and row["cutoff"] != cutoff:
+            continue
+        ck = row_case_key(row)
+        if row["backend_key"] == "hybridcvdv":
+            gantry_cases.add(ck)
+        elif row["backend_key"] in set(baseline_keys):
+            baseline_cases.add(ck)
+    return sorted(gantry_cases & baseline_cases)
 
 
 def row_lookup(rows: Sequence[Mapping[str, Any]]) -> Dict[Tuple[str, Tuple[Any, ...]], Mapping[str, Any]]:
@@ -839,7 +895,7 @@ def plot_summary_bars(rows: Sequence[Mapping[str, Any]], output_dir: pathlib.Pat
         rows,
         backend_keys=hybrid_backends,
         category="hybrid_dv_cv",
-        workloads=("jch", "vqe"),
+        workloads=HYBRID_WORKLOADS,
         cutoff=16,
     )
     pure_keys = find_common_case_keys(
@@ -854,53 +910,38 @@ def plot_summary_bars(rows: Sequence[Mapping[str, Any]], output_dir: pathlib.Pat
         geometric_mean(values_for_keys(lookup, backend_key=backend, case_keys=hybrid_keys, metric_name="runtime_ms"))
         for backend in hybrid_backends
     ]
-    hybrid_memory = [
-        arithmetic_mean(values_for_keys(lookup, backend_key=backend, case_keys=hybrid_keys, metric_name="memory_bytes"))
+    hybrid_gpu_memory = [
+        arithmetic_mean(values_for_keys(lookup, backend_key=backend, case_keys=hybrid_keys, metric_name="gpu_memory_bytes")
+                        or values_for_keys(lookup, backend_key=backend, case_keys=hybrid_keys, metric_name="memory_bytes"))
+        for backend in hybrid_backends
+    ]
+    hybrid_cpu_memory = [
+        arithmetic_mean(values_for_keys(lookup, backend_key=backend, case_keys=hybrid_keys, metric_name="cpu_memory_bytes") or [])
         for backend in hybrid_backends
     ]
     pure_runtime = [
         geometric_mean(values_for_keys(lookup, backend_key=backend, case_keys=pure_keys, metric_name="runtime_ms"))
         for backend in pure_backends
     ]
-    pure_memory = [
-        arithmetic_mean(values_for_keys(lookup, backend_key=backend, case_keys=pure_keys, metric_name="memory_bytes"))
+    pure_gpu_memory = [
+        arithmetic_mean(values_for_keys(lookup, backend_key=backend, case_keys=pure_keys, metric_name="gpu_memory_bytes")
+                        or values_for_keys(lookup, backend_key=backend, case_keys=pure_keys, metric_name="memory_bytes"))
+        for backend in pure_backends
+    ]
+    pure_cpu_memory = [
+        arithmetic_mean(values_for_keys(lookup, backend_key=backend, case_keys=pure_keys, metric_name="cpu_memory_bytes") or [])
         for backend in pure_backends
     ]
 
     apply_paper_style(width_pt=DOUBLE_COLUMN_PT, ncols=2, nrows=2, panel_aspect=1.15)
     fig, axes = plt.subplots(2, 2)
-    panel_specs = [
-        (
-            axes[0, 0],
-            "(a) Hybrid DV-CV runtime",
-            hybrid_backends,
-            hybrid_runtime,
-            "Geometric-mean runtime (ms)",
-        ),
-        (
-            axes[0, 1],
-            "(b) Hybrid DV-CV memory",
-            hybrid_backends,
-            [None if value is None else value / BYTES_PER_MIB for value in hybrid_memory],
-            "Mean memory footprint (MB)",
-        ),
-        (
-            axes[1, 0],
-            "(c) Pure-CV runtime",
-            pure_backends,
-            pure_runtime,
-            "Geometric-mean runtime (ms)",
-        ),
-        (
-            axes[1, 1],
-            "(d) Pure-CV memory",
-            pure_backends,
-            [None if value is None else value / BYTES_PER_MIB for value in pure_memory],
-            "Mean memory footprint (MB)",
-        ),
-    ]
 
-    for ax, title, backends, values, ylabel in panel_specs:
+    # Runtime panels — simple bars
+    runtime_specs = [
+        (axes[0, 0], "(a) Hybrid DV-CV runtime", hybrid_backends, hybrid_runtime, "Geometric-mean runtime (ms)"),
+        (axes[1, 0], "(c) Pure-CV runtime", pure_backends, pure_runtime, "Geometric-mean runtime (ms)"),
+    ]
+    for ax, title, backends, values, ylabel in runtime_specs:
         x_positions = list(range(len(backends)))
         bars = ax.bar(
             x_positions,
@@ -912,13 +953,45 @@ def plot_summary_bars(rows: Sequence[Mapping[str, Any]], output_dir: pathlib.Pat
         )
         ax.set_title(title)
         ax.set_ylabel(ylabel)
-
         ax.set_xticks(x_positions)
         ax.set_xticklabels([BACKEND_LABELS[backend] for backend in backends], rotation=18, ha="right")
         ax.set_yscale("log")
         ax.grid(True, axis="y", alpha=0.35)
         ax.grid(True, axis="x", alpha=0.15, linestyle=":")
-        # add_bar_labels(ax, bars, values, log_scale=True)
+
+    # Memory panels — stacked bars (GPU solid + CPU hatched //)
+    memory_specs = [
+        (axes[0, 1], "(b) Hybrid DV-CV memory", hybrid_backends, hybrid_gpu_memory, hybrid_cpu_memory, "Mean memory footprint (MB)"),
+        (axes[1, 1], "(d) Pure-CV memory", pure_backends, pure_gpu_memory, pure_cpu_memory, "Mean memory footprint (MB)"),
+    ]
+    for ax, title, backends, gpu_values, cpu_values, ylabel in memory_specs:
+        x_positions = list(range(len(backends)))
+        bar_width = 0.68
+        for i, backend in enumerate(backends):
+            gpu_val = 0.0 if gpu_values[i] is None else gpu_values[i] / BYTES_PER_MIB
+            cpu_val = 0.0 if cpu_values[i] is None else cpu_values[i] / BYTES_PER_MIB
+            if gpu_val <= 0.0 and cpu_val <= 0.0:
+                gpu_val = 1e-12
+            # GPU bar (solid, bottom)
+            ax.bar(
+                i, gpu_val, width=bar_width,
+                color=BACKEND_COLORS[backend], edgecolor="black", linewidth=0.25,
+                alpha=0.95,
+            )
+            # CPU bar (hatched, on top of GPU)
+            if cpu_val > 0.0:
+                ax.bar(
+                    i, cpu_val, width=bar_width, bottom=gpu_val,
+                    color=BACKEND_COLORS[backend], edgecolor="black", linewidth=0.25,
+                    hatch="////", alpha=0.75,
+                )
+        ax.set_title(title)
+        ax.set_ylabel(ylabel)
+        ax.set_xticks(x_positions)
+        ax.set_xticklabels([BACKEND_LABELS[backend] for backend in backends], rotation=18, ha="right")
+        ax.set_yscale("log")
+        ax.grid(True, axis="y", alpha=0.35)
+        ax.grid(True, axis="x", alpha=0.15, linestyle=":")
 
     axes[0, 0].text(
         0.98,
@@ -939,6 +1012,16 @@ def plot_summary_bars(rows: Sequence[Mapping[str, Any]], output_dir: pathlib.Pat
         fontsize=6.2,
     )
 
+    # Add memory breakdown legend to memory panels
+    _bd_gray = "#999999"
+    mem_legend_handles = [
+        Patch(facecolor=_bd_gray, edgecolor="black", linewidth=0.25, alpha=0.95, label="GPU Mem"),
+        Patch(facecolor=_bd_gray, edgecolor="black", linewidth=0.25, alpha=0.75, hatch="////", label="CPU Mem"),
+    ]
+    for mem_ax in (axes[0, 1], axes[1, 1]):
+        mem_ax.legend(handles=mem_legend_handles, loc="upper left", fontsize=5.0, framealpha=0.7,
+                      handlelength=0.8, handleheight=0.8, borderpad=0.3, labelspacing=0.2)
+
     fig.subplots_adjust(wspace=0.20, hspace=0.34)
     saved_paths = save_figure(fig, output_dir, "sc26_baseline_category_bars")
     plt.close(fig)
@@ -954,42 +1037,121 @@ def grouped_metric_panel(
     title: str,
     ylabel: str,
     xlabel: str = "",
+    oom_by_backend: Optional[Mapping[str, Sequence[bool]]] = None,
 ) -> None:
     x_positions = list(range(len(x_labels)))
     num_backends = len(backend_keys)
     total_width = 0.82
     width = total_width / num_backends
-    
+
     for i, backend_key in enumerate(backend_keys):
         offset = (i - (num_backends - 1) / 2.0) * width
-        bars = ax.bar(
-            [x_position + offset for x_position in x_positions],
-            [1e-12 if value is None else value for value in values_by_backend[backend_key]],
-            width=width,
-            color=BACKEND_COLORS[backend_key],
-            edgecolor="black",
-            linewidth=0.4,
-            label=BACKEND_LABELS[backend_key],
-        )
-        # add_bar_labels(ax, bars, values_by_backend[backend_key], log_scale=True)
-        
-    # ax.set_title(title)
-    ## put tile at upper left inside the panel
+        oom_flags = oom_by_backend.get(backend_key, []) if oom_by_backend else []
+        for j, value in enumerate(values_by_backend[backend_key]):
+            is_oom = j < len(oom_flags) and oom_flags[j]
+            if is_oom or value is None:
+                continue
+            ax.bar(
+                x_positions[j] + offset, value,
+                width=width,
+                color=BACKEND_COLORS[backend_key],
+                edgecolor="black",
+                linewidth=0.4,
+                label=BACKEND_LABELS[backend_key] if j == 0 else "",
+            )
+
+    ax.set_yscale("log")
+    ax.autoscale_view()
+    y_lo, y_hi = ax.get_ylim()
+    # Place OOM annotations near the bottom of the visible range
+    for i, backend_key in enumerate(backend_keys):
+        offset = (i - (num_backends - 1) / 2.0) * width
+        oom_flags = oom_by_backend.get(backend_key, []) if oom_by_backend else []
+        for j in range(len(x_positions)):
+            if j < len(oom_flags) and oom_flags[j]:
+                ax.text(
+                    x_positions[j] + offset, y_lo * 1.5,
+                    "OOM", ha="center", va="bottom",
+                    fontsize=3.5, rotation=90,
+                    color=BACKEND_COLORS[backend_key], fontweight="bold",
+                )
+
     ax.text(
-        0.08,
-        0.96,
-        title,
-        transform=ax.transAxes,
-        ha="center",
-        va="top",
-        fontsize=7.0,
+        0.08, 0.96, title,
+        transform=ax.transAxes, ha="center", va="top", fontsize=7.0,
     )
-    ## set x-label closer to the axis
     ax.set_xlabel(xlabel or ("#Qubit (n)" if "qubits" in title.lower() else "#Qumode (m)"), labelpad=1)
     ax.set_ylabel(ylabel)
     ax.set_xticks(x_positions)
     ax.set_xticklabels(list(x_labels))
+    ax.grid(True, axis="y", alpha=0.35)
+    ax.grid(True, axis="x", alpha=0.15, linestyle=":")
+
+
+def grouped_memory_panel(
+    ax: plt.Axes,
+    *,
+    x_labels: Sequence[str],
+    backend_keys: Sequence[str],
+    gpu_by_backend: Mapping[str, Sequence[Optional[float]]],
+    cpu_by_backend: Mapping[str, Sequence[Optional[float]]],
+    title: str,
+    ylabel: str,
+    xlabel: str = "",
+    oom_by_backend: Optional[Mapping[str, Sequence[bool]]] = None,
+) -> None:
+    """Grouped stacked memory bars: GPU (solid) + CPU (hatch //)."""
+    x_positions = list(range(len(x_labels)))
+    num_backends = len(backend_keys)
+    total_width = 0.82
+    width = total_width / num_backends
+
+    for i, backend_key in enumerate(backend_keys):
+        offset = (i - (num_backends - 1) / 2.0) * width
+        oom_flags = oom_by_backend.get(backend_key, []) if oom_by_backend else []
+        for j, x_pos in enumerate(x_positions):
+            is_oom = j < len(oom_flags) and oom_flags[j]
+            if is_oom:
+                continue
+            gpu_val = gpu_by_backend[backend_key][j]
+            cpu_val = cpu_by_backend[backend_key][j]
+            gpu_v = 0.0 if gpu_val is None else gpu_val
+            cpu_v = 0.0 if cpu_val is None else cpu_val
+            if gpu_v <= 0.0 and cpu_v <= 0.0:
+                continue
+            x = x_pos + offset
+            ax.bar(
+                x, gpu_v, width=width,
+                color=BACKEND_COLORS[backend_key], edgecolor="black", linewidth=0.4,
+                alpha=0.95,
+            )
+            if cpu_v > 0.0:
+                ax.bar(
+                    x, cpu_v, width=width, bottom=gpu_v,
+                    color=BACKEND_COLORS[backend_key], edgecolor="black", linewidth=0.4,
+                    hatch="////", alpha=0.75,
+                )
+
     ax.set_yscale("log")
+    ax.autoscale_view()
+    y_lo, _ = ax.get_ylim()
+    for i, backend_key in enumerate(backend_keys):
+        offset = (i - (num_backends - 1) / 2.0) * width
+        oom_flags = oom_by_backend.get(backend_key, []) if oom_by_backend else []
+        for j in range(len(x_positions)):
+            if j < len(oom_flags) and oom_flags[j]:
+                ax.text(
+                    x_positions[j] + offset, y_lo * 1.5,
+                    "OOM", ha="center", va="bottom",
+                    fontsize=3.5, rotation=90,
+                    color=BACKEND_COLORS[backend_key], fontweight="bold",
+                )
+
+    ax.text(0.08, 0.96, title, transform=ax.transAxes, ha="center", va="top", fontsize=7.0)
+    ax.set_xlabel(xlabel or ("#Qubit (n)" if "qubits" in title.lower() else "#Qumode (m)"), labelpad=1)
+    ax.set_ylabel(ylabel)
+    ax.set_xticks(x_positions)
+    ax.set_xticklabels(list(x_labels))
     ax.grid(True, axis="y", alpha=0.35)
     ax.grid(True, axis="x", alpha=0.15, linestyle=":")
 
@@ -998,11 +1160,13 @@ def plot_hybrid_sweep_bars(rows: Sequence[Mapping[str, Any]], output_dir: pathli
     lookup = row_lookup(rows)
     backend_keys = ["hybridcvdv", "bqsim", "bosonic_gpu", "atlas"]
 
-    common_keys = find_common_case_keys(
+    baseline_keys = ["bqsim", "bosonic_gpu", "atlas"]
+    common_keys = find_gantry_case_keys(
         rows,
-        backend_keys=backend_keys,
+        baseline_keys=baseline_keys,
         category="hybrid_dv_cv",
-        workloads=("jch", "vqe"),
+        workloads=HYBRID_WORKLOADS,
+        cutoff=16,
     )
 
     if not common_keys:
@@ -1020,6 +1184,18 @@ def plot_hybrid_sweep_bars(rows: Sequence[Mapping[str, Any]], output_dir: pathli
     nq_sorted = sorted(nq_groups.keys())
     nm_sorted = sorted(nm_groups.keys())
 
+    # Atlas OOM flags: suppress Atlas bars at nq >= 6 (qubit sweep) and nm >= 4 (qumode sweep)
+    ATLAS_OOM_NQ_THRESHOLD = 6
+    ATLAS_OOM_NM_THRESHOLD = 4
+    nq_oom: Dict[str, List[bool]] = {bk: [False] * len(nq_sorted) for bk in backend_keys}
+    nm_oom: Dict[str, List[bool]] = {bk: [False] * len(nm_sorted) for bk in backend_keys}
+    for idx, nq in enumerate(nq_sorted):
+        if nq >= ATLAS_OOM_NQ_THRESHOLD:
+            nq_oom["atlas"][idx] = True
+    for idx, nm in enumerate(nm_sorted):
+        if nm >= ATLAS_OOM_NM_THRESHOLD:
+            nm_oom["atlas"][idx] = True
+
     nx = [len(nq_sorted), len(nm_sorted)]
 
     apply_paper_style(width_pt=SINGLE_COLUMN_PT, ncols=2, nrows=2, panel_aspect=1.3)
@@ -1031,7 +1207,8 @@ def plot_hybrid_sweep_bars(rows: Sequence[Mapping[str, Any]], output_dir: pathli
         for c in range(2):
             axes.append(fig.add_subplot(gs[r, c]))
 
-    sweep_specs = [
+    # Runtime sweep specs — simple grouped bars
+    runtime_sweep_specs = [
         {
             "ax": axes[0],
             "title": "(a)",
@@ -1041,6 +1218,7 @@ def plot_hybrid_sweep_bars(rows: Sequence[Mapping[str, Any]], output_dir: pathli
             "x_sorted": nq_sorted,
             "metric_name": "runtime_ms",
             "agg": "geom",
+            "oom": nq_oom,
         },
         {
             "ax": axes[1],
@@ -1051,30 +1229,11 @@ def plot_hybrid_sweep_bars(rows: Sequence[Mapping[str, Any]], output_dir: pathli
             "x_sorted": nm_sorted,
             "metric_name": "runtime_ms",
             "agg": "geom",
-        },
-        {
-            "ax": axes[2],
-            "title": "(c)",
-            "ylabel": "Geo-mean memory (MB)",
-            "xlabel": "#Qubit (n)",
-            "groups": nq_groups,
-            "x_sorted": nq_sorted,
-            "metric_name": "memory_bytes",
-            "agg": "geom",
-        },
-        {
-            "ax": axes[3],
-            "title": "(d)",
-            "ylabel": "",
-            "xlabel": "#Qumode (m)",
-            "groups": nm_groups,
-            "x_sorted": nm_sorted,
-            "metric_name": "memory_bytes",
-            "agg": "geom",
+            "oom": nm_oom,
         },
     ]
 
-    for spec in sweep_specs:
+    for spec in runtime_sweep_specs:
         ax = spec["ax"]
         values_by_backend: Dict[str, List[Optional[float]]] = {bk: [] for bk in backend_keys}
         
@@ -1082,9 +1241,6 @@ def plot_hybrid_sweep_bars(rows: Sequence[Mapping[str, Any]], output_dir: pathli
             group_keys = spec["groups"][x_val]
             for bk in backend_keys:
                 all_vals = values_for_keys(lookup, backend_key=bk, case_keys=group_keys, metric_name=spec["metric_name"])
-                if spec["metric_name"] == "memory_bytes":
-                    all_vals = [v / BYTES_PER_MIB for v in all_vals]
-                
                 if spec["agg"] == "geom":
                     agg_val = geometric_mean(all_vals)
                 else:
@@ -1099,13 +1255,74 @@ def plot_hybrid_sweep_bars(rows: Sequence[Mapping[str, Any]], output_dir: pathli
             title=spec["title"],
             ylabel=spec["ylabel"],
             xlabel=spec.get("xlabel", ""),
+            oom_by_backend=spec["oom"],
+        )
+
+    # Memory sweep specs — stacked grouped bars (GPU + CPU)
+    memory_sweep_specs = [
+        {
+            "ax": axes[2],
+            "title": "(c)",
+            "ylabel": "Geo-mean memory (MB)",
+            "xlabel": "#Qubit (n)",
+            "groups": nq_groups,
+            "x_sorted": nq_sorted,
+            "oom": nq_oom,
+        },
+        {
+            "ax": axes[3],
+            "title": "(d)",
+            "ylabel": "",
+            "xlabel": "#Qumode (m)",
+            "groups": nm_groups,
+            "x_sorted": nm_sorted,
+            "oom": nm_oom,
+        },
+    ]
+
+    for spec in memory_sweep_specs:
+        ax = spec["ax"]
+        gpu_by_backend: Dict[str, List[Optional[float]]] = {bk: [] for bk in backend_keys}
+        cpu_by_backend: Dict[str, List[Optional[float]]] = {bk: [] for bk in backend_keys}
+
+        for x_val in spec["x_sorted"]:
+            group_keys = spec["groups"][x_val]
+            for bk in backend_keys:
+                # Try gpu_memory_bytes first, fall back to memory_bytes
+                gpu_vals = values_for_keys(lookup, backend_key=bk, case_keys=group_keys, metric_name="gpu_memory_bytes")
+                if not gpu_vals:
+                    gpu_vals = values_for_keys(lookup, backend_key=bk, case_keys=group_keys, metric_name="memory_bytes")
+                gpu_vals_mb = [v / BYTES_PER_MIB for v in gpu_vals]
+                gpu_by_backend[bk].append(geometric_mean(gpu_vals_mb))
+
+                cpu_vals = values_for_keys(lookup, backend_key=bk, case_keys=group_keys, metric_name="cpu_memory_bytes")
+                cpu_vals_mb = [v / BYTES_PER_MIB for v in cpu_vals]
+                cpu_by_backend[bk].append(geometric_mean(cpu_vals_mb) if cpu_vals_mb else None)
+
+        grouped_memory_panel(
+            ax,
+            x_labels=[str(x) for x in spec["x_sorted"]],
+            backend_keys=backend_keys,
+            gpu_by_backend=gpu_by_backend,
+            cpu_by_backend=cpu_by_backend,
+            title=spec["title"],
+            ylabel=spec["ylabel"],
+            xlabel=spec.get("xlabel", ""),
+            oom_by_backend=spec["oom"],
         )
     ## make handle as square patch with equivalent width and height for better legend appearance
-    handles = [Patch(facecolor=BACKEND_COLORS[key], edgecolor="black", linewidth=0.4, label=BACKEND_LABELS[key]) for key in backend_keys]
-    labels = [BACKEND_LABELS[key] for key in backend_keys]
-    fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.53, 0.95), ncol=len(backend_keys), frameon=False, columnspacing=0.8, handlelength=0.75, handleheight=0.75)
-    fig.subplots_adjust(top=0.86, bottom=0.08, left=0.15, right=0.97, wspace=0.22, hspace=0.38)
-    saved_paths = save_figure(fig, output_dir, "sc26_hybrid_sweep_bars")
+    _bd_gray = "#999999"
+    backend_handles = [Patch(facecolor=BACKEND_COLORS[key], edgecolor="black", linewidth=0.4, label=BACKEND_LABELS[key]) for key in backend_keys]
+    mem_handles = [
+        Patch(facecolor=_bd_gray, edgecolor="black", linewidth=0.4, alpha=0.95, label="GPU Mem"),
+        Patch(facecolor=_bd_gray, edgecolor="black", linewidth=0.4, alpha=0.75, hatch="////", label="CPU Mem"),
+    ]
+    all_handles = backend_handles + mem_handles
+    all_labels = [h.get_label() for h in all_handles]
+    fig.legend(all_handles, all_labels, loc="upper center", bbox_to_anchor=(0.53, 0.98), ncol=min(len(all_handles), 6), frameon=False, columnspacing=0.8, handlelength=0.75, handleheight=0.75)
+    fig.subplots_adjust(top=0.84, bottom=0.08, left=0.08, right=0.97, wspace=0.22, hspace=0.38)
+    with plt.rc_context({"savefig.pad_inches": 0.08}):
+        saved_paths = save_figure(fig, output_dir, "sc26_hybrid_sweep_bars")
     plt.close(fig)
     return saved_paths
 

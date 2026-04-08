@@ -8,6 +8,7 @@
 #include <chrono>
 
 #include "circuit.h"
+#include "performance_monitor_global.h"
 #include "quartz/gate/gate_utils.h"
 #include "quartz/parser/qasm_parser.h"
 #include "quartz/tasograph/tasograph.h"
@@ -444,6 +445,10 @@ void qcircuit::Circuit<DT>::simulate(bool use_mpi) {
     simulator.InitStateMulti(init_permutation);
 
   printf("Init State Vectors!\n");
+
+  // 状态向量已分配到 GPU，立即采样一次显存
+  if (auto* pm = sim::GlobalPerfMonitor::get()) pm->update_memory_peak();
+
   auto start = std::chrono::system_clock::now();
 
   int normal_idx = 0;
@@ -480,6 +485,10 @@ void qcircuit::Circuit<DT>::simulate(bool use_mpi) {
   }
   
   printf("Finish Simulating! Total: %d FUSE Kernel, %d SHM Kernel, %d Shuffles.\n", num_fuse, num_shm, num_shuffle);
+
+  // 在 Destroy 释放显存之前采样峰值
+  if (auto* pm = sim::GlobalPerfMonitor::get()) pm->update_memory_peak();
+
   simulator.Destroy(false);
   auto end= std::chrono::system_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);

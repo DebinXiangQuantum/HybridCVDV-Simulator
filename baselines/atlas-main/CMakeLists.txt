@@ -141,9 +141,9 @@ set_property(TARGET quansim PROPERTY CUDA_ARCHITECTURES "70;75;80;90")
 target_include_directories(quansim PUBLIC ${QSIM_INCLUDE_DIRS})
 # TODO: add option to choose simulator backend
 if(USE_LEGION)
-  target_link_libraries(quansim ${LEGION_LIBRARY} quartz_runtime)
+  target_link_libraries(quansim ${LEGION_LIBRARY} quartz_runtime nvidia-ml)
 else()
-  target_link_libraries(quansim quartz_runtime)
+  target_link_libraries(quansim quartz_runtime nvidia-ml)
 endif()
 
 set(INCLUDE_DEST "include")

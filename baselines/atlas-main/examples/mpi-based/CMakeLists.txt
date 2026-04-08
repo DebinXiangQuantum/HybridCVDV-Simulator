@@ -19,7 +19,7 @@ set(RUN_QASM_SRC
 
 cuda_add_executable(${run_qasm_target} ${RUN_QASM_SRC})
 target_include_directories(${run_qasm_target} PRIVATE ${QSIM_INCLUDE_DIRS} ${CMAKE_INSTALL_INCLUDEDIR})
-target_link_libraries(${run_qasm_target} -Wl,--whole-archive quansim -Wl,--no-whole-archive ${QSIM_EXT_LIBRARIES} ${CMAKE_BINARY_DIR}/deps/quartz/libquartz_runtime.so)
+target_link_libraries(${run_qasm_target} -Wl,--whole-archive quansim -Wl,--no-whole-archive ${QSIM_EXT_LIBRARIES} ${CMAKE_BINARY_DIR}/deps/quartz/libquartz_runtime.so nvidia-ml)
 
 # 新的 test_param 目标
 set(test_param_target test_param)
