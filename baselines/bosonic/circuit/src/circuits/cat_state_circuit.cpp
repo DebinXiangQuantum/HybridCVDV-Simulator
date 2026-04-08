@@ -1,4 +1,4 @@
-num_qumodes * qubits_per_qumode#include <iostream>
+#include <iostream>
 #include <complex>
 #include <cmath>
 #include <fstream>

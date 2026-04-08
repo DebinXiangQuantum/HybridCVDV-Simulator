@@ -6,6 +6,9 @@
 #include <vector>
 #include <memory>
 #include <chrono>
+#include <atomic>
+#include <mutex>
+#include <thread>
 
 namespace gpu {
 
@@ -30,6 +33,7 @@ public:
     
 private:
     size_t get_system_memory_usage() const;
+    void monitor_memory();
     
     int num_qubits_;
     int num_qumodes_;
@@ -42,6 +46,11 @@ private:
     double transfer_time_ms_;
     double computation_time_ms_;
     size_t memory_usage_bytes_;
+    
+    // 内存检测线程相关
+    std::atomic<bool> memory_monitor_running_;
+    std::mutex memory_mutex_;
+    std::thread memory_monitor_thread_;
 };
 
 } // namespace gpu

@@ -1,8 +1,11 @@
 #include "quantum_state.h"
 #include <stdexcept>
 #include <cmath>
+#include <iostream>
 
 namespace gpu {
+
+std::atomic<size_t> QuantumState::process_allocated_gpu_bytes_(0);
 
 QuantumState::QuantumState(int num_qubits, int num_qumodes, int cutoff)
     : num_qubits_(num_qubits), num_qumodes_(num_qumodes), cutoff_(cutoff) {
@@ -13,15 +16,24 @@ QuantumState::QuantumState(int num_qubits, int num_qumodes, int cutoff)
         dim_ *= cutoff;
     }
     
-    cudaError_t err = cudaMalloc(&d_data_, dim_ * sizeof(cuDoubleComplex));
+    size_t bytes_to_alloc = dim_ * sizeof(cuDoubleComplex);
+    cudaError_t err = cudaMalloc(&d_data_, bytes_to_alloc);
     if (err != cudaSuccess) {
         throw std::runtime_error("Failed to allocate GPU memory");
     }
+    
+    process_allocated_gpu_bytes_ += bytes_to_alloc;
+    std::cout << "当前进程 GPU 内存分配: " << bytes_to_alloc / (1024 * 1024) << " MB"
+              << " (累计: " << process_allocated_gpu_bytes_.load() / (1024 * 1024) << " MB)" << std::endl;
 }
 
 QuantumState::~QuantumState() {
     if (d_data_) {
+        size_t bytes_to_free = dim_ * sizeof(cuDoubleComplex);
         cudaFree(d_data_);
+        process_allocated_gpu_bytes_ -= bytes_to_free;
+        std::cout << "当前进程 GPU 内存释放: " << bytes_to_free  << " 字节"
+                  << " (剩余: " << process_allocated_gpu_bytes_.load() << " 字节)" << std::endl;
     }
 }
 
@@ -29,10 +41,11 @@ void QuantumState::initialize_zero() {
     cudaMemset(d_data_, 0, dim_ * sizeof(cuDoubleComplex));
 }
 
-void QuantumState::initialize_ground() {
+size_t QuantumState::initialize_ground() {
     initialize_zero();
     cuDoubleComplex one = make_cuDoubleComplex(1.0, 0.0);
     cudaMemcpy(d_data_, &one, sizeof(cuDoubleComplex), cudaMemcpyHostToDevice);
+    return process_allocated_gpu_bytes_.load();
 }
 
 void QuantumState::upload(const std::vector<std::complex<double>>& host_data) {

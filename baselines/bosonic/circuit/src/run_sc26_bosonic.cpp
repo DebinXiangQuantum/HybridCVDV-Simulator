@@ -7,9 +7,9 @@
 #include <iomanip>
 #include <filesystem>
 #include <algorithm>
-#include <thread>
-#include <future>
-#include <mutex>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #include "nlohmann/json.hpp"
 #include "core/circuit.h"
 #include "gates/gates.h"
@@ -230,8 +230,18 @@ CircuitResult run_circuit(const CircuitCase& c, const std::string& result_dir) {
             }
             run_qft_circuit(c.num_qubits, c.num_modes, c.cutoff, delta, n, a, append);
         } else if (c.workload == "shors_circuit") {
-            std::cout << "  Skipping: shors_circuit (known issue)" << std::endl;
-            result.status = "skipped_shors_circuit";
+            int N = 15;
+            if (c.int_params.find("N") != c.int_params.end()) {
+                N = c.int_params.at("N");
+            }
+            int a = 2;
+            if (c.int_params.find("a") != c.int_params.end()) {
+                a = c.int_params.at("a");
+            }
+            int m = 4; // 量子比特数
+            int R = 8; // 寄存器大小
+            double delta = 0.1;
+            run_shors_circuit(c.num_qubits, c.num_modes, c.cutoff, N, m, R, a, delta);
         } else if (c.workload == "cat_state_circuit") {
             double alpha = 1.0;
             if (c.params.find("alpha") != c.params.end()) {
@@ -360,6 +370,8 @@ int main(int argc, char* argv[]) {
 
     auto cases = parse_json_file(json_file);
 
+    // 运行所有案例，不移除任何案例
+
     std::cout << "Total cases: " << cases.size() << std::endl;
     std::cout << "========================================" << std::endl;
     std::cout << std::endl;
@@ -374,44 +386,38 @@ int main(int argc, char* argv[]) {
     std::cout << "========================================" << std::endl;
     std::cout << std::endl;
 
+    // 确保result目录存在
+    fs::create_directories("result");
+
     std::vector<CircuitResult> results;
-    const int num_threads = 4;
-    std::vector<std::thread> threads;
-    std::vector<std::vector<CircuitCase>> thread_cases(num_threads);
 
-    // 分配任务到各个线程
-    for (size_t i = 0; i < cases.size(); ++i) {
-        thread_cases[i % num_threads].push_back(cases[i]);
-    }
-
-    // 启动线程
-    for (int i = 0; i < num_threads; ++i) {
-        threads.emplace_back([&, i]() {
-            std::vector<CircuitResult> thread_results;
-            for (const auto& c : thread_cases[i]) {
-                auto result = run_circuit(c, result_dir);
-                thread_results.push_back(result);
-            }
-            
-            // 合并结果
-            std::lock_guard<std::mutex> lock(results_mutex);
-            results.insert(results.end(), thread_results.begin(), thread_results.end());
-        });
-    }
-
-    // 等待所有线程完成
-    for (auto& t : threads) {
-        t.join();
+    // 串行运行每个案例，避免同时分配过多GPU内存
+    for (const auto& c : cases) {
+        pid_t pid = fork();
+        if (pid == 0) {
+            // 子进程
+            auto result = run_circuit(c, result_dir);
+            // 子进程完成后退出
+            exit(0);
+        } else if (pid > 0) {
+            // 父进程等待当前子进程完成，然后再运行下一个案例
+            waitpid(pid, nullptr, 0);
+        } else {
+            //  fork失败
+            std::cerr << "Fork failed for circuit: " << c.name << std::endl;
+        }
     }
 
     fs::create_directories(result_dir);
 
+    // 由于每个进程独立运行，结果已经单独保存，这里只需要创建一个汇总文件
     auto now = std::chrono::system_clock::now();
     auto now_time_t = std::chrono::system_clock::to_time_t(now);
     std::stringstream ss;
     ss << result_dir << "/sc26_results_" << std::put_time(std::localtime(&now_time_t), "%Y%m%d_%H%M%S") << ".json";
     std::string output_path = ss.str();
 
+    // 由于结果已经在子进程中保存，这里只需要创建一个空的汇总文件
     save_results_to_json(results, output_path);
 
     std::cout << "========================================" << std::endl;
