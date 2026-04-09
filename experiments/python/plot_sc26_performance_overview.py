@@ -1776,9 +1776,9 @@ def render_pure_cv_figure(
     apply_paper_style(width_pt=SINGLE_COLUMN_PT, nrows=2, panel_aspect=3.75, font_size=BASE_FONT_SIZE)
     fig, (ax_runtime, ax_memory) = plt.subplots(2, 1, sharex=True)
 
-    runtime_geometry = plot_runtime_bars_with_breakdown(ax_runtime, cases, lookup, PURE_CV_BACKENDS, "Runtime (ms)")
+    runtime_geometry = plot_runtime_bars_with_breakdown(ax_runtime, cases, lookup, PURE_CV_BACKENDS, "Runtime(ms)")
     _, speedup_series = add_speedup_lines(ax_runtime, cases, lookup, PURE_CV_BACKENDS)
-    plot_memory_bars_with_breakdown(ax_memory, cases, lookup, PURE_CV_BACKENDS, "Memory (MB)")
+    plot_memory_bars_with_breakdown(ax_memory, cases, lookup, PURE_CV_BACKENDS, "Memory(MB)")
     annotate_oom_missing_bars(ax_runtime, cases, lookup, PURE_CV_BACKENDS, runtime_geometry)
 
     ax_runtime.text(0.01, 0.98, "(a)", transform=ax_runtime.transAxes, ha="left", va="top", fontweight="bold")
@@ -1798,14 +1798,14 @@ def render_pure_cv_figure(
         workload_order=PURE_WORKLOAD_ORDER,
         show_group_labels=False,
         show_labels=True,
-        rotation=55.0,
+        rotation=0,
     )
-    ax_memory.set_xlabel("Pure-CV benchmark instances", labelpad=2.0)
+    ax_memory.set_xlabel("Pure-CV QAOA instances", labelpad=2.0)
 
     fig.legend(
         handles=backend_patch_handles(HYBRID_BACKENDS), title="Method",
         loc="upper center",
-        bbox_to_anchor=(0.2, 1.3),
+        bbox_to_anchor=(0.2, 1.27),
         ncol=min(len(HYBRID_BACKENDS), 1),
         handlelength=0.75,
         handleheight=0.75,
@@ -1815,7 +1815,7 @@ def render_pure_cv_figure(
     fig.legend(
         handles=runtime_breakdown_handles(), title="Runtime Breakdown",
         loc="upper center",
-        bbox_to_anchor=(0.5, 1.3),
+        bbox_to_anchor=(0.5, 1.27),
         ncol=min(len(runtime_breakdown_handles()), 1),
         handlelength=0.75,
         handleheight=0.75,
@@ -1825,14 +1825,14 @@ def render_pure_cv_figure(
     fig.legend(
         handles=memory_breakdown_handles(), title="Memory Breakdown",
         loc="upper center",
-        bbox_to_anchor=(0.8, 1.3),
+        bbox_to_anchor=(0.8, 1.27),
         ncol=min(len(memory_breakdown_handles()), 1),
         handlelength=0.75,
         handleheight=0.75,
         borderpad=0.2,
         columnspacing=0.8,
     )
-    fig.subplots_adjust(top=0.84, bottom=0.20, hspace=0.12, right=0.88)
+    fig.subplots_adjust(top=0.84, bottom=0.20, hspace=0.15, right=0.88)
     figure_paths = save_figure(fig, output_dir, "sc26_pure_cv_performance_overview")
     plt.close(fig)
 

@@ -49,7 +49,7 @@ MODE_SWEEP = [2, 3, 4, 5]
 CONFIGS = [
     {
         "suffix": "full",
-        "label": "Full",
+        "label": "Gantry",
         "color": "#1b9e77",   # teal
         "marker": "o",
         "linestyle": "-",
@@ -63,7 +63,7 @@ CONFIGS = [
     },
     {
         "suffix": "no_symbolic_dense_fock",
-        "label": "w/o Gaussian + Dense Fock",
+        "label": "w/o Gaussian Track + w/o Fock Optimization",
         "color": "#FFA800",   # orange
         "marker": "D",
         "linestyle": ":",

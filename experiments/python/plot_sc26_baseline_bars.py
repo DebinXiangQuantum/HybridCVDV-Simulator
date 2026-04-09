@@ -1015,8 +1015,8 @@ def plot_summary_bars(rows: Sequence[Mapping[str, Any]], output_dir: pathlib.Pat
     # Add memory breakdown legend to memory panels
     _bd_gray = "#999999"
     mem_legend_handles = [
-        Patch(facecolor=_bd_gray, edgecolor="black", linewidth=0.25, alpha=0.95, label="GPU Mem"),
-        Patch(facecolor=_bd_gray, edgecolor="black", linewidth=0.25, alpha=0.75, hatch="////", label="CPU Mem"),
+        Patch(facecolor=_bd_gray, edgecolor="black", linewidth=0.25, alpha=0.95, label="GPU Memory"),
+        Patch(facecolor=_bd_gray, edgecolor="black", linewidth=0.25, alpha=0.75, hatch="////", label="CPU Memory"),
     ]
     for mem_ax in (axes[0, 1], axes[1, 1]):
         mem_ax.legend(handles=mem_legend_handles, loc="upper left", fontsize=5.0, framealpha=0.7,
