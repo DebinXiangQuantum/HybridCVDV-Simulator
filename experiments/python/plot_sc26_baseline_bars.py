@@ -1319,7 +1319,8 @@ def plot_hybrid_sweep_bars(rows: Sequence[Mapping[str, Any]], output_dir: pathli
     ]
     all_handles = backend_handles + mem_handles
     all_labels = [h.get_label() for h in all_handles]
-    fig.legend(all_handles, all_labels, loc="upper center", bbox_to_anchor=(0.53, 0.98), ncol=min(len(all_handles), 6), frameon=False, columnspacing=0.8, handlelength=0.75, handleheight=0.75)
+    fig.legend(backend_handles, [h.get_label() for h in backend_handles], loc="upper center", bbox_to_anchor=(0.3,1.04), ncol=min(len(all_handles), 2), frameon=False, columnspacing=0.8, handlelength=0.75, handleheight=0.75, title="Method")
+    fig.legend(mem_handles, [h.get_label() for h in mem_handles], loc="upper center", bbox_to_anchor=(0.85, 1.04), ncol=1, frameon=False, columnspacing=0.8, handlelength=0.75, title="Memory Type")
     fig.subplots_adjust(top=0.84, bottom=0.08, left=0.08, right=0.97, wspace=0.22, hspace=0.38)
     with plt.rc_context({"savefig.pad_inches": 0.08}):
         saved_paths = save_figure(fig, output_dir, "sc26_hybrid_sweep_bars")

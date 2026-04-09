@@ -1042,7 +1042,7 @@ def add_group_background(
                 transform=ax.get_xaxis_transform(),
                 ha="center",
                 va="bottom",
-                fontsize=5.4,
+                fontsize=6,
                 linespacing=0.9,
             )
     for start, end, _ in workload_ranges(cases, workload_order)[:-1]:
@@ -1511,7 +1511,7 @@ def finish_axis(
     ax.set_xlim(-0.5, len(cases) - 0.5)
     ax.set_xticks(x_positions)
     if show_labels:
-        ax.set_xticklabels([case_label(case) for case in cases], rotation=rotation, ha="right")
+        ax.set_xticklabels([case_label(case) for case in cases], rotation=rotation, ha="center")
     else:
         ax.set_xticklabels([])
 
@@ -1677,7 +1677,7 @@ def render_hybrid_figure(
     missing = count_missing_cases(cases, lookup, HYBRID_BACKENDS)
     oom_annotations = collect_oom_annotations(cases, lookup, HYBRID_BACKENDS)
 
-    apply_paper_style(width_pt=DOUBLE_COLUMN_PT, nrows=2, panel_aspect=5.25, font_size=BASE_FONT_SIZE)
+    apply_paper_style(width_pt=DOUBLE_COLUMN_PT, nrows=2, panel_aspect=7, font_size=BASE_FONT_SIZE)
     fig, (ax_runtime, ax_memory) = plt.subplots(2, 1, sharex=True)
 
     runtime_geometry = plot_runtime_bars_with_breakdown(ax_runtime, cases, lookup, HYBRID_BACKENDS, "Runtime (ms)")
@@ -1704,14 +1704,34 @@ def render_hybrid_figure(
         show_labels=True,
         rotation=90.0,
     )
-    ax_memory.set_xlabel("Hybrid benchmark instances", labelpad=2.0)
+    ax_memory.set_xlabel("Hybrid benchmark instances (cutoff = 16)", labelpad=2.0)
 
-    all_handles = backend_patch_handles(HYBRID_BACKENDS) + runtime_breakdown_handles() + memory_breakdown_handles()
+    # all_handles = backend_patch_handles(HYBRID_BACKENDS) + runtime_breakdown_handles() + memory_breakdown_handles()
     fig.legend(
-        handles=all_handles,
+        handles=backend_patch_handles(HYBRID_BACKENDS), title="Method",
         loc="upper center",
-        bbox_to_anchor=(0.5, 1.02),
-        ncol=min(len(all_handles), 5),
+        bbox_to_anchor=(0.25, 1.17),
+        ncol=min(len(HYBRID_BACKENDS), 2),
+        handlelength=0.75,
+        handleheight=0.75,
+        borderpad=0.2,
+        columnspacing=0.8,
+    )
+    fig.legend(
+        handles=runtime_breakdown_handles(), title="Runtime Breakdown",
+        loc="upper center",
+        bbox_to_anchor=(0.55, 1.17),
+        ncol=min(len(runtime_breakdown_handles()), 2),
+        handlelength=0.75,
+        handleheight=0.75,
+        borderpad=0.2,
+        columnspacing=0.8,
+    )
+    fig.legend(
+        handles=memory_breakdown_handles(), title="Memory Breakdown",
+        loc="upper center",
+        bbox_to_anchor=(0.8, 1.17),
+        ncol=min(len(memory_breakdown_handles()), 1),
         handlelength=0.75,
         handleheight=0.75,
         borderpad=0.2,
@@ -1782,12 +1802,31 @@ def render_pure_cv_figure(
     )
     ax_memory.set_xlabel("Pure-CV benchmark instances", labelpad=2.0)
 
-    all_handles = backend_patch_handles(PURE_CV_BACKENDS) + runtime_breakdown_handles() + memory_breakdown_handles()
     fig.legend(
-        handles=all_handles,
+        handles=backend_patch_handles(HYBRID_BACKENDS), title="Method",
         loc="upper center",
-        bbox_to_anchor=(0.5, 1.1),
-        ncol=min(len(all_handles), 5),
+        bbox_to_anchor=(0.2, 1.3),
+        ncol=min(len(HYBRID_BACKENDS), 1),
+        handlelength=0.75,
+        handleheight=0.75,
+        borderpad=0.2,
+        columnspacing=0.8,
+    )
+    fig.legend(
+        handles=runtime_breakdown_handles(), title="Runtime Breakdown",
+        loc="upper center",
+        bbox_to_anchor=(0.5, 1.3),
+        ncol=min(len(runtime_breakdown_handles()), 1),
+        handlelength=0.75,
+        handleheight=0.75,
+        borderpad=0.2,
+        columnspacing=0.8,
+    )
+    fig.legend(
+        handles=memory_breakdown_handles(), title="Memory Breakdown",
+        loc="upper center",
+        bbox_to_anchor=(0.8, 1.3),
+        ncol=min(len(memory_breakdown_handles()), 1),
         handlelength=0.75,
         handleheight=0.75,
         borderpad=0.2,
