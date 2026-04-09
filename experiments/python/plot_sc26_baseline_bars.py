@@ -1314,8 +1314,8 @@ def plot_hybrid_sweep_bars(rows: Sequence[Mapping[str, Any]], output_dir: pathli
     _bd_gray = "#999999"
     backend_handles = [Patch(facecolor=BACKEND_COLORS[key], edgecolor="black", linewidth=0.4, label=BACKEND_LABELS[key]) for key in backend_keys]
     mem_handles = [
-        Patch(facecolor=_bd_gray, edgecolor="black", linewidth=0.4, alpha=0.95, label="GPU Mem"),
-        Patch(facecolor=_bd_gray, edgecolor="black", linewidth=0.4, alpha=0.75, hatch="////", label="CPU Mem"),
+        Patch(facecolor=_bd_gray, edgecolor="black", linewidth=0.4, alpha=0.95, label="GPU Memory"),
+        Patch(facecolor=_bd_gray, edgecolor="black", linewidth=0.4, alpha=0.75, hatch="////", label="CPU Memory"),
     ]
     all_handles = backend_handles + mem_handles
     all_labels = [h.get_label() for h in all_handles]
