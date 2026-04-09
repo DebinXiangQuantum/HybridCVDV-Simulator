@@ -1564,8 +1564,8 @@ def runtime_breakdown_handles() -> List[Patch]:
 
 def memory_breakdown_handles() -> List[Patch]:
     return [
-        Patch(facecolor=_BREAKDOWN_GRAY, edgecolor="black", linewidth=0.25, alpha=0.95, label="GPU Memory"),
-        Patch(facecolor=_BREAKDOWN_GRAY, edgecolor="black", linewidth=0.25, alpha=0.75, hatch="////", label="CPU Memory"),
+        Patch(facecolor=_BREAKDOWN_GRAY, edgecolor="black", linewidth=0.25, alpha=0.95, label="GPU"),
+        Patch(facecolor=_BREAKDOWN_GRAY, edgecolor="black", linewidth=0.25, alpha=0.75, hatch="////", label="CPU"),
     ]
 
 
@@ -1803,19 +1803,19 @@ def render_pure_cv_figure(
     ax_memory.set_xlabel("Pure-CV QAOA instances", labelpad=2.0)
 
     fig.legend(
-        handles=backend_patch_handles(HYBRID_BACKENDS), title="Method",
+        handles=backend_patch_handles(PURE_CV_BACKENDS), title="Method",
         loc="upper center",
-        bbox_to_anchor=(0.2, 1.27),
-        ncol=min(len(HYBRID_BACKENDS), 1),
+        bbox_to_anchor=(0.23, 1.24),
+        ncol=min(len(PURE_CV_BACKENDS), 2),
         handlelength=0.75,
         handleheight=0.75,
         borderpad=0.2,
         columnspacing=0.8,
     )
     fig.legend(
-        handles=runtime_breakdown_handles(), title="Runtime Breakdown",
+        handles=runtime_breakdown_handles(), title="Runtime",
         loc="upper center",
-        bbox_to_anchor=(0.5, 1.27),
+        bbox_to_anchor=(0.6, 1.24),
         ncol=min(len(runtime_breakdown_handles()), 1),
         handlelength=0.75,
         handleheight=0.75,
@@ -1823,9 +1823,9 @@ def render_pure_cv_figure(
         columnspacing=0.8,
     )
     fig.legend(
-        handles=memory_breakdown_handles(), title="Memory Breakdown",
+        handles=memory_breakdown_handles(), title="Memory",
         loc="upper center",
-        bbox_to_anchor=(0.8, 1.27),
+        bbox_to_anchor=(0.86, 1.24),
         ncol=min(len(memory_breakdown_handles()), 1),
         handlelength=0.75,
         handleheight=0.75,

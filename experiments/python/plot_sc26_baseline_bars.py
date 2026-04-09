@@ -65,7 +65,7 @@ BACKEND_COLORS = {
     "hybridcvdv": "#5F8B4C",
     "bqsim": "#FFDDAB",
     "bosonic_gpu": "#FF9A9A",
-    "atlas": "#A6761D",
+    "atlas": "#B41C2D",
     "strawberryfields_tf": "#945034",
     "mrmustard_jax": "#3C77B4",
 }
