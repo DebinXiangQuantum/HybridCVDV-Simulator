@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 
 # Add the project root to sys.path to import paper_style
-project_root = Path(__file__).resolve().parent.parent.parent
+project_root = Path(__file__).resolve().parent
 sys.path.append(str(project_root))
 
 from experiments.configs.paper_style import apply_paper_style, save_figure
@@ -59,7 +59,7 @@ def get_mapping(k_name):
     return "Unknown", "Unknown", None
 
 def process_data():
-    csv_path = project_root / 'artifacts/remote_ncu_reports_20260329/ncu_random_circuit_mgpu_20260329_1808.csv'
+    csv_path = project_root / 'remote_ncu_reports_20260329/ncu_random_circuit_mgpu_20260329_1808.csv'
     
     with open(csv_path, 'r', newline='') as f:
         reader = csv.reader(f)
