@@ -1,356 +1,154 @@
-# Hybrid Tensor-DD 量子模拟器 (HybridCVDV-Simulator)
+# HybridCVDV-Simulator
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![C++](https://img.shields.io/badge/C%2B%2B-17-blue.svg)](https://en.wikipedia.org/wiki/C%2B%2B17)
-[![CUDA](https://img.shields.io/badge/CUDA-11.0+-green.svg)](https://developer.nvidia.com/cuda-toolkit)
+[![CUDA](https://img.shields.io/badge/CUDA-11.x%2F12.x-green.svg)](https://developer.nvidia.com/cuda-toolkit)
+[![CMake](https://img.shields.io/badge/CMake-3.18%2B-brightgreen.svg)](https://cmake.org/)
 
-一个高性能的混合连续变量-离散变量 (CV-DV) 量子模拟器，采用创新的 Hybrid Tensor-DD (HTDD) 架构，专门为高性能计算 (HPC) 场景设计。
 
-## 🚀 核心特性
 
-- **混合架构**: CPU逻辑控制 + GPU张量计算
-- **高效压缩**: 使用混合决策图 (HDD) 压缩Qubit空间
-- **GPU加速**: 专门优化的CUDA内核，支持批处理执行
-- **内存管理**: 智能的GPU内存池和垃圾回收系统
-- **指令融合**: 自动检测和合并可融合的连续操作
-- **多级别优化**: 从Level 0到Level 4的门操作层次化优化
+HybridCVDV-Simulator is a C++/CUDA research codebase for simulating hybrid discrete-variable and continuous-variable quantum circuits. The implementation follows the Hybrid Tensor-DD architecture described in `docs/architecture.md`: the CPU manages discrete branching with a decision diagram, while the GPU executes the continuous-variable payload with specialized kernels and execution paths.
 
-## 📋 系统要求
+## Overview
 
-### 硬件要求
-- NVIDIA GPU (支持CUDA 11.0+)
-- 至少8GB GPU内存 (推荐16GB+)
-- CPU: 支持多线程的现代处理器
+The current repository focuses on three layers:
 
-### 软件要求
-- **编译器**: GCC 9.0+ 或 Clang 10.0+
-- **CUDA Toolkit**: 11.0 或更高版本
-- **CMake**: 3.18+
-- **操作系统**: Linux (Ubuntu 18.04+, CentOS 7+)
+- **Hybrid circuit runtime**: a `QuantumCircuit` API for qubits, qumodes, and hybrid gates.
+- **Execution backends**: exact Fock-space kernels, Gaussian symbolic updates, and diagonal non-Gaussian mixture approximations.
+- **Experiment tooling**: single-GPU benchmark drivers, baseline runners, plotting inputs, and SC26 evaluation assets.
 
-### 可选依赖
-- **Google Test**: 用于单元测试 (`sudo apt install libgtest-dev`)
-- **Doxygen**: 用于生成文档
+## Current capabilities
 
-## 🛠️ 安装指南
+- **Control/physical separation** through a CPU-resident HDD plus GPU-resident CV state storage.
+- **Dual-track CV execution** with symbolic Gaussian evolution and exact tensor-based execution for non-Gaussian paths.
+- **Gate coverage across DV, CV, and hybrid layers**, including:
+  - qubit gates such as Hadamard, Pauli, rotations, CNOT, and CZ
+  - CV gates such as phase rotation, Kerr, SNAP, cross-Kerr, displacement, squeezing, beam splitter, creation, and annihilation
+  - hybrid gates such as conditional displacement/squeezing/beam splitter, Jaynes-Cummings, anti-Jaynes-Cummings, Rabi interaction, and selective qubit rotation
+- **Execution utilities** such as checkpointing, execution-block compilation, batching, instruction fusion, and CUDA graph-based scheduling.
+- **Benchmark infrastructure** under `experiments/` for scaling runs, baseline comparison, and GPU telemetry collection.
+- **Experimental noisy-simulation sandbox** under `src/noisy/`, kept intentionally separate from the default runtime while the API is still evolving.
 
-### 1. 克隆仓库
+## Supported gates
+
+The current public gate constructors are exposed through the `Gates::...` helpers in `include/quantum_circuit.h`.
+
+| Category | Gate helpers currently exposed |
+| --- | --- |
+| **Qubit gates** | `Hadamard`, `PauliX`, `PauliY`, `PauliZ`, `RotationX`, `RotationY`, `RotationZ`, `PhaseGateS`, `PhaseGateT`, `CNOT`, `CZ` |
+| **Pure CV gates** | `PhaseRotation`, `KerrGate`, `ConditionalParity`, `Snap`, `MultiSNAP`, `CrossKerr`, `CreationOperator`, `AnnihilationOperator`, `Displacement`, `Squeezing`, `BeamSplitter` |
+| **Hybrid controlled gates** | `ConditionalDisplacement`, `ConditionalSqueezing`, `ConditionalBeamSplitter`, `ConditionalTwoModeSqueezing`, `ConditionalSUM` |
+| **Hybrid interaction gates** | `RabiInteraction`, `JaynesCummings`, `AntiJaynesCummings`, `SelectiveQubitRotation` |
+
+From an execution-path perspective, these gates map onto four practical groups:
+
+- **Discrete-only control** for qubit rewrites on the HDD.
+- **Pure CV evolution** for Fock-space and Gaussian-state updates on qumodes.
+- **Conditionally applied hybrid gates** that branch on qubit state and act on one or more qumodes.
+- **Qubit-qumode mixing interactions** that explicitly couple DV and CV degrees of freedom.
+
+This section is intentionally limited to the gate surface that is present in the current codebase, rather than older paper-only or placeholder functionality.
+
+## Repository layout
+
+| Path | Purpose |
+| --- | --- |
+| `include/` | Public headers for the simulator library |
+| `src/core/` | CV state pool, Gaussian state handling, HDD nodes, and shared math |
+| `src/cpu/` | Circuit construction, compilation, and CPU-side control flow |
+| `src/gpu/` | CUDA kernels for qubit, CV, and hybrid gate execution |
+| `src/scheduler/` | Batch scheduling and instruction fusion |
+| `src/noisy/` | Experimental noisy-runtime subsystem |
+| `examples/` | Small standalone usage example |
+| `tests/` | Unit tests and analysis/benchmark drivers |
+| `experiments/` | Single-GPU benchmark harness, configs, and result-processing scripts |
+| `baselines/` | External baseline simulators and related setup material |
+| `docs/` | Architecture and design documentation |
+
+## Requirements
+
+- **CMake** 3.18 or newer
+- **C++ compiler** with C++17 support
+- **CUDA Toolkit** 11.x or 12.x for GPU acceleration
+- **GCC 9** is the recommended CUDA host compiler when available; otherwise the build falls back to the system GCC/Clang toolchain
+- **Linux-like environment** is the primary tested target
+
+If CUDA is not detected, CMake can still configure a CPU-only build for limited development and inspection workflows, but the main simulator is designed around GPU execution.
+
+## Build
+
 ```bash
-git clone https://github.com/your-repo/HybridCVDV-Simulator.git
-cd HybridCVDV-Simulator
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
 ```
 
-### 2. 创建构建目录
+To build the GoogleTest-based test suite as well:
+
 ```bash
-mkdir build && cd build
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHYBRIDCVDV_BUILD_TESTS=ON
+cmake --build build -j
+ctest --test-dir build --output-on-failure
 ```
 
-### 3. 配置和编译
+## Run the included executables
+
+After a successful build, the repository provides these common entry points:
+
 ```bash
-# 基本构建
-cmake ..
-make -j$(nproc)
-
-# 带测试的完整构建
-cmake .. -DBUILD_TESTS=ON
-make -j$(nproc)
-
-# 带调试信息的构建
-cmake .. -DCMAKE_BUILD_TYPE=Debug
-make -j$(nproc)
-```
-
-### 4. 安装 (可选)
-```bash
-sudo make install
-```
-
-### 5. 运行测试 (如果启用了测试)
-```bash
-# 运行所有测试
-ctest
-
-# 运行特定测试
-ctest -R test_cv_state_pool
-
-# 详细输出
-ctest -V
-```
-
-## 🚀 快速开始
-
-### 基本使用示例
-
-```cpp
-#include "quantum_circuit.h"
-
-// 创建量子电路: 2 qubits, 2 qumodes, 截断维度16
-QuantumCircuit circuit(2, 2, 16, 32);
-circuit.build();
-
-// 添加量子门操作
-circuit.add_gates({
-    Gates::PhaseRotation(0, M_PI / 4.0),                    // Qubit相位旋转
-    Gates::Displacement(0, std::complex<double>(0.5, 0.2)),  // CV位移门
-    Gates::BeamSplitter(0, 1, M_PI / 3.0),                  // 光束分裂器
-    Gates::ControlledDisplacement(0, 1, std::complex<double>(0.3, 0.0))  // 受控位移
-});
-
-// 执行电路
-circuit.execute();
-
-// 获取结果统计
-auto stats = circuit.get_stats();
-std::cout << "活跃状态数: " << stats.active_states << std::endl;
-```
-
-### 批处理调度器使用
-
-```cpp
-#include "batch_scheduler.h"
-
-// 创建调度器
-RuntimeScheduler scheduler(&circuit, 8);  // 批大小为8
-
-// 调度多个门操作
-scheduler.schedule_gates({
-    Gates::PhaseRotation(0, M_PI / 4.0),
-    Gates::Displacement(0, std::complex<double>(0.1, 0.0)),
-    Gates::CreationOperator(1)
-});
-
-// 执行所有操作
-scheduler.execute_all();
-
-// 获取性能统计
-auto stats = scheduler.get_stats();
-std::cout << "处理了 " << stats.batch_stats.total_tasks << " 个任务" << std::endl;
-```
-
-## 📚 API 文档
-
-### 核心类
-
-#### QuantumCircuit
-主要的量子电路类，管理整个模拟过程。
-
-**构造函数:**
-```cpp
-QuantumCircuit(int num_qubits, int num_qumodes, int cv_truncation, int max_states = 1024)
-```
-
-**主要方法:**
-- `add_gate(const GateParams& gate)`: 添加单个门操作
-- `add_gates(const std::vector<GateParams>& gates)`: 批量添加门操作
-- `execute()`: 执行量子电路
-- `get_amplitude(...)`: 获取状态振幅
-- `get_stats()`: 获取电路统计信息
-
-#### CVStatePool
-连续变量状态池，管理GPU上的量子态存储。
-
-#### FockELLOperator
-Fock基底上的ELL格式稀疏算符存储。
-
-#### HDDNode & HDDNodeManager
-混合决策图的节点和节点管理器。
-
-### 门操作类型
-
-#### Level 0: 对角门 (Diagonal Gates)
-- `PhaseRotation`: 相位旋转门 R(θ)
-- `KerrGate`: Kerr非线性门 K(χ)
-- `ConditionalParity`: 条件奇偶校验门 CP
-
-#### Level 1: 梯算符门 (Ladder Gates)
-- `CreationOperator`: 光子创建算符 a†
-- `AnnihilationOperator`: 光子湮灭算符 a
-
-#### Level 2: 单模门 (Single-Mode Gates)
-- `Displacement`: 位移门 D(α)
-- `Squeezing`: 挤压门 S(ξ)
-
-#### Level 3: 双模门 (Two-Mode Gates)
-- `BeamSplitter`: 光束分裂器 BS(θ,φ)
-
-#### Level 4: 混合控制门 (Hybrid Control Gates)
-- `ControlledDisplacement`: 受控位移门 CD(α)
-- `ControlledSqueezing`: 受控挤压门 CS(ξ)
-
-### 便捷门构造函数
-
-```cpp
-namespace Gates {
-    // Level 0
-    GateParams PhaseRotation(int qubit, double theta);
-    GateParams KerrGate(int qumode, double chi);
-
-    // Level 1
-    GateParams CreationOperator(int qumode);
-    GateParams AnnihilationOperator(int qumode);
-
-    // Level 2
-    GateParams Displacement(int qumode, std::complex<double> alpha);
-    GateParams Squeezing(int qumode, std::complex<double> xi);
-
-    // Level 3
-    GateParams BeamSplitter(int qumode1, int qumode2, double theta, double phi = 0.0);
-
-    // Level 4
-    GateParams ControlledDisplacement(int control_qubit, int target_qumode, std::complex<double> alpha);
-}
-```
-
-## 🧪 运行测试
-
-### 单元测试
-```bash
-# 运行所有单元测试
-make test
-
-# 运行特定组件测试
-./tests/HybridCVDV-Simulator_tests --gtest_filter="*CVStatePool*"
-
-# 生成测试覆盖率报告 (需要lcov)
-make coverage
-```
-
-### 性能测试
-```bash
-# 运行性能基准测试
-./build/HybridCVDV-Simulator_main --benchmark
-
-# 内存使用分析
-cuda-memcheck ./build/HybridCVDV-Simulator_main
-```
-
-### 系统测试
-```bash
-# 运行集成测试
-ctest -R "SystemTest*"
-
-# 运行示例程序
+./build/HybridCVDV-Simulator_main
 ./build/HybridCVDV-Simulator_examples
 ```
 
-## 📊 性能优化
+When CUDA is available, the single-GPU experiment driver is also built:
 
-### GPU优化特性
-- **批处理执行**: 将多个门操作批量提交到GPU
-- **指令融合**: 自动检测连续位移门进行合并
-- **内存预分配**: GPU内存池避免频繁分配
-- **Warp优化**: 使用shuffle指令优化梯算符门
-- **Shared Memory**: 复杂门操作使用共享内存加速
-
-### 内存管理
-- **智能垃圾回收**: 基于引用计数和相似度检测
-- **状态去重**: 自动合并保真度高的相似状态
-- **内存池化**: GPU内存块重用和整理
-
-### 性能建议
-1. **批大小调优**: 根据GPU型号调整批处理大小 (64-256)
-2. **截断维度**: 根据精度要求选择合适的Fock空间维度
-3. **内存预分配**: 为大型模拟预分配足够的状态池容量
-4. **指令排序**: 将相似操作分组以提高批处理效率
-
-## 🔧 高级配置
-
-### CMake选项
 ```bash
-# 启用测试
--DCMAKE_BUILD_TYPE=Debug
--DBUILD_TESTS=ON
-
-# 性能优化
--DCMAKE_BUILD_TYPE=Release
--DCMAKE_CUDA_FLAGS="-O3 --use_fast_math"
-
-# CUDA架构指定
--DCMAKE_CUDA_ARCHITECTURES="60;70;80"
-
-# 自定义安装路径
--DCMAKE_INSTALL_PREFIX=/opt/HybridCVDV-Simulator
+./build/hybridcvdv_single_gpu_experiments
 ```
 
-### 环境变量
-```bash
-# CUDA相关
-export CUDA_HOME=/usr/local/cuda
-export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
+## Minimal usage example
 
-# 性能调优
-export CUDA_MPS_PIPE_DIRECTORY=/tmp/mps
-export CUDA_MPS_LOG_DIRECTORY=/tmp/mps_log
-```
+The example below mirrors `examples/basic_usage.cpp`:
 
-## 📈 基准测试结果
+```cpp
+#include <complex>
+#include "quantum_circuit.h"
 
-### 测试配置
-- **GPU**: NVIDIA RTX 3080 (10GB)
-- **CPU**: Intel Core i7-10700K
-- **CUDA**: 11.4
-- **截断维度**: 32
-- **状态池容量**: 1024
+int main() {
+    constexpr double pi = 3.14159265358979323846;
+    QuantumCircuit circuit(1, 2, 8, 16);
+    circuit.build();
 
-### 性能数据
-| 操作类型 | 单个门延迟 | 批处理吞吐量 | 内存效率 |
-|---------|-----------|-------------|---------|
-| 对角门 | 2.3 μs | 12.8 Gops/s | 95% |
-| 梯算符门 | 3.1 μs | 9.2 Gops/s | 92% |
-| 单模门 | 15.7 μs | 2.1 Gops/s | 87% |
-| 双模门 | 45.2 μs | 0.8 Gops/s | 78% |
+    circuit.add_gate(Gates::PhaseRotation(0, pi / 4.0));
+    circuit.add_gate(Gates::Displacement(0, std::complex<double>(0.3, 0.1)));
+    circuit.add_gate(Gates::Squeezing(1, std::complex<double>(0.2, 0.0)));
+    circuit.add_gate(Gates::BeamSplitter(0, 1, pi / 3.0));
+    circuit.add_gate(Gates::CreationOperator(0));
 
-## 🤝 贡献指南
-
-### 开发环境设置
-1. Fork 本仓库
-2. 创建特性分支: `git checkout -b feature/new-feature`
-3. 提交更改: `git commit -am 'Add new feature'`
-4. 推送分支: `git push origin feature/new-feature`
-5. 创建 Pull Request
-
-### 代码规范
-- 使用 C++17 标准
-- 遵循 Google C++ 风格指南
-- 添加详细的中文注释
-- 为新功能编写单元测试
-- 更新相关文档
-
-### 测试要求
-- 所有新代码必须有单元测试
-- 测试覆盖率不低于 80%
-- 通过所有现有测试
-- 性能测试不能下降超过 5%
-
-## 📝 引用
-
-如果您在研究中使用本模拟器，请引用：
-
-```bibtex
-@software{HybridCVDV_Simulator,
-  title = {{Hybrid Tensor-DD Quantum Simulator}},
-  author = {Your Name},
-  url = {https://github.com/your-repo/HybridCVDV-Simulator},
-  version = {1.5},
-  year = {2025}
+    circuit.execute();
+    auto stats = circuit.get_stats();
+    return stats.active_states >= 0 ? 0 : 1;
 }
 ```
 
-## 📄 许可证
+## Benchmarks and experiment flow
 
-本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件
+The benchmark harness in `experiments/` is the current entry point for paper-style GPU runs.
 
-## 🙏 致谢
+Typical flow:
 
-- 感谢 NVIDIA CUDA 团队提供优秀的 GPU 计算平台
-- 感谢开源社区的贡献和支持
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --target hybridcvdv_single_gpu_experiments -j
+python experiments/python/run_gpu_benchmark_matrix.py
+```
 
-## 📞 联系方式
+For setup details, benchmark matrix formats, and baseline environment preparation, see [Experiment Harness](experiments/README.md)
+## Notes on the current codebase
 
-- **项目主页**: https://github.com/your-repo/HybridCVDV-Simulator
-- **问题反馈**: https://github.com/your-repo/HybridCVDV-Simulator/issues
-- **邮箱**: your-email@example.com
+- `src/noisy/` is a sandbox for the next noisy-simulation subsystem and is not wired into the root `CMakeLists.txt` yet.
+- The repository contains both library-style APIs and paper-oriented experiment drivers; not every directory is meant for end-user installation.
+- The previous top-level README contained stale benchmark numbers and placeholder metadata. This version intentionally focuses on the current implementation and documented build/run flow instead.
 
----
+## License
 
-**注意**: 本模拟器仍在积极开发中，API 可能会发生变化。建议定期更新到最新版本。
+This project is released under the [MIT License](LICENSE).
