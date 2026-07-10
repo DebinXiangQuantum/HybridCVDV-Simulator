@@ -1,0 +1,24 @@
+{
+  "created_at": "2026-06-11T06:49:43Z",
+  "max_dense_dim": 100000000,
+  "force_dense_fock": true,
+  "device": {
+    "available": true,
+    "index": 0,
+    "name": "NVIDIA H100 PCIe",
+    "cc_major": 9,
+    "cc_minor": 0,
+    "multiprocessor_count": 114,
+    "total_global_mem_bytes": 85017886720
+  },
+  "results": [
+    {
+      "name": "conv_qaoa_low_r_nm1_c128_reverse_convergence",
+      "category": "reverse_convergence",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "128", "force_dense_fock": "true", "forward_gates": "5", "identity_gates": "10", "initial_profile": "low", "num_qubits": "1", "num_qumodes": "1", "workload": "qaoa_low_r_circuit"},
+      "metrics": {"forward_boundary_fraction": 0.00495102259739379, "forward_boundary_population": 0.220592560800256, "forward_mean_total_photon_number": 74.594295949356, "forward_norm": 6.67494938542795, "forward_norm_loss": 5.67494938542795, "forward_norm_sq": 44.554949298025, "forward_state_change_fidelity": 0.000855785267528014, "forward_state_change_l2": 6.74110007105624, "forward_tail_fraction": 0.142494037217848, "forward_tail_population": 6.3488146035121, "initial_boundary_fraction": 0, "initial_norm": 1, "initial_tail_fraction": 0, "reverse_boundary_fraction": 0.00625559109600877, "reverse_fidelity": 3.46429393911905e-15, "reverse_fidelity_deviation": 0.999999999999997, "reverse_l2_error": 750723558.562904, "reverse_max_abs_error": 150978387.198547, "reverse_mean_total_photon_number": 74.2013532223705, "reverse_norm": 750723558.562904, "reverse_norm_loss": 750723557.562904, "reverse_tail_fraction": 0.146913223935031, "state_dim": 256}
+    }
+  ]
+}

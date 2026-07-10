@@ -308,8 +308,16 @@ if(CUDA_FOUND)
 endif()
 
 if(CUDA_FOUND)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/analyze/gate_compile_microbenchmark.cpp")
+        add_executable(${PROJECT_NAME}_gate_compile_microbenchmark tests/analyze/gate_compile_microbenchmark.cpp)
+        target_link_libraries(${PROJECT_NAME}_gate_compile_microbenchmark ${PROJECT_NAME} ${CUDA_LIBRARIES} CUDA::cublas)
+    endif()
+
     add_executable(${PROJECT_NAME}_gpu_precision_report tests/analyze/gpu_precision_report.cpp)
     target_link_libraries(${PROJECT_NAME}_gpu_precision_report ${PROJECT_NAME} ${CUDA_LIBRARIES} CUDA::cublas)
+
+    add_executable(${PROJECT_NAME}_sc26_precision_sweep tests/analyze/sc26_precision_sweep.cpp)
+    target_link_libraries(${PROJECT_NAME}_sc26_precision_sweep ${PROJECT_NAME} ${CUDA_LIBRARIES} CUDA::cublas)
 endif()
 
 # 测试 (使用自动下载的GoogleTest)

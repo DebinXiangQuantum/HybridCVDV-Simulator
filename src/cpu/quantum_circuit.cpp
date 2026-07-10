@@ -254,6 +254,7 @@ QuantumCircuit::QuantumCircuit(int num_qubits, int num_qumodes, int cv_truncatio
       fused_diagonal_enabled_(true),
       eager_symbolic_materialization_enabled_(false),
       force_dense_fock_(false),
+      symbolic_vacuum_projection_tolerance_(1e-10),
       qubit_only_block_count_(0),
       gaussian_symbolic_block_count_(0),
       diagonal_mixture_block_count_(0),
@@ -1131,6 +1132,13 @@ void QuantumCircuit::set_eager_symbolic_materialization_enabled(bool enabled) {
 
 void QuantumCircuit::set_force_dense_fock(bool enabled) {
     force_dense_fock_ = enabled;
+}
+
+void QuantumCircuit::set_symbolic_vacuum_projection_tolerance(double tolerance) {
+    if (!(tolerance > 0.0) || !std::isfinite(tolerance)) {
+        throw std::invalid_argument("symbolic vacuum projection tolerance must be finite and positive");
+    }
+    symbolic_vacuum_projection_tolerance_ = tolerance;
 }
 
 void QuantumCircuit::set_gaussian_state_pool_capacity(int capacity) {

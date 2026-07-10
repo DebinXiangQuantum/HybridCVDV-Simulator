@@ -1,0 +1,56 @@
+{
+  "created_at": "2026-06-11T12:23:16Z",
+  "max_dense_dim": 1000000,
+  "force_dense_fock": false,
+  "device": {
+    "available": true,
+    "index": 0,
+    "name": "NVIDIA H100 PCIe",
+    "cc_major": 9,
+    "cc_minor": 0,
+    "multiprocessor_count": 114,
+    "total_global_mem_bytes": 85017886720
+  },
+  "results": [
+    {
+      "name": "conv_gkp_c8_reverse_convergence",
+      "category": "reverse_convergence",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "8", "force_dense_fock": "false", "forward_gates": "65", "forward_gaussian_available": "false", "forward_gaussian_reason": "reachable symbolic terminal count is 0", "gaussian_only_dense_state": "false", "gaussian_symbolic_enabled": "true", "identity_gates": "162", "initial_profile": "low", "num_qubits": "1", "num_qumodes": "1", "reverse_gaussian_available": "false", "reverse_gaussian_reason": "reachable symbolic terminal count is 0", "workload": "gkp_state_circuit"},
+      "metrics": {"forward_active_states": 2, "forward_boundary_fraction": 0.0653853216093709, "forward_boundary_population": 0.0305978002915195, "forward_exact_blocks": 17, "forward_gaussian_symbolic_blocks": 0, "forward_mean_total_photon_number": 2.34368774072001, "forward_norm": 0.684076971480649, "forward_norm_loss": 0.315923028519351, "forward_norm_sq": 0.467961302910137, "forward_state_change_fidelity": 0.0675590242722308, "forward_state_change_l2": 1.0625993351458, "forward_symbolic_materializations": 0, "forward_tail_fraction": 0.0653853216093709, "forward_tail_population": 0.0305978002915195, "initial_boundary_fraction": 0.115533772581292, "initial_norm": 1, "initial_tail_fraction": 0.115533772581292, "reverse_active_states": 2, "reverse_boundary_fraction": 0.0349864184521479, "reverse_exact_blocks": 34, "reverse_fidelity": 0.674322597255637, "reverse_fidelity_deviation": 0.325677402744363, "reverse_gaussian_symbolic_blocks": 0, "reverse_l2_error": 0.623562061609831, "reverse_max_abs_error": 0.304164910630893, "reverse_mean_total_photon_number": 1.27826737972807, "reverse_norm": 0.56987038043697, "reverse_norm_loss": 0.43012961956303, "reverse_symbolic_materializations": 0, "reverse_tail_fraction": 0.0349864184521479, "state_dim": 16}
+    },
+    {
+      "name": "conv_gkp_c16_reverse_convergence",
+      "category": "reverse_convergence",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "16", "force_dense_fock": "false", "forward_gates": "65", "forward_gaussian_available": "false", "forward_gaussian_reason": "reachable symbolic terminal count is 0", "gaussian_only_dense_state": "false", "gaussian_symbolic_enabled": "true", "identity_gates": "162", "initial_profile": "low", "num_qubits": "1", "num_qumodes": "1", "reverse_gaussian_available": "false", "reverse_gaussian_reason": "reachable symbolic terminal count is 0", "workload": "gkp_state_circuit"},
+      "metrics": {"forward_active_states": 2, "forward_boundary_fraction": 0.0148617376876972, "forward_boundary_population": 0.00765346621900879, "forward_exact_blocks": 17, "forward_gaussian_symbolic_blocks": 0, "forward_mean_total_photon_number": 3.27678727933411, "forward_norm": 0.717619595234195, "forward_norm_loss": 0.282380404765805, "forward_norm_sq": 0.514977883464089, "forward_state_change_fidelity": 0.015158122248277, "forward_state_change_l2": 1.16562460618288, "forward_symbolic_materializations": 0, "forward_tail_fraction": 0.0331872612684217, "forward_tail_population": 0.0170907055659816, "initial_boundary_fraction": 0, "initial_norm": 1, "initial_tail_fraction": 0, "reverse_active_states": 2, "reverse_boundary_fraction": 0.00302750540741284, "reverse_exact_blocks": 34, "reverse_fidelity": 0.673376229775862, "reverse_fidelity_deviation": 0.326623770224138, "reverse_gaussian_symbolic_blocks": 0, "reverse_l2_error": 0.603227839500604, "reverse_max_abs_error": 0.291385378329449, "reverse_mean_total_photon_number": 2.50353414196703, "reverse_norm": 0.627566405471759, "reverse_norm_loss": 0.372433594528241, "reverse_symbolic_materializations": 0, "reverse_tail_fraction": 0.00733671486576893, "state_dim": 32}
+    },
+    {
+      "name": "conv_gkp_c32_reverse_convergence",
+      "category": "reverse_convergence",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "32", "force_dense_fock": "false", "forward_gates": "65", "forward_gaussian_available": "false", "forward_gaussian_reason": "reachable symbolic terminal count is 0", "gaussian_only_dense_state": "false", "gaussian_symbolic_enabled": "true", "identity_gates": "162", "initial_profile": "low", "num_qubits": "1", "num_qumodes": "1", "reverse_gaussian_available": "false", "reverse_gaussian_reason": "reachable symbolic terminal count is 0", "workload": "gkp_state_circuit"},
+      "metrics": {"forward_active_states": 2, "forward_boundary_fraction": 0.0013897714570595, "forward_boundary_population": 0.000901697274798941, "forward_exact_blocks": 17, "forward_gaussian_symbolic_blocks": 0, "forward_mean_total_photon_number": 8.09278147876502, "forward_norm": 0.805487276307458, "forward_norm_loss": 0.194512723692542, "forward_norm_sq": 0.648809752293207, "forward_state_change_fidelity": 0.0187217020877485, "forward_state_change_l2": 1.19840841185435, "forward_symbolic_materializations": 0, "forward_tail_fraction": 0.0271610063778188, "forward_tail_population": 0.0176223258200269, "initial_boundary_fraction": 0, "initial_norm": 1, "initial_tail_fraction": 0, "reverse_active_states": 2, "reverse_boundary_fraction": 0.00889902041352019, "reverse_exact_blocks": 34, "reverse_fidelity": 0.71162315951099, "reverse_fidelity_deviation": 0.28837684048901, "reverse_gaussian_symbolic_blocks": 0, "reverse_l2_error": 0.54214503727838, "reverse_max_abs_error": 0.184220172321118, "reverse_mean_total_photon_number": 4.63504561529561, "reverse_norm": 0.769116861102388, "reverse_norm_loss": 0.230883138897612, "reverse_symbolic_materializations": 0, "reverse_tail_fraction": 0.0434033885529724, "state_dim": 64}
+    },
+    {
+      "name": "conv_gkp_c64_reverse_convergence",
+      "category": "reverse_convergence",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "64", "force_dense_fock": "false", "forward_gates": "65", "forward_gaussian_available": "false", "forward_gaussian_reason": "reachable symbolic terminal count is 0", "gaussian_only_dense_state": "false", "gaussian_symbolic_enabled": "true", "identity_gates": "162", "initial_profile": "low", "num_qubits": "1", "num_qumodes": "1", "reverse_gaussian_available": "false", "reverse_gaussian_reason": "reachable symbolic terminal count is 0", "workload": "gkp_state_circuit"},
+      "metrics": {"forward_active_states": 2, "forward_boundary_fraction": 0.000524401787417634, "forward_boundary_population": 0.000444426116365053, "forward_exact_blocks": 17, "forward_gaussian_symbolic_blocks": 0, "forward_mean_total_photon_number": 15.63024735288, "forward_norm": 0.920593076446909, "forward_norm_loss": 0.0794069235530911, "forward_norm_sq": 0.847491612401984, "forward_state_change_fidelity": 0.0367171409986272, "forward_state_change_l2": 1.22257732471364, "forward_symbolic_materializations": 0, "forward_tail_fraction": 0.0493611529331311, "forward_tail_population": 0.0418331630893202, "initial_boundary_fraction": 0, "initial_norm": 1, "initial_tail_fraction": 0, "reverse_active_states": 2, "reverse_boundary_fraction": 2.87700579873659e-05, "reverse_exact_blocks": 34, "reverse_fidelity": 0.902273106939867, "reverse_fidelity_deviation": 0.0977268930601335, "reverse_gaussian_symbolic_blocks": 0, "reverse_l2_error": 0.31788826725713, "reverse_max_abs_error": 0.103354975658524, "reverse_mean_total_photon_number": 2.92450304639236, "reverse_norm": 0.892208594031525, "reverse_norm_loss": 0.107791405968475, "reverse_symbolic_materializations": 0, "reverse_tail_fraction": 0.000308075418514519, "state_dim": 128}
+    },
+    {
+      "name": "conv_gkp_c128_reverse_convergence",
+      "category": "reverse_convergence",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "128", "force_dense_fock": "false", "forward_gates": "65", "forward_gaussian_available": "false", "forward_gaussian_reason": "reachable symbolic terminal count is 0", "gaussian_only_dense_state": "false", "gaussian_symbolic_enabled": "true", "identity_gates": "162", "initial_profile": "low", "num_qubits": "1", "num_qumodes": "1", "reverse_gaussian_available": "false", "reverse_gaussian_reason": "reachable symbolic terminal count is 0", "workload": "gkp_state_circuit"},
+      "metrics": {"forward_active_states": 2, "forward_boundary_fraction": 5.69983848853457e-07, "forward_boundary_population": 5.69966370486847e-07, "forward_exact_blocks": 17, "forward_gaussian_symbolic_blocks": 0, "forward_mean_total_photon_number": 24.5853110287094, "forward_norm": 0.999984667547476, "forward_norm_loss": 1.53324525242748e-05, "forward_norm_sq": 0.999969335330036, "forward_state_change_fidelity": 0.0311166664102129, "forward_state_change_l2": 1.28342627188732, "forward_symbolic_materializations": 0, "forward_tail_fraction": 0.000145539929552355, "forward_tail_population": 0.000145535466618449, "initial_boundary_fraction": 0, "initial_norm": 1, "initial_tail_fraction": 0, "reverse_active_states": 2, "reverse_boundary_fraction": 2.51204717212622e-09, "reverse_exact_blocks": 34, "reverse_fidelity": 0.999999535182701, "reverse_fidelity_deviation": 4.64817299206111e-07, "reverse_gaussian_symbolic_blocks": 0, "reverse_l2_error": 0.000682443646399695, "reverse_max_abs_error": 0.000197482284930503, "reverse_mean_total_photon_number": 2.27325603637786, "reverse_norm": 0.999969567731639, "reverse_norm_loss": 3.04322683606362e-05, "reverse_symbolic_materializations": 0, "reverse_tail_fraction": 2.30131920722566e-08, "state_dim": 256}
+    }
+  ]
+}

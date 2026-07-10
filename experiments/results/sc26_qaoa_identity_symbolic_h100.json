@@ -1,0 +1,64 @@
+{
+  "created_at": "2026-06-11T07:44:22Z",
+  "max_dense_dim": 1000000,
+  "force_dense_fock": false,
+  "device": {
+    "available": true,
+    "index": 0,
+    "name": "NVIDIA H100 PCIe",
+    "cc_major": 9,
+    "cc_minor": 0,
+    "multiprocessor_count": 114,
+    "total_global_mem_bytes": 85017886720
+  },
+  "results": [
+    {
+      "name": "sc26_qaoa_nm1_c16_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "16", "force_dense_fock": "false", "forward_gates": "5", "gaussian_only_dense_state": "false", "gaussian_symbolic_enabled": "true", "identity_gates": "10", "initial_profile": "vacuum", "num_qubits": "1", "num_qumodes": "1", "reverse_gaussian_available": "true", "reverse_gaussian_reason": "ok", "workload": "qaoa_circuit"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "reverse_active_states": 1, "reverse_exact_blocks": 0, "reverse_gaussian_covariance_fro_delta": 4.18210389384022e-07, "reverse_gaussian_covariance_max_abs_delta": 2.95719401928155e-07, "reverse_gaussian_displacement_l2": 1.24791223958305e-08, "reverse_gaussian_overlap_determinant": 1.00000000002942, "reverse_gaussian_overlap_quadratic": 1.5572849576782e-16, "reverse_gaussian_symbolic_blocks": 1, "reverse_gaussian_vacuum_fidelity": 0.999999999985292, "reverse_gaussian_vacuum_fidelity_deviation": 1.47081236079316e-11, "reverse_gaussian_vacuum_fidelity_raw": 0.999999999985292, "reverse_gaussian_weight_abs": 1, "reverse_gaussian_weight_abs_sq": 1, "reverse_symbolic_materializations": 0, "state_dim": 32}
+    },
+    {
+      "name": "sc26_qaoa_nm2_c16_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "16", "force_dense_fock": "false", "forward_gates": "10", "gaussian_only_dense_state": "false", "gaussian_symbolic_enabled": "true", "identity_gates": "20", "initial_profile": "vacuum", "num_qubits": "1", "num_qumodes": "2", "reverse_gaussian_available": "true", "reverse_gaussian_reason": "ok", "workload": "qaoa_circuit"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "reverse_active_states": 1, "reverse_exact_blocks": 0, "reverse_gaussian_covariance_fro_delta": 5.91438804592217e-07, "reverse_gaussian_covariance_max_abs_delta": 2.95719401928155e-07, "reverse_gaussian_displacement_l2": 1.76481441386973e-08, "reverse_gaussian_overlap_determinant": 1.00000000005883, "reverse_gaussian_overlap_quadratic": 3.1145699153564e-16, "reverse_gaussian_symbolic_blocks": 1, "reverse_gaussian_vacuum_fidelity": 0.999999999970584, "reverse_gaussian_vacuum_fidelity_deviation": 2.94161361935608e-11, "reverse_gaussian_vacuum_fidelity_raw": 0.999999999970584, "reverse_gaussian_weight_abs": 1, "reverse_gaussian_weight_abs_sq": 1, "reverse_symbolic_materializations": 0, "state_dim": 512}
+    },
+    {
+      "name": "sc26_qaoa_nm4_c16_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "16", "force_dense_fock": "false", "forward_gates": "20", "gaussian_only_dense_state": "false", "gaussian_symbolic_enabled": "true", "identity_gates": "40", "initial_profile": "vacuum", "num_qubits": "1", "num_qumodes": "4", "reverse_gaussian_available": "true", "reverse_gaussian_reason": "ok", "workload": "qaoa_circuit"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "reverse_active_states": 1, "reverse_exact_blocks": 0, "reverse_gaussian_covariance_fro_delta": 8.36420778768045e-07, "reverse_gaussian_covariance_max_abs_delta": 2.95719401928155e-07, "reverse_gaussian_displacement_l2": 2.4958244791661e-08, "reverse_gaussian_overlap_determinant": 1.00000000011766, "reverse_gaussian_overlap_quadratic": 6.22913983071279e-16, "reverse_gaussian_symbolic_blocks": 1, "reverse_gaussian_vacuum_fidelity": 0.999999999941168, "reverse_gaussian_vacuum_fidelity_deviation": 5.8832383409424e-11, "reverse_gaussian_vacuum_fidelity_raw": 0.999999999941168, "reverse_gaussian_weight_abs": 1, "reverse_gaussian_weight_abs_sq": 1, "reverse_symbolic_materializations": 0, "state_dim": 131072}
+    },
+    {
+      "name": "sc26_qaoa_nm6_c16_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "16", "force_dense_fock": "false", "forward_gates": "30", "gaussian_backend": "cpu_gaussian_symplectic", "gaussian_only_dense_state": "true", "gaussian_symbolic_enabled": "true", "identity_gates": "60", "initial_profile": "vacuum", "num_qubits": "1", "num_qumodes": "6", "reverse_gaussian_available": "true", "reverse_gaussian_reason": "ok", "workload": "qaoa_circuit"},
+      "metrics": {"fidelity": 0.999999999911751, "fidelity_deviation": 8.82485196029847e-11, "gpu_norm": 1, "initial_norm": 1, "l2_error": 3.05674823075226e-08, "max_abs_error": 2.95719401928155e-07, "relative_error": 8.82485196029847e-11, "reverse_active_states": 0, "reverse_exact_blocks": 0, "reverse_gaussian_covariance_fro_delta": 1.02440205912152e-06, "reverse_gaussian_covariance_max_abs_delta": 2.95719401928155e-07, "reverse_gaussian_displacement_l2": 3.05674823075226e-08, "reverse_gaussian_overlap_determinant": 1.0000000001765, "reverse_gaussian_overlap_quadratic": 9.34370974606919e-16, "reverse_gaussian_symbolic_blocks": 1, "reverse_gaussian_vacuum_fidelity": 0.999999999911751, "reverse_gaussian_vacuum_fidelity_deviation": 8.82485196029847e-11, "reverse_gaussian_vacuum_fidelity_raw": 0.999999999911751, "reverse_gaussian_weight_abs": 1, "reverse_gaussian_weight_abs_sq": 1, "reverse_symbolic_materializations": 0, "state_dim": 33554432}
+    },
+    {
+      "name": "sc26_qaoa_nm7_c16_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "16", "force_dense_fock": "false", "forward_gates": "35", "gaussian_backend": "cpu_gaussian_symplectic", "gaussian_only_dense_state": "true", "gaussian_symbolic_enabled": "true", "identity_gates": "70", "initial_profile": "vacuum", "num_qubits": "1", "num_qumodes": "7", "reverse_gaussian_available": "true", "reverse_gaussian_reason": "ok", "workload": "qaoa_circuit"},
+      "metrics": {"fidelity": 0.999999999897043, "fidelity_deviation": 1.02956643210916e-10, "gpu_norm": 1, "initial_norm": 1, "l2_error": 3.3016654439704e-08, "max_abs_error": 2.95719401928155e-07, "relative_error": 1.02956643210916e-10, "reverse_active_states": 0, "reverse_exact_blocks": 0, "reverse_gaussian_covariance_fro_delta": 1.10648068601361e-06, "reverse_gaussian_covariance_max_abs_delta": 2.95719401928155e-07, "reverse_gaussian_displacement_l2": 3.3016654439704e-08, "reverse_gaussian_overlap_determinant": 1.00000000020591, "reverse_gaussian_overlap_quadratic": 1.09009947037474e-15, "reverse_gaussian_symbolic_blocks": 1, "reverse_gaussian_vacuum_fidelity": 0.999999999897043, "reverse_gaussian_vacuum_fidelity_deviation": 1.02956643210916e-10, "reverse_gaussian_vacuum_fidelity_raw": 0.999999999897043, "reverse_gaussian_weight_abs": 1, "reverse_gaussian_weight_abs_sq": 1, "reverse_symbolic_materializations": 0, "state_dim": 536870912}
+    },
+    {
+      "name": "sc26_qaoa_nm8_c16_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "16", "force_dense_fock": "false", "forward_gates": "40", "gaussian_backend": "cpu_gaussian_symplectic", "gaussian_only_dense_state": "true", "gaussian_symbolic_enabled": "true", "identity_gates": "80", "initial_profile": "vacuum", "num_qubits": "1", "num_qumodes": "8", "reverse_gaussian_available": "true", "reverse_gaussian_reason": "ok", "workload": "qaoa_circuit"},
+      "metrics": {"fidelity": 0.999999999882335, "fidelity_deviation": 1.17664766818848e-10, "gpu_norm": 1, "initial_norm": 1, "l2_error": 3.52962882773946e-08, "max_abs_error": 2.95719401928155e-07, "relative_error": 1.17664766818848e-10, "reverse_active_states": 0, "reverse_exact_blocks": 0, "reverse_gaussian_covariance_fro_delta": 1.18287760918443e-06, "reverse_gaussian_covariance_max_abs_delta": 2.95719401928155e-07, "reverse_gaussian_displacement_l2": 3.52962882773946e-08, "reverse_gaussian_overlap_determinant": 1.00000000023533, "reverse_gaussian_overlap_quadratic": 1.24582796614256e-15, "reverse_gaussian_symbolic_blocks": 1, "reverse_gaussian_vacuum_fidelity": 0.999999999882335, "reverse_gaussian_vacuum_fidelity_deviation": 1.17664766818848e-10, "reverse_gaussian_vacuum_fidelity_raw": 0.999999999882335, "reverse_gaussian_weight_abs": 1, "reverse_gaussian_weight_abs_sq": 1, "reverse_symbolic_materializations": 0, "state_dim": 8589934592}
+    }
+  ]
+}

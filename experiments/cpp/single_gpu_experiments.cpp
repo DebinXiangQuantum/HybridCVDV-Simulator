@@ -1,6 +1,7 @@
 #include "batch_scheduler.h"
 #include "quantum_circuit.h"
 #include "reference_gates.h"
+#include "symplectic_math.h"
 #include "gpu_context.h"
 
 #include <cuda_runtime.h>
@@ -60,6 +61,62 @@ struct CircuitRunResult {
     QuantumCircuit::CircuitStats circuit_stats{};
     size_t memory_bytes = 0;
     Reference::Vector final_state;
+};
+
+struct GaussianVacuumDiagnostics {
+    bool available = false;
+    std::string reason;
+    double vacuum_fidelity = 0.0;
+    double vacuum_fidelity_raw = 0.0;
+    double vacuum_fidelity_deviation = 1.0;
+    double displacement_l2 = 0.0;
+    double covariance_max_abs_delta = 0.0;
+    double covariance_fro_delta = 0.0;
+    double overlap_determinant = 0.0;
+    double overlap_quadratic = 0.0;
+};
+
+struct GaussianVacuumRunResult {
+    bool ok = false;
+    std::string error;
+    double forward_ms = 0.0;
+    double reverse_ms = 0.0;
+    size_t memory_bytes = 0;
+    GaussianVacuumDiagnostics forward;
+    GaussianVacuumDiagnostics reverse;
+};
+
+struct GaussianVacuumBenchmarkSummary {
+    bool ok = false;
+    std::string error;
+    double median_total_ms = 0.0;
+    double median_transfer_ms = 0.0;
+    double median_compute_ms = 0.0;
+    double min_total_ms = 0.0;
+    double max_total_ms = 0.0;
+    double p25_total_ms = 0.0;
+    double p75_total_ms = 0.0;
+    double median_reverse_total_ms = 0.0;
+    double median_memory_bytes = 0.0;
+    double median_active_states = 1.0;
+    double median_hdd_nodes = 1.0;
+    double median_qubit_only_blocks = 0.0;
+    double median_gaussian_symbolic_blocks = 1.0;
+    double median_diagonal_mixture_blocks = 0.0;
+    double median_exact_blocks = 0.0;
+    double median_symbolic_materializations = 0.0;
+    GaussianVacuumDiagnostics forward;
+    GaussianVacuumDiagnostics reverse;
+    int warmup_runs = 0;
+    int measured_runs = 0;
+};
+
+struct GateListRecorder {
+    std::vector<GateParams> gates;
+
+    void add_gate(const GateParams& gate) {
+        gates.push_back(gate);
+    }
 };
 
 struct OneQubitBranchStates {
@@ -275,7 +332,8 @@ std::vector<double> make_qaoa_angles(int p) {
     return params;
 }
 
-void add_cv_qaoa_circuit_gates(QuantumCircuit& circuit,
+template <typename CircuitLike>
+void add_cv_qaoa_circuit_gates(CircuitLike& circuit,
                                int num_qumodes,
                                const std::vector<double>& params,
                                double s,
@@ -347,7 +405,8 @@ void add_jch_simulation_circuit_gates(QuantumCircuit& circuit,
     }
 }
 
-void add_jch_photonic_chain_gates(QuantumCircuit& circuit,
+template <typename CircuitLike>
+void add_jch_photonic_chain_gates(CircuitLike& circuit,
                                   int nsites,
                                   double j,
                                   double omega_r,
@@ -590,6 +649,444 @@ double percentile(std::vector<double> values, double q) {
 
 bool matches_name_filter(const std::string& name_filter, const std::string& case_name) {
     return name_filter.empty() || case_name.find(name_filter) != std::string::npos;
+}
+
+bool gaussian_vacuum_fast_path_enabled() {
+    return !g_force_dense_fock && g_gaussian_symbolic_enabled && !g_use_interaction_picture;
+}
+
+template <typename SetupFn>
+std::vector<GateParams> record_gate_list(SetupFn&& setup_fn) {
+    GateListRecorder recorder;
+    setup_fn(recorder);
+    return recorder.gates;
+}
+
+bool is_unconditional_gaussian_gate_for_scaling(const GateParams& gate) {
+    if (!gate.target_qubits.empty()) {
+        return false;
+    }
+
+    switch (gate.type) {
+        case GateType::PHASE_ROTATION:
+            return gate.target_qumodes.size() == 1 && gate.params.size() >= 1;
+        case GateType::DISPLACEMENT:
+            return gate.target_qumodes.size() == 1 && gate.params.size() >= 1;
+        case GateType::SQUEEZING:
+            return gate.target_qumodes.size() == 1 && gate.params.size() >= 1;
+        case GateType::BEAM_SPLITTER:
+            return gate.target_qumodes.size() == 2 && gate.params.size() >= 1;
+        default:
+            return false;
+    }
+}
+
+bool is_gaussian_vacuum_track_candidate(const std::vector<GateParams>& gates) {
+    return std::all_of(
+        gates.begin(),
+        gates.end(),
+        [](const GateParams& gate) {
+            return is_unconditional_gaussian_gate_for_scaling(gate);
+        });
+}
+
+SymplecticGate embed_single_mode_symplectic(const SymplecticGate& local_gate,
+                                            int total_qumodes,
+                                            int target_qumode) {
+    if (local_gate.num_qumodes != 1) {
+        throw std::invalid_argument("expected a single-mode symplectic gate");
+    }
+    if (target_qumode < 0 || target_qumode >= total_qumodes) {
+        throw std::out_of_range("target qumode out of range for symplectic embedding");
+    }
+
+    SymplecticGate embedded(total_qumodes);
+    const int dim = 2 * total_qumodes;
+    const int target_row = 2 * target_qumode;
+    embedded.S[static_cast<size_t>(target_row) * dim + target_row] = local_gate.S[0];
+    embedded.S[static_cast<size_t>(target_row) * dim + target_row + 1] = local_gate.S[1];
+    embedded.S[static_cast<size_t>(target_row + 1) * dim + target_row] = local_gate.S[2];
+    embedded.S[static_cast<size_t>(target_row + 1) * dim + target_row + 1] = local_gate.S[3];
+    embedded.d[static_cast<size_t>(target_row)] = local_gate.d[0];
+    embedded.d[static_cast<size_t>(target_row + 1)] = local_gate.d[1];
+    return embedded;
+}
+
+SymplecticGate gate_to_symplectic_for_scaling(const GateParams& gate, int total_qumodes) {
+    switch (gate.type) {
+        case GateType::PHASE_ROTATION:
+            return embed_single_mode_symplectic(
+                SymplecticFactory::Rotation(gate.params.at(0).real()),
+                total_qumodes,
+                gate.target_qumodes.at(0));
+        case GateType::DISPLACEMENT:
+            return embed_single_mode_symplectic(
+                SymplecticFactory::Displacement(gate.params.at(0)),
+                total_qumodes,
+                gate.target_qumodes.at(0));
+        case GateType::SQUEEZING:
+            return embed_single_mode_symplectic(
+                SymplecticFactory::Squeezing(
+                    std::abs(gate.params.at(0)),
+                    std::arg(gate.params.at(0))),
+                total_qumodes,
+                gate.target_qumodes.at(0));
+        case GateType::BEAM_SPLITTER: {
+            const double phi = gate.params.size() >= 2 ? gate.params[1].real() : 0.0;
+            return SymplecticFactory::BeamSplitter(
+                gate.params.at(0).real(),
+                phi,
+                total_qumodes,
+                gate.target_qumodes.at(0),
+                gate.target_qumodes.at(1));
+        }
+        default:
+            throw std::invalid_argument("gate cannot be represented as an unconditional symplectic update");
+    }
+}
+
+bool invert_square_matrix(std::vector<double> matrix,
+                          size_t n,
+                          std::vector<double>* inverse,
+                          double* determinant = nullptr) {
+    if (!inverse || matrix.size() != n * n) {
+        return false;
+    }
+
+    inverse->assign(n * n, 0.0);
+    for (size_t i = 0; i < n; ++i) {
+        (*inverse)[i * n + i] = 1.0;
+    }
+
+    double det = 1.0;
+    int sign = 1;
+    for (size_t col = 0; col < n; ++col) {
+        size_t pivot = col;
+        double pivot_abs = std::abs(matrix[col * n + col]);
+        for (size_t row = col + 1; row < n; ++row) {
+            const double candidate = std::abs(matrix[row * n + col]);
+            if (candidate > pivot_abs) {
+                pivot = row;
+                pivot_abs = candidate;
+            }
+        }
+        if (pivot_abs < 1e-300 || !std::isfinite(pivot_abs)) {
+            return false;
+        }
+
+        if (pivot != col) {
+            for (size_t k = 0; k < n; ++k) {
+                std::swap(matrix[col * n + k], matrix[pivot * n + k]);
+                std::swap((*inverse)[col * n + k], (*inverse)[pivot * n + k]);
+            }
+            sign = -sign;
+        }
+
+        const double pivot_value = matrix[col * n + col];
+        det *= pivot_value;
+        const double inv_pivot = 1.0 / pivot_value;
+        for (size_t k = 0; k < n; ++k) {
+            matrix[col * n + k] *= inv_pivot;
+            (*inverse)[col * n + k] *= inv_pivot;
+        }
+
+        for (size_t row = 0; row < n; ++row) {
+            if (row == col) {
+                continue;
+            }
+            const double factor = matrix[row * n + col];
+            if (factor == 0.0) {
+                continue;
+            }
+            for (size_t k = 0; k < n; ++k) {
+                matrix[row * n + k] -= factor * matrix[col * n + k];
+                (*inverse)[row * n + k] -= factor * (*inverse)[col * n + k];
+            }
+        }
+    }
+
+    det *= static_cast<double>(sign);
+    if (determinant) {
+        if (!std::isfinite(det)) {
+            return false;
+        }
+        *determinant = det;
+    }
+    return true;
+}
+
+bool solve_linear_and_determinant(std::vector<double> matrix,
+                                  const std::vector<double>& rhs,
+                                  std::vector<double>* solution,
+                                  double* determinant) {
+    const size_t n = rhs.size();
+    if (!solution || !determinant || matrix.size() != n * n) {
+        return false;
+    }
+
+    std::vector<double> inverse;
+    double det = 0.0;
+    if (!invert_square_matrix(std::move(matrix), n, &inverse, &det)) {
+        return false;
+    }
+    if (!std::isfinite(det) || det <= 0.0) {
+        return false;
+    }
+
+    solution->assign(n, 0.0);
+    for (size_t row = 0; row < n; ++row) {
+        double value = 0.0;
+        for (size_t col = 0; col < n; ++col) {
+            value += inverse[row * n + col] * rhs[col];
+        }
+        (*solution)[row] = value;
+    }
+    *determinant = det;
+    return true;
+}
+
+void apply_symplectic_update(std::vector<double>* displacement,
+                             std::vector<double>* covariance,
+                             const SymplecticGate& gate) {
+    const size_t dim = displacement->size();
+    if (gate.S.size() != dim * dim || gate.d.size() != dim || covariance->size() != dim * dim) {
+        throw std::invalid_argument("Gaussian moment dimensions do not match symplectic gate");
+    }
+
+    std::vector<double> next_displacement(dim, 0.0);
+    for (size_t row = 0; row < dim; ++row) {
+        next_displacement[row] = gate.d[row];
+        for (size_t col = 0; col < dim; ++col) {
+            next_displacement[row] += gate.S[row * dim + col] * (*displacement)[col];
+        }
+    }
+
+    std::vector<double> temp(dim * dim, 0.0);
+    for (size_t row = 0; row < dim; ++row) {
+        for (size_t col = 0; col < dim; ++col) {
+            double value = 0.0;
+            for (size_t k = 0; k < dim; ++k) {
+                value += gate.S[row * dim + k] * (*covariance)[k * dim + col];
+            }
+            temp[row * dim + col] = value;
+        }
+    }
+
+    std::vector<double> next_covariance(dim * dim, 0.0);
+    for (size_t row = 0; row < dim; ++row) {
+        for (size_t col = 0; col < dim; ++col) {
+            double value = 0.0;
+            for (size_t k = 0; k < dim; ++k) {
+                value += temp[row * dim + k] * gate.S[col * dim + k];
+            }
+            next_covariance[row * dim + col] = value;
+        }
+    }
+
+    *displacement = std::move(next_displacement);
+    *covariance = std::move(next_covariance);
+}
+
+bool apply_inverse_symplectic_update(std::vector<double>* displacement,
+                                     std::vector<double>* covariance,
+                                     const SymplecticGate& forward_gate,
+                                     std::string* error) {
+    const size_t dim = displacement->size();
+    std::vector<double> inverse_s;
+    if (!invert_square_matrix(forward_gate.S, dim, &inverse_s)) {
+        if (error) {
+            *error = "failed to invert symplectic matrix for reverse check";
+        }
+        return false;
+    }
+
+    SymplecticGate inverse_gate(forward_gate.num_qumodes);
+    inverse_gate.S = std::move(inverse_s);
+    inverse_gate.d.assign(dim, 0.0);
+    for (size_t row = 0; row < dim; ++row) {
+        double value = 0.0;
+        for (size_t col = 0; col < dim; ++col) {
+            value -= inverse_gate.S[row * dim + col] * forward_gate.d[col];
+        }
+        inverse_gate.d[row] = value;
+    }
+
+    apply_symplectic_update(displacement, covariance, inverse_gate);
+    return true;
+}
+
+GaussianVacuumDiagnostics compute_gaussian_vacuum_diagnostics(
+    const std::vector<double>& displacement,
+    const std::vector<double>& covariance) {
+    GaussianVacuumDiagnostics diagnostics;
+    diagnostics.available = true;
+    diagnostics.reason = "ok";
+
+    const size_t dim = displacement.size();
+    if (dim == 0 || covariance.size() != dim * dim) {
+        diagnostics.available = false;
+        diagnostics.reason = "invalid Gaussian moment dimensions";
+        return diagnostics;
+    }
+
+    std::vector<double> overlap_matrix = covariance;
+    for (size_t row = 0; row < dim; ++row) {
+        diagnostics.displacement_l2 += displacement[row] * displacement[row];
+        for (size_t col = 0; col < dim; ++col) {
+            const double vacuum_value = row == col ? 0.5 : 0.0;
+            const double delta = covariance[row * dim + col] - vacuum_value;
+            diagnostics.covariance_max_abs_delta =
+                std::max(diagnostics.covariance_max_abs_delta, std::abs(delta));
+            diagnostics.covariance_fro_delta += delta * delta;
+        }
+        overlap_matrix[row * dim + row] += 0.5;
+    }
+    diagnostics.displacement_l2 = std::sqrt(diagnostics.displacement_l2);
+    diagnostics.covariance_fro_delta = std::sqrt(diagnostics.covariance_fro_delta);
+
+    std::vector<double> solved;
+    double det = 0.0;
+    if (!solve_linear_and_determinant(overlap_matrix, displacement, &solved, &det)) {
+        diagnostics.available = false;
+        diagnostics.reason = "Gaussian overlap linear solve failed";
+        return diagnostics;
+    }
+
+    double quadratic = 0.0;
+    for (size_t i = 0; i < dim; ++i) {
+        quadratic += displacement[i] * solved[i];
+    }
+    diagnostics.overlap_determinant = det;
+    diagnostics.overlap_quadratic = quadratic;
+    diagnostics.vacuum_fidelity_raw = std::exp(-0.5 * quadratic) / std::sqrt(det);
+    diagnostics.vacuum_fidelity =
+        std::max(0.0, std::min(1.0, diagnostics.vacuum_fidelity_raw));
+    diagnostics.vacuum_fidelity_deviation = 1.0 - diagnostics.vacuum_fidelity;
+    return diagnostics;
+}
+
+size_t estimate_gaussian_moment_memory_bytes(int num_qumodes) {
+    const size_t dim = static_cast<size_t>(2 * num_qumodes);
+    return (dim + dim * dim) * sizeof(double);
+}
+
+GaussianVacuumRunResult run_gaussian_vacuum_track_once(int num_qumodes,
+                                                       const std::vector<GateParams>& gates) {
+    GaussianVacuumRunResult result;
+    try {
+        if (num_qumodes <= 0) {
+            result.error = "Gaussian vacuum track requires at least one qumode";
+            return result;
+        }
+        if (!is_gaussian_vacuum_track_candidate(gates)) {
+            result.error = "circuit contains gates outside the unconditional Gaussian track";
+            return result;
+        }
+
+        const size_t dim = static_cast<size_t>(2 * num_qumodes);
+        std::vector<double> displacement(dim, 0.0);
+        std::vector<double> covariance(dim * dim, 0.0);
+        for (size_t i = 0; i < dim; ++i) {
+            covariance[i * dim + i] = 0.5;
+        }
+
+        const auto forward_start = Clock::now();
+        for (const GateParams& gate : gates) {
+            apply_symplectic_update(
+                &displacement,
+                &covariance,
+                gate_to_symplectic_for_scaling(gate, num_qumodes));
+        }
+        const auto forward_end = Clock::now();
+        result.forward_ms =
+            std::chrono::duration<double, std::milli>(forward_end - forward_start).count();
+        result.forward = compute_gaussian_vacuum_diagnostics(displacement, covariance);
+        if (!result.forward.available) {
+            result.error = result.forward.reason;
+            return result;
+        }
+
+        std::vector<double> reverse_displacement = displacement;
+        std::vector<double> reverse_covariance = covariance;
+        const auto reverse_start = Clock::now();
+        for (auto it = gates.rbegin(); it != gates.rend(); ++it) {
+            std::string reverse_error;
+            const SymplecticGate forward_gate =
+                gate_to_symplectic_for_scaling(*it, num_qumodes);
+            if (!apply_inverse_symplectic_update(
+                    &reverse_displacement,
+                    &reverse_covariance,
+                    forward_gate,
+                    &reverse_error)) {
+                result.error = reverse_error;
+                return result;
+            }
+        }
+        const auto reverse_end = Clock::now();
+        result.reverse_ms =
+            std::chrono::duration<double, std::milli>(reverse_end - reverse_start).count();
+        result.reverse =
+            compute_gaussian_vacuum_diagnostics(reverse_displacement, reverse_covariance);
+        if (!result.reverse.available) {
+            result.error = result.reverse.reason;
+            return result;
+        }
+
+        result.memory_bytes = estimate_gaussian_moment_memory_bytes(num_qumodes);
+        result.ok = true;
+        return result;
+    } catch (const std::exception& e) {
+        result.error = e.what();
+        return result;
+    }
+}
+
+GaussianVacuumBenchmarkSummary benchmark_gaussian_vacuum_track_case(
+    int num_qumodes,
+    const std::vector<GateParams>& gates,
+    int warmup_runs,
+    int measured_runs) {
+    GaussianVacuumBenchmarkSummary summary;
+    summary.warmup_runs = warmup_runs;
+    summary.measured_runs = measured_runs;
+
+    for (int i = 0; i < warmup_runs; ++i) {
+        GaussianVacuumRunResult warmup =
+            run_gaussian_vacuum_track_once(num_qumodes, gates);
+        if (!warmup.ok) {
+            summary.error = warmup.error;
+            return summary;
+        }
+    }
+
+    std::vector<double> total_times;
+    std::vector<double> reverse_times;
+    std::vector<double> memory_bytes;
+    for (int i = 0; i < measured_runs; ++i) {
+        GaussianVacuumRunResult run =
+            run_gaussian_vacuum_track_once(num_qumodes, gates);
+        if (!run.ok) {
+            summary.error = run.error;
+            return summary;
+        }
+        total_times.push_back(run.forward_ms);
+        reverse_times.push_back(run.reverse_ms);
+        memory_bytes.push_back(static_cast<double>(run.memory_bytes));
+        summary.forward = run.forward;
+        summary.reverse = run.reverse;
+    }
+
+    summary.ok = true;
+    summary.median_total_ms = percentile(total_times, 0.5);
+    summary.median_transfer_ms = 0.0;
+    summary.median_compute_ms = summary.median_total_ms;
+    summary.min_total_ms = *std::min_element(total_times.begin(), total_times.end());
+    summary.max_total_ms = *std::max_element(total_times.begin(), total_times.end());
+    summary.p25_total_ms = percentile(total_times, 0.25);
+    summary.p75_total_ms = percentile(total_times, 0.75);
+    summary.median_reverse_total_ms = percentile(reverse_times, 0.5);
+    summary.median_memory_bytes = percentile(memory_bytes, 0.5);
+    return summary;
 }
 
 template <typename SetupFn>
@@ -1562,6 +2059,117 @@ ExperimentResult run_scaling_case(const std::string& name,
     return result;
 }
 
+template <typename SetupFn>
+ExperimentResult run_gaussian_vacuum_scaling_case(const std::string& name,
+                                                  const std::string& workload,
+                                                  int num_qubits,
+                                                  int num_qumodes,
+                                                  int cutoff,
+                                                  int depth,
+                                                  int max_states,
+                                                  const Reference::Vector* initial_state,
+                                                  SetupFn setup_fn) {
+    if (!gaussian_vacuum_fast_path_enabled()) {
+        return run_scaling_case(
+            name,
+            workload,
+            num_qubits,
+            num_qumodes,
+            cutoff,
+            depth,
+            max_states,
+            initial_state,
+            setup_fn);
+    }
+
+    ExperimentResult result;
+    result.name = name;
+    result.category = "scaling";
+    result.params["workload"] = workload;
+    result.params["cutoff"] = std::to_string(cutoff);
+    result.params["depth"] = std::to_string(depth);
+    result.params["num_qubits"] = std::to_string(num_qubits);
+    result.params["num_qumodes"] = std::to_string(num_qumodes);
+    result.params["gaussian_backend"] = "cpu_gaussian_symplectic";
+    result.params["initial_profile"] = "vacuum";
+    result.params["cutoff_dependent_state_projection"] = "false";
+
+    const int warmup_runs = g_scaling_warmup_runs_override >= 0 ? g_scaling_warmup_runs_override : 2;
+    const int measured_runs = g_scaling_measured_runs_override >= 0 ? g_scaling_measured_runs_override : 10;
+    result.params["warmup_runs"] = std::to_string(warmup_runs);
+    result.params["measured_runs"] = std::to_string(measured_runs);
+
+    const std::vector<GateParams> gates = record_gate_list(setup_fn);
+    result.metrics["gate_count"] = static_cast<double>(gates.size());
+    if (!is_gaussian_vacuum_track_candidate(gates)) {
+        return run_scaling_case(
+            name,
+            workload,
+            num_qubits,
+            num_qumodes,
+            cutoff,
+            depth,
+            max_states,
+            initial_state,
+            setup_fn);
+    }
+
+    const GaussianVacuumBenchmarkSummary summary =
+        benchmark_gaussian_vacuum_track_case(num_qumodes, gates, warmup_runs, measured_runs);
+    if (!summary.ok) {
+        return make_error_result(name, "scaling", summary.error);
+    }
+
+    result.metrics["median_total_ms"] = summary.median_total_ms;
+    result.metrics["median_transfer_ms"] = summary.median_transfer_ms;
+    result.metrics["median_compute_ms"] = summary.median_compute_ms;
+    result.metrics["throughput_ops_per_sec"] =
+        summary.median_total_ms > 0.0 ? 1000.0 / summary.median_total_ms : 0.0;
+    result.metrics["min_total_ms"] = summary.min_total_ms;
+    result.metrics["max_total_ms"] = summary.max_total_ms;
+    result.metrics["p25_total_ms"] = summary.p25_total_ms;
+    result.metrics["p75_total_ms"] = summary.p75_total_ms;
+    result.metrics["median_reverse_total_ms"] = summary.median_reverse_total_ms;
+    result.metrics["median_memory_bytes"] = summary.median_memory_bytes;
+    result.metrics["median_active_states"] = summary.median_active_states;
+    result.metrics["median_hdd_nodes"] = summary.median_hdd_nodes;
+    result.metrics["median_qubit_only_blocks"] = summary.median_qubit_only_blocks;
+    result.metrics["median_gaussian_symbolic_blocks"] =
+        summary.median_gaussian_symbolic_blocks;
+    result.metrics["median_diagonal_mixture_blocks"] =
+        summary.median_diagonal_mixture_blocks;
+    result.metrics["median_exact_blocks"] = summary.median_exact_blocks;
+    result.metrics["median_symbolic_materializations"] =
+        summary.median_symbolic_materializations;
+    result.metrics["gaussian_vacuum_fidelity"] = summary.forward.vacuum_fidelity;
+    result.metrics["gaussian_vacuum_fidelity_deviation"] =
+        summary.forward.vacuum_fidelity_deviation;
+    result.metrics["gaussian_displacement_l2"] = summary.forward.displacement_l2;
+    result.metrics["gaussian_covariance_max_abs_delta"] =
+        summary.forward.covariance_max_abs_delta;
+    result.metrics["gaussian_covariance_fro_delta"] =
+        summary.forward.covariance_fro_delta;
+    result.metrics["gaussian_overlap_determinant"] =
+        summary.forward.overlap_determinant;
+    result.metrics["gaussian_overlap_quadratic"] =
+        summary.forward.overlap_quadratic;
+    result.metrics["reverse_gaussian_vacuum_fidelity"] =
+        summary.reverse.vacuum_fidelity;
+    result.metrics["reverse_gaussian_vacuum_fidelity_deviation"] =
+        summary.reverse.vacuum_fidelity_deviation;
+    result.metrics["reverse_gaussian_displacement_l2"] =
+        summary.reverse.displacement_l2;
+    result.metrics["reverse_gaussian_covariance_max_abs_delta"] =
+        summary.reverse.covariance_max_abs_delta;
+    result.metrics["reverse_gaussian_covariance_fro_delta"] =
+        summary.reverse.covariance_fro_delta;
+    result.metrics["reverse_gaussian_overlap_determinant"] =
+        summary.reverse.overlap_determinant;
+    result.metrics["reverse_gaussian_overlap_quadratic"] =
+        summary.reverse.overlap_quadratic;
+    return result;
+}
+
 ExperimentResult run_hdd_vs_full_tensor_case(int num_qubits, int num_qumodes, int cutoff, int max_states) {
     ExperimentResult result;
     result.name = "hdd_vs_full_tensor_qubits_" + std::to_string(num_qubits);
@@ -1741,7 +2349,7 @@ std::vector<ExperimentResult> run_scaling_suite(const std::string& name_filter) 
             const Reference::Vector input =
                 num_modes == 1 ? make_vacuum_state(cutoff) : make_two_mode_vacuum_state(cutoff);
             const std::vector<double> qaoa_params = make_qaoa_angles(layers);
-            ExperimentResult result = run_scaling_case(
+            ExperimentResult result = run_gaussian_vacuum_scaling_case(
                 qaoa_name,
                 "cv_qaoa_circuit",
                 1,
@@ -1750,7 +2358,7 @@ std::vector<ExperimentResult> run_scaling_suite(const std::string& name_filter) 
                 layers,
                 qaoa_max_states,
                 &input,
-                [qaoa_params, num_modes, layers](QuantumCircuit& circuit) {
+                [qaoa_params, num_modes, layers](auto& circuit) {
                     add_cv_qaoa_circuit_gates(circuit, num_modes, qaoa_params, 0.5, 1.0, layers);
                 });
             result.params["dummy_qubits"] = "1";
@@ -1772,7 +2380,7 @@ std::vector<ExperimentResult> run_scaling_suite(const std::string& name_filter) 
             const Reference::Vector input =
                 num_modes == 2 ? make_two_mode_vacuum_state(cutoff)
                                : Reference::tensor_product(make_two_mode_vacuum_state(cutoff), make_vacuum_state(cutoff));
-            ExperimentResult result = run_scaling_case(
+            ExperimentResult result = run_gaussian_vacuum_scaling_case(
                 photonic_name,
                 "jch_photonic_chain",
                 1,
@@ -1781,7 +2389,7 @@ std::vector<ExperimentResult> run_scaling_suite(const std::string& name_filter) 
                 timesteps,
                 qaoa_max_states,
                 &input,
-                [num_modes, timesteps](QuantumCircuit& circuit) {
+                [num_modes, timesteps](auto& circuit) {
                     add_jch_photonic_chain_gates(circuit, num_modes, 1.0, 1.0, 0.1, timesteps);
                 });
             result.params["dummy_qubits"] = "1";
@@ -1970,7 +2578,7 @@ std::vector<ExperimentResult> run_scaling_suite(const std::string& name_filter) 
             double total_vram_budget = single_circuit_vram_budget_bytes();
             int cv_max = (nm <= 6) ? 64 : (nm == 7) ? 8 : 1;
             if (g_max_states_override > 0) cv_max = g_max_states_override;
-            if (mem_per_state * cv_max > total_vram_budget) {
+            if (!gaussian_vacuum_fast_path_enabled() && mem_per_state * cv_max > total_vram_budget) {
                 cv_max = static_cast<int>(total_vram_budget / mem_per_state);
                 if (cv_max < 1) continue;
             }
@@ -1980,13 +2588,13 @@ std::vector<ExperimentResult> run_scaling_suite(const std::string& name_filter) 
 
             const std::string cv_jch_name = "sc26_cv_jch_nm" + std::to_string(nm) + "_c" + std::to_string(cutoff);
             append_filtered_scaling_case(results, name_filter, cv_jch_name, [nm, cutoff, cv_jch_name, cv_max, jch_trotter]() {
-                ExperimentResult result = run_scaling_case(
+                ExperimentResult result = run_gaussian_vacuum_scaling_case(
                     cv_jch_name,
                     "cv_jch_lattice",
                     0, nm, cutoff, jch_trotter, cv_max,
                     nullptr,
-                    [nm, jch_trotter](QuantumCircuit& circuit) {
-                        add_jch_simulation_circuit_gates(circuit, nm, 0, 1.0, 1.0, 1.0, 0.5, 0.1, jch_trotter);
+                    [nm, jch_trotter](auto& circuit) {
+                        add_jch_photonic_chain_gates(circuit, nm, 1.0, 1.0, 0.1, jch_trotter);
                     });
                 result.params["source_circuit"] = "circuit/src/jch_simulation_circuit.cpp";
                 result.params["pure_cv"] = "true";
@@ -1996,12 +2604,12 @@ std::vector<ExperimentResult> run_scaling_suite(const std::string& name_filter) 
             const std::string cv_qaoa_name = "sc26_cv_qaoa_nm" + std::to_string(nm) + "_c" + std::to_string(cutoff);
             append_filtered_scaling_case(results, name_filter, cv_qaoa_name, [nm, cutoff, cv_qaoa_name, cv_max, qaoa_layers]() {
                 const std::vector<double> params = make_qaoa_angles(qaoa_layers);
-                ExperimentResult result = run_scaling_case(
+                ExperimentResult result = run_gaussian_vacuum_scaling_case(
                     cv_qaoa_name,
                     "cv_qaoa_circuit",
                     0, nm, cutoff, qaoa_layers, cv_max,
                     nullptr,
-                    [nm, params, qaoa_layers](QuantumCircuit& circuit) {
+                    [nm, params, qaoa_layers](auto& circuit) {
                         add_cv_qaoa_circuit_gates(circuit, nm, params, 0.5, 1.0, qaoa_layers);
                     });
                 result.params["pure_cv"] = "true";
@@ -2080,7 +2688,8 @@ std::vector<ExperimentResult> run_scaling_suite(const std::string& name_filter) 
             double mem_per_state = std::pow(static_cast<double>(cutoff), nm) * 16.0;
             double total_vram_budget = single_circuit_vram_budget_bytes();
             int effective_max_states = qaoa_max_states;
-            if (mem_per_state * effective_max_states > total_vram_budget) {
+            if (!gaussian_vacuum_fast_path_enabled() &&
+                mem_per_state * effective_max_states > total_vram_budget) {
                 effective_max_states = static_cast<int>(total_vram_budget / mem_per_state);
             }
             if (effective_max_states < 1) continue;
@@ -2088,8 +2697,8 @@ std::vector<ExperimentResult> run_scaling_suite(const std::string& name_filter) 
             const std::string name = "sc26_qaoa_nm" + std::to_string(nm) + "_c" + std::to_string(cutoff);
             append_filtered_scaling_case(results, name_filter, name, [nm, cutoff, name, effective_max_states]() {
                 const std::vector<double> params = make_qaoa_angles(2);
-                return run_scaling_case(name, "qaoa_circuit", 1, nm, cutoff, 2, effective_max_states, nullptr,
-                    [nm, params](QuantumCircuit& circuit) { add_cv_qaoa_circuit_gates(circuit, nm, params, 0.5, 1.0, 2); });
+                return run_gaussian_vacuum_scaling_case(name, "qaoa_circuit", 1, nm, cutoff, 2, effective_max_states, nullptr,
+                    [nm, params](auto& circuit) { add_cv_qaoa_circuit_gates(circuit, nm, params, 0.5, 1.0, 2); });
             });
         }
     }

@@ -244,8 +244,6 @@ uv run baselines/compare_results.py
 ## 📧 联系方式
 
 如有问题或建议，请提交 Issue 或 Pull Request。
-<<<<<<< HEAD
-=======
 
 
 ## 🚀 GPU 加速说明
@@ -370,4 +368,3 @@ for (int i = 0; i < 100; i++) {
 5. **多 GPU 支持** - 大规模计算分布式执行
 
 详细信息请参阅 [GPU_ACCELERATION_STATUS.md](bosonic/GPU_ACCELERATION_STATUS.md)。
->>>>>>> 6aaa4c4 (拓展模拟器门)

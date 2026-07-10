@@ -1,0 +1,28 @@
+[GPUContext] Initialized with 1 device(s)
+[MultiGPU] Initialized 1 GPU(s)
+╔══════════════════════════════════════════════════╗
+║          GPU Context Summary                    ║
+╠══════════════════════════════════════════════════╣
+║ GPU 0: NVIDIA H100 PCIe                         ║
+║   Compute: SM 9.0  |  SMs: 114   |  Warp: 32   ║
+║   Memory:  81079 MiB total / 71182 MiB free    ║
+║   SharedMem/Block:    48 KB  /SM:   228 KB    ║
+╚══════════════════════════════════════════════════╝
+CUDA设备检查: device_count=1, error=no error
+CVStatePool 初始化完成: 单个qumode截断维度=4, 初始总维度=16, 容量=128, 设备数=1
+创建量子电路: 3 qubits, 2 qumodes, 截断维度=4, 执行GPU=0
+构建量子线路...
+量子线路构建完成
+执行量子线路...
+块级编译-执行流水线已启用，块数=16
+GaussianStatePool initialized: 2 qumodes, 4096 capacity (refcount-enabled).
+量子线路执行完成
+执行时间: 7.51225 ms
+传输时延: 0.043056 ms
+计算时延: 0.657614 ms
+规划时延: 0.07995 ms
+HDD节点管理器已清空
+CVStatePool 已重置
+CVStatePool 销毁完成
+Wrote experiment report to "experiments/results/sc26_gaussian_path_audit_h100_20260611T0915Z/sc26_jch_nq3_nm2_c4.json"
+Results: ok=1, unsupported=0, error=0

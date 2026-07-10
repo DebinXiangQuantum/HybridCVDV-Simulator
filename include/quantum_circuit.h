@@ -115,6 +115,7 @@ private:
     bool fused_diagonal_enabled_;
     bool eager_symbolic_materialization_enabled_;
     bool force_dense_fock_; // ablation: force all Fock gates through dense D×D/D²×D² MatVec
+    double symbolic_vacuum_projection_tolerance_;
     size_t qubit_only_block_count_;
     size_t gaussian_symbolic_block_count_;
     size_t diagonal_mixture_block_count_;
@@ -220,6 +221,12 @@ public:
     void set_force_dense_fock(bool enabled);
 
     /**
+     * 设置symbolic Gaussian terminal直接投影为vacuum的数值阈值。
+     * 默认较严格；诊断实验可放宽以避免近vacuum态重新replay Fock门。
+     */
+    void set_symbolic_vacuum_projection_tolerance(double tolerance);
+
+    /**
      * 获取显式设置的Gaussian symbolic branch池容量；0表示自动推导
      */
     int get_gaussian_state_pool_capacity() const { return gaussian_state_pool_capacity_override_; }
@@ -305,6 +312,20 @@ public:
         size_t symbolic_materializations;
     };
     CircuitStats get_stats() const;
+
+    /**
+     * 诊断用：若当前HDD只包含一个可达symbolic Gaussian terminal且该terminal
+     * 只有一个Gaussian component，则导出其phase-space moments。
+     */
+    bool get_single_symbolic_gaussian_state(std::vector<double>& displacement,
+                                            std::vector<double>& covariance,
+                                            std::complex<double>* weight = nullptr,
+                                            std::string* reason = nullptr) const;
+
+    /**
+     * 诊断用：显式将symbolic Gaussian terminal物化到Fock状态。
+     */
+    bool materialize_symbolic_terminals_for_diagnostics();
 
     /**
      * 获取时间统计信息

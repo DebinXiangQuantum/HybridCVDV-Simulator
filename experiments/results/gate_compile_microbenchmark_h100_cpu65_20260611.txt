@@ -1,0 +1,25 @@
+Gantry gate compilation microbenchmark
+CPU: AMD EPYC 9554 64-Core Processor
+Host threads: benchmark driver=1 process_threads=3 affinity_cpus=1 hardware_concurrency=256
+GPU: NVIDIA H100 PCIe
+samples=64 warmup=16 cutoff=8 max_states=4096 compile_repeats=10000
+
+category          case                            nq  nm gates        unit     mean_us   median_us      p10_us      p90_us      min_us      max_us
+DV_HDD_rewrite    CNOT_basis                       2   1     1     us/gate       3.984       3.626       2.620       5.839       2.444       7.381
+DV_HDD_rewrite    CZ_basis                         2   1     1     us/gate       3.925       3.746       3.214       4.672       2.754       6.971
+DV_DD_Add         H_after_H                        2   1     1     us/gate    1114.863      95.669      93.004    5151.132      88.213    9034.597
+DV_DD_Add         Rx_after_H                       2   1     1     us/gate    1065.091      95.764      92.279    6245.590      90.166    8972.743
+DV_oracle         2q_H_Rx_CNOT_CZ                  2   1     6     us/gate     449.476     118.574     110.877     291.203     109.061    8929.137
+DV_oracle         4q_layer                         4   1    10     us/gate     629.351     211.310     203.122     700.218     194.824    9946.267
+Gaussian_compile  BeamSplitter                     0   2     1     us/gate       0.416       0.317       0.303       0.627       0.298       0.921
+Gaussian_compile  BS_block_x16                     0   2    16     us/gate       0.290       0.292       0.250       0.298       0.241       0.397
+Gaussian_compile  D_S_BS_block                     0   2     4     us/gate       0.275       0.263       0.234       0.282       0.231       0.669
+Gaussian_compile  Cond_BS_metadata                 1   2     1     us/gate       0.217       0.217       0.215       0.218       0.205       0.228
+
+reachable HDD nodes after last DV sample:
+  CNOT_basis: 5
+  CZ_basis: 5
+  H_after_H: 6
+  Rx_after_H: 6
+  2q_H_Rx_CNOT_CZ: 7
+  4q_layer: 31

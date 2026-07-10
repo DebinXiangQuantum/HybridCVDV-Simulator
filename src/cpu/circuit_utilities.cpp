@@ -83,6 +83,72 @@ QuantumCircuit::CircuitStats QuantumCircuit::get_stats() const {
     };
 }
 
+bool QuantumCircuit::get_single_symbolic_gaussian_state(std::vector<double>& displacement,
+                                                        std::vector<double>& covariance,
+                                                        std::complex<double>* weight,
+                                                        std::string* reason) const {
+    if (!root_node_) {
+        if (reason) {
+            *reason = "empty circuit root";
+        }
+        return false;
+    }
+    if (!gaussian_state_pool_) {
+        if (reason) {
+            *reason = "Gaussian state pool is not initialized";
+        }
+        return false;
+    }
+
+    const std::vector<int>& terminal_ids = get_cached_symbolic_terminal_ids();
+    if (terminal_ids.size() != 1) {
+        if (reason) {
+            *reason = "reachable symbolic terminal count is " +
+                      std::to_string(terminal_ids.size());
+        }
+        return false;
+    }
+
+    const auto terminal_it = symbolic_terminal_states_.find(terminal_ids.front());
+    if (terminal_it == symbolic_terminal_states_.end()) {
+        if (reason) {
+            *reason = "symbolic terminal sidecar is missing";
+        }
+        return false;
+    }
+    if (terminal_it->second.components.size() != 1) {
+        if (reason) {
+            *reason = "symbolic terminal component count is " +
+                      std::to_string(terminal_it->second.components.size());
+        }
+        return false;
+    }
+
+    const GaussianComponent& component = terminal_it->second.components.front();
+    if (component.gaussian_state_id < 0) {
+        if (reason) {
+            *reason = "Gaussian component has invalid state id";
+        }
+        return false;
+    }
+
+    gaussian_state_pool_->download_state(
+        component.gaussian_state_id,
+        displacement,
+        covariance);
+    if (weight) {
+        *weight = component.weight;
+    }
+    if (reason) {
+        *reason = "ok";
+    }
+    return true;
+}
+
+bool QuantumCircuit::materialize_symbolic_terminals_for_diagnostics() {
+    return materialize_symbolic_terminals_to_fock();
+}
+
 /**
  * 获取时间统计信息
  */

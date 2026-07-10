@@ -1,0 +1,912 @@
+{
+  "created_at": "2026-06-11T06:46:18Z",
+  "max_dense_dim": 100000000,
+  "force_dense_fock": true,
+  "device": {
+    "available": true,
+    "index": 0,
+    "name": "NVIDIA H100 PCIe",
+    "cc_major": 9,
+    "cc_minor": 0,
+    "multiprocessor_count": 114,
+    "total_global_mem_bytes": 85017886720
+  },
+  "results": [
+    {
+      "name": "highcutoff_phase_rotation_low_c32_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "32", "force_dense_fock": "true", "initial_profile": "low", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 0.646533151545701, "max_fidelity_deviation": 0.777063401348305, "max_l2_error": 1.07789713972441, "mean_l2_error": 1.07789713972441, "state_dim": 32}
+    },
+    {
+      "name": "highcutoff_phase_rotation_low_c32_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "32", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "low", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 32}
+    },
+    {
+      "name": "highcutoff_phase_rotation_stress_c32_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "32", "force_dense_fock": "true", "initial_profile": "stress", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 0.656672942499951, "max_fidelity_deviation": 0.825942096316542, "max_l2_error": 1.20066744319726, "mean_l2_error": 1.20066744319726, "state_dim": 32}
+    },
+    {
+      "name": "highcutoff_phase_rotation_stress_c32_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "32", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "stress", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 32}
+    },
+    {
+      "name": "highcutoff_displacement_0p1_low_c32_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "32", "force_dense_fock": "true", "initial_profile": "low", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 4.62106213383196e-12, "max_fidelity_deviation": 0, "max_l2_error": 8.22576357556451e-12, "mean_l2_error": 8.22576357556451e-12, "state_dim": 32}
+    },
+    {
+      "name": "highcutoff_displacement_0p1_low_c32_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "32", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "low", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 32}
+    },
+    {
+      "name": "highcutoff_displacement_0p1_stress_c32_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "32", "force_dense_fock": "true", "initial_profile": "stress", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 0.211287119683168, "max_fidelity_deviation": 0.137437026545178, "max_l2_error": 0.378190968271013, "mean_l2_error": 0.378190968271013, "state_dim": 32}
+    },
+    {
+      "name": "highcutoff_displacement_0p1_stress_c32_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "32", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "stress", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 32}
+    },
+    {
+      "name": "highcutoff_displacement_0p5_low_c32_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "32", "force_dense_fock": "true", "initial_profile": "low", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 0.360554555299918, "max_fidelity_deviation": 0.330961438722782, "max_l2_error": 0.631317800236719, "mean_l2_error": 0.631317800236719, "state_dim": 32}
+    },
+    {
+      "name": "highcutoff_displacement_0p5_low_c32_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "32", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "low", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 32}
+    },
+    {
+      "name": "highcutoff_displacement_0p5_stress_c32_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "32", "force_dense_fock": "true", "initial_profile": "stress", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 0.780856670524609, "max_fidelity_deviation": 0.868193540243143, "max_l2_error": 1.13496050321378, "mean_l2_error": 1.13496050321378, "state_dim": 32}
+    },
+    {
+      "name": "highcutoff_displacement_0p5_stress_c32_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "32", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "stress", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 32}
+    },
+    {
+      "name": "highcutoff_displacement_pi_over_2_low_c32_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "32", "force_dense_fock": "true", "initial_profile": "low", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 54.9503006767086, "max_fidelity_deviation": 0.996037654827135, "max_l2_error": 92.2017525780819, "mean_l2_error": 92.2017525780819, "state_dim": 32}
+    },
+    {
+      "name": "highcutoff_displacement_pi_over_2_low_c32_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "32", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "low", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 32}
+    },
+    {
+      "name": "highcutoff_displacement_pi_over_2_stress_c32_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "32", "force_dense_fock": "true", "initial_profile": "stress", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 10047.2717459956, "max_fidelity_deviation": 0.971085907968377, "max_l2_error": 23831.0950036487, "mean_l2_error": 23831.0950036487, "state_dim": 32}
+    },
+    {
+      "name": "highcutoff_displacement_pi_over_2_stress_c32_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "32", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "stress", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 32}
+    },
+    {
+      "name": "highcutoff_displacement_pi_low_c32_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "32", "force_dense_fock": "true", "initial_profile": "low", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 62162.0292359371, "max_fidelity_deviation": 0.990474677685776, "max_l2_error": 122374.446530682, "mean_l2_error": 122374.446530682, "state_dim": 32}
+    },
+    {
+      "name": "highcutoff_displacement_pi_low_c32_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "32", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "low", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 32}
+    },
+    {
+      "name": "highcutoff_displacement_pi_stress_c32_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "32", "force_dense_fock": "true", "initial_profile": "stress", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 13490337.1606091, "max_fidelity_deviation": 0.957472344538571, "max_l2_error": 27616802.5059426, "mean_l2_error": 27616802.5059426, "state_dim": 32}
+    },
+    {
+      "name": "highcutoff_displacement_pi_stress_c32_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "32", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "stress", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 32}
+    },
+    {
+      "name": "highcutoff_squeezing_0p25_low_c32_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "32", "force_dense_fock": "true", "initial_profile": "low", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 1.27946881663023e-16, "max_fidelity_deviation": 0, "max_l2_error": 2.52141561390335e-16, "mean_l2_error": 2.52141561390335e-16, "state_dim": 32}
+    },
+    {
+      "name": "highcutoff_squeezing_0p25_low_c32_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "32", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "low", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 0.999999999995992, "fidelity_deviation": 4.00801614119928e-12, "gpu_norm": 0.999999999995271, "initial_norm": 1, "l2_error": 2.00189482830321e-06, "max_abs_error": 1.09201436918929e-06, "relative_error": 2.00189482830321e-06, "state_dim": 32}
+    },
+    {
+      "name": "highcutoff_squeezing_0p25_stress_c32_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "32", "force_dense_fock": "true", "initial_profile": "stress", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 8.98955062650455e-16, "max_fidelity_deviation": 2.22044604925031e-16, "max_l2_error": 2.24188087555248e-15, "mean_l2_error": 2.24188087555248e-15, "state_dim": 32}
+    },
+    {
+      "name": "highcutoff_squeezing_0p25_stress_c32_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "32", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "stress", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 0.968132835099932, "fidelity_deviation": 0.0318671649000684, "gpu_norm": 0.983379299591248, "initial_norm": 1, "l2_error": 0.178514639153226, "max_abs_error": 0.113985675419158, "relative_error": 0.178514639153226, "state_dim": 32}
+    },
+    {
+      "name": "highcutoff_squeezing_0p5_low_c32_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "32", "force_dense_fock": "true", "initial_profile": "low", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 1.70109075050152e-16, "max_fidelity_deviation": 0, "max_l2_error": 3.61480239836632e-16, "mean_l2_error": 3.61480239836632e-16, "state_dim": 32}
+    },
+    {
+      "name": "highcutoff_squeezing_0p5_low_c32_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "32", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "low", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 0.999982873714923, "fidelity_deviation": 1.7126285076996e-05, "gpu_norm": 0.999985260912414, "initial_norm": 1, "l2_error": 0.00413839621336696, "max_abs_error": 0.00216927805876332, "relative_error": 0.00413839621336696, "state_dim": 32}
+    },
+    {
+      "name": "highcutoff_squeezing_0p5_stress_c32_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "32", "force_dense_fock": "true", "initial_profile": "stress", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 1.73360098972148e-14, "max_fidelity_deviation": 3.33066907387547e-16, "max_l2_error": 2.90695907242254e-14, "mean_l2_error": 2.90695907242254e-14, "state_dim": 32}
+    },
+    {
+      "name": "highcutoff_squeezing_0p5_stress_c32_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "32", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "stress", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 0.829265512391437, "fidelity_deviation": 0.170734487608563, "gpu_norm": 0.906894061388871, "initial_norm": 1, "l2_error": 0.413217280507735, "max_abs_error": 0.240075779767079, "relative_error": 0.413217280507735, "state_dim": 32}
+    },
+    {
+      "name": "highcutoff_phase_rotation_low_c64_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "64", "force_dense_fock": "true", "initial_profile": "low", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 0.646533151545701, "max_fidelity_deviation": 0.777063401348305, "max_l2_error": 1.07789713972441, "mean_l2_error": 1.07789713972441, "state_dim": 64}
+    },
+    {
+      "name": "highcutoff_phase_rotation_low_c64_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "64", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "low", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 64}
+    },
+    {
+      "name": "highcutoff_phase_rotation_stress_c64_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "64", "force_dense_fock": "true", "initial_profile": "stress", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 0.850740116359438, "max_fidelity_deviation": 0.894316834208224, "max_l2_error": 1.45984475172248, "mean_l2_error": 1.45984475172248, "state_dim": 64}
+    },
+    {
+      "name": "highcutoff_phase_rotation_stress_c64_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "64", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "stress", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 64}
+    },
+    {
+      "name": "highcutoff_displacement_0p1_low_c64_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "64", "force_dense_fock": "true", "initial_profile": "low", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 0.104002410384652, "max_fidelity_deviation": 0.0199656390923876, "max_l2_error": 0.146209989424855, "mean_l2_error": 0.146209989424855, "state_dim": 64}
+    },
+    {
+      "name": "highcutoff_displacement_0p1_low_c64_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "64", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "low", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 64}
+    },
+    {
+      "name": "highcutoff_displacement_0p1_stress_c64_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "64", "force_dense_fock": "true", "initial_profile": "stress", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 0.226181361354182, "max_fidelity_deviation": 0.319168904985666, "max_l2_error": 0.591607408861781, "mean_l2_error": 0.591607408861781, "state_dim": 64}
+    },
+    {
+      "name": "highcutoff_displacement_0p1_stress_c64_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "64", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "stress", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 64}
+    },
+    {
+      "name": "highcutoff_displacement_0p5_low_c64_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "64", "force_dense_fock": "true", "initial_profile": "low", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 0.360554555299918, "max_fidelity_deviation": 0.330961438722782, "max_l2_error": 0.631317800236719, "mean_l2_error": 0.631317800236719, "state_dim": 64}
+    },
+    {
+      "name": "highcutoff_displacement_0p5_low_c64_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "64", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "low", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 64}
+    },
+    {
+      "name": "highcutoff_displacement_0p5_stress_c64_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "64", "force_dense_fock": "true", "initial_profile": "stress", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 3.56668760580384, "max_fidelity_deviation": 0.991769939154474, "max_l2_error": 7.42188820839069, "mean_l2_error": 7.42188820839069, "state_dim": 64}
+    },
+    {
+      "name": "highcutoff_displacement_0p5_stress_c64_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "64", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "stress", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 64}
+    },
+    {
+      "name": "highcutoff_displacement_pi_over_2_low_c64_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "64", "force_dense_fock": "true", "initial_profile": "low", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 54.9503006767086, "max_fidelity_deviation": 0.996037654827135, "max_l2_error": 92.2017525780819, "mean_l2_error": 92.2017525780819, "state_dim": 64}
+    },
+    {
+      "name": "highcutoff_displacement_pi_over_2_low_c64_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "64", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "low", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 64}
+    },
+    {
+      "name": "highcutoff_displacement_pi_over_2_stress_c64_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "64", "force_dense_fock": "true", "initial_profile": "stress", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 583169.833318756, "max_fidelity_deviation": 0.940334508794946, "max_l2_error": 1142174.81650546, "mean_l2_error": 1142174.81650546, "state_dim": 64}
+    },
+    {
+      "name": "highcutoff_displacement_pi_over_2_stress_c64_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "64", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "stress", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 64}
+    },
+    {
+      "name": "highcutoff_displacement_pi_low_c64_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "64", "force_dense_fock": "true", "initial_profile": "low", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 62162.0292359371, "max_fidelity_deviation": 0.990474677685776, "max_l2_error": 122374.446530682, "mean_l2_error": 122374.446530682, "state_dim": 64}
+    },
+    {
+      "name": "highcutoff_displacement_pi_low_c64_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "64", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "low", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 64}
+    },
+    {
+      "name": "highcutoff_displacement_pi_stress_c64_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "64", "force_dense_fock": "true", "initial_profile": "stress", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 693828360.735313, "max_fidelity_deviation": 0.927799902394657, "max_l2_error": 1247384040.9186, "mean_l2_error": 1247384040.9186, "state_dim": 64}
+    },
+    {
+      "name": "highcutoff_displacement_pi_stress_c64_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "64", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "stress", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 64}
+    },
+    {
+      "name": "highcutoff_squeezing_0p25_low_c64_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "64", "force_dense_fock": "true", "initial_profile": "low", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 1.27946881663023e-16, "max_fidelity_deviation": 0, "max_l2_error": 2.52141561390443e-16, "mean_l2_error": 2.52141561390443e-16, "state_dim": 64}
+    },
+    {
+      "name": "highcutoff_squeezing_0p25_low_c64_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "64", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "low", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 3.55494361747303e-15, "max_abs_error": 1.58421583822613e-15, "relative_error": 3.55494361747303e-15, "state_dim": 64}
+    },
+    {
+      "name": "highcutoff_squeezing_0p25_stress_c64_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "64", "force_dense_fock": "true", "initial_profile": "stress", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 2.4199451209884e-13, "max_fidelity_deviation": 0, "max_l2_error": 4.91221908590754e-13, "mean_l2_error": 4.91221908590754e-13, "state_dim": 64}
+    },
+    {
+      "name": "highcutoff_squeezing_0p25_stress_c64_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "64", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "stress", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 0.935012285590116, "fidelity_deviation": 0.0649877144098843, "gpu_norm": 0.964526913592353, "initial_norm": 1, "l2_error": 0.254938494425389, "max_abs_error": 0.162545962476276, "relative_error": 0.254938494425389, "state_dim": 64}
+    },
+    {
+      "name": "highcutoff_squeezing_0p5_low_c64_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "64", "force_dense_fock": "true", "initial_profile": "low", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 1.70109075050152e-16, "max_fidelity_deviation": 0, "max_l2_error": 3.61574952604238e-16, "mean_l2_error": 3.61574952604238e-16, "state_dim": 64}
+    },
+    {
+      "name": "highcutoff_squeezing_0p5_low_c64_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "64", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "low", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 0.999999999999961, "fidelity_deviation": 3.86357612569554e-14, "gpu_norm": 0.999999999999964, "initial_norm": 1, "l2_error": 1.96611304792966e-07, "max_abs_error": 8.77363194370274e-08, "relative_error": 1.96611304792966e-07, "state_dim": 64}
+    },
+    {
+      "name": "highcutoff_squeezing_0p5_stress_c64_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "64", "force_dense_fock": "true", "initial_profile": "stress", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 1.51478795925385e-11, "max_fidelity_deviation": 3.33066907387547e-16, "max_l2_error": 3.59781992118956e-11, "mean_l2_error": 3.59781992118956e-11, "state_dim": 64}
+    },
+    {
+      "name": "highcutoff_squeezing_0p5_stress_c64_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "64", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "stress", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 0.841742922292897, "fidelity_deviation": 0.158257077707103, "gpu_norm": 0.908742003285088, "initial_norm": 1, "l2_error": 0.397911016307147, "max_abs_error": 0.224651470054487, "relative_error": 0.397911016307147, "state_dim": 64}
+    },
+    {
+      "name": "highcutoff_phase_rotation_low_c128_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "128", "force_dense_fock": "true", "initial_profile": "low", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 0.646533151545701, "max_fidelity_deviation": 0.777063401348305, "max_l2_error": 1.07789713972441, "mean_l2_error": 1.07789713972441, "state_dim": 128}
+    },
+    {
+      "name": "highcutoff_phase_rotation_low_c128_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "128", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "low", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 128}
+    },
+    {
+      "name": "highcutoff_phase_rotation_stress_c128_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "128", "force_dense_fock": "true", "initial_profile": "stress", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 0.919807362393433, "max_fidelity_deviation": 0.953716984719601, "max_l2_error": 1.34263299808891, "mean_l2_error": 1.34263299808891, "state_dim": 128}
+    },
+    {
+      "name": "highcutoff_phase_rotation_stress_c128_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "128", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "stress", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 128}
+    },
+    {
+      "name": "highcutoff_displacement_0p1_low_c128_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "128", "force_dense_fock": "true", "initial_profile": "low", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 0.104002410384652, "max_fidelity_deviation": 0.0199656390923876, "max_l2_error": 0.146209989424855, "mean_l2_error": 0.146209989424855, "state_dim": 128}
+    },
+    {
+      "name": "highcutoff_displacement_0p1_low_c128_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "128", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "low", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 128}
+    },
+    {
+      "name": "highcutoff_displacement_0p1_stress_c128_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "128", "force_dense_fock": "true", "initial_profile": "stress", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 0.268350300928118, "max_fidelity_deviation": 0.461927613555105, "max_l2_error": 0.730283306422112, "mean_l2_error": 0.730283306422112, "state_dim": 128}
+    },
+    {
+      "name": "highcutoff_displacement_0p1_stress_c128_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "128", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "stress", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 128}
+    },
+    {
+      "name": "highcutoff_displacement_0p5_low_c128_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "128", "force_dense_fock": "true", "initial_profile": "low", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 0.360554555299918, "max_fidelity_deviation": 0.330961438722782, "max_l2_error": 0.631317800236719, "mean_l2_error": 0.631317800236719, "state_dim": 128}
+    },
+    {
+      "name": "highcutoff_displacement_0p5_low_c128_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "128", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "low", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 128}
+    },
+    {
+      "name": "highcutoff_displacement_0p5_stress_c128_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "128", "force_dense_fock": "true", "initial_profile": "stress", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 103.118097804164, "max_fidelity_deviation": 0.978380415761442, "max_l2_error": 240.288614486679, "mean_l2_error": 240.288614486679, "state_dim": 128}
+    },
+    {
+      "name": "highcutoff_displacement_0p5_stress_c128_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "128", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "stress", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 128}
+    },
+    {
+      "name": "highcutoff_displacement_pi_over_2_low_c128_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "128", "force_dense_fock": "true", "initial_profile": "low", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 54.9503006767086, "max_fidelity_deviation": 0.996037654827135, "max_l2_error": 92.2017525780819, "mean_l2_error": 92.2017525780819, "state_dim": 128}
+    },
+    {
+      "name": "highcutoff_displacement_pi_over_2_low_c128_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "128", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "low", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 128}
+    },
+    {
+      "name": "highcutoff_displacement_pi_over_2_stress_c128_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "128", "force_dense_fock": "true", "initial_profile": "stress", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 17033376.8934368, "max_fidelity_deviation": 0.947671090540701, "max_l2_error": 31300590.4732168, "mean_l2_error": 31300590.4732168, "state_dim": 128}
+    },
+    {
+      "name": "highcutoff_displacement_pi_over_2_stress_c128_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "128", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "stress", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 128}
+    },
+    {
+      "name": "highcutoff_displacement_pi_low_c128_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "128", "force_dense_fock": "true", "initial_profile": "low", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 62162.0292359371, "max_fidelity_deviation": 0.990474677685776, "max_l2_error": 122374.446530682, "mean_l2_error": 122374.446530682, "state_dim": 128}
+    },
+    {
+      "name": "highcutoff_displacement_pi_low_c128_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "128", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "low", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 128}
+    },
+    {
+      "name": "highcutoff_displacement_pi_stress_c128_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "128", "force_dense_fock": "true", "initial_profile": "stress", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 18841691117.3218, "max_fidelity_deviation": 0.942102269456227, "max_l2_error": 33130074555.3388, "mean_l2_error": 33130074555.3388, "state_dim": 128}
+    },
+    {
+      "name": "highcutoff_displacement_pi_stress_c128_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "128", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "stress", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 128}
+    },
+    {
+      "name": "highcutoff_squeezing_0p25_low_c128_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "128", "force_dense_fock": "true", "initial_profile": "low", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 1.27946881663023e-16, "max_fidelity_deviation": 0, "max_l2_error": 2.52141561390443e-16, "mean_l2_error": 2.52141561390443e-16, "state_dim": 128}
+    },
+    {
+      "name": "highcutoff_squeezing_0p25_low_c128_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "128", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "low", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 6.83667550328226e-16, "max_abs_error": 4.51828035988303e-16, "relative_error": 6.83667550328226e-16, "state_dim": 128}
+    },
+    {
+      "name": "highcutoff_squeezing_0p25_stress_c128_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "128", "force_dense_fock": "true", "initial_profile": "stress", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 1.19258893401572e-09, "max_fidelity_deviation": 0, "max_l2_error": 2.56530429596356e-09, "mean_l2_error": 2.56530429596356e-09, "state_dim": 128}
+    },
+    {
+      "name": "highcutoff_squeezing_0p25_stress_c128_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "128", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "stress", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 0.951656364877187, "fidelity_deviation": 0.048343635122813, "gpu_norm": 0.97485007191145, "initial_norm": 1, "l2_error": 0.219872908159745, "max_abs_error": 0.137939308059292, "relative_error": 0.219872908159745, "state_dim": 128}
+    },
+    {
+      "name": "highcutoff_squeezing_0p5_low_c128_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "128", "force_dense_fock": "true", "initial_profile": "low", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 1.70109075050152e-16, "max_fidelity_deviation": 0, "max_l2_error": 3.61574952605639e-16, "mean_l2_error": 3.61574952605639e-16, "state_dim": 128}
+    },
+    {
+      "name": "highcutoff_squeezing_0p5_low_c128_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "128", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "low", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 2.22044604925031e-16, "gpu_norm": 1, "initial_norm": 1, "l2_error": 1.05722624583188e-13, "max_abs_error": 2.50094853250311e-14, "relative_error": 1.05722624583188e-13, "state_dim": 128}
+    },
+    {
+      "name": "highcutoff_squeezing_0p5_stress_c128_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "128", "force_dense_fock": "true", "initial_profile": "stress", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 7.75374357791559e-05, "max_fidelity_deviation": 2.8996026468775e-08, "max_l2_error": 0.000158647881876512, "mean_l2_error": 0.000158647881876512, "state_dim": 128}
+    },
+    {
+      "name": "highcutoff_squeezing_0p5_stress_c128_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "128", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "stress", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 0.870730978921523, "fidelity_deviation": 0.129269021078477, "gpu_norm": 0.930176317056309, "initial_norm": 1, "l2_error": 0.359552142762911, "max_abs_error": 0.189938378662033, "relative_error": 0.359552142762911, "state_dim": 128}
+    },
+    {
+      "name": "highcutoff_phase_rotation_low_c256_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "256", "force_dense_fock": "true", "initial_profile": "low", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 0.646533151545701, "max_fidelity_deviation": 0.777063401348305, "max_l2_error": 1.07789713972441, "mean_l2_error": 1.07789713972441, "state_dim": 256}
+    },
+    {
+      "name": "highcutoff_phase_rotation_low_c256_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "256", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "low", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 256}
+    },
+    {
+      "name": "highcutoff_phase_rotation_stress_c256_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "256", "force_dense_fock": "true", "initial_profile": "stress", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 0.640236285568853, "max_fidelity_deviation": 0.93825122008283, "max_l2_error": 1.2574042188613, "mean_l2_error": 1.2574042188613, "state_dim": 256}
+    },
+    {
+      "name": "highcutoff_phase_rotation_stress_c256_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "256", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "stress", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 256}
+    },
+    {
+      "name": "highcutoff_displacement_0p1_low_c256_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "256", "force_dense_fock": "true", "initial_profile": "low", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 0.104002410384652, "max_fidelity_deviation": 0.0199656390923876, "max_l2_error": 0.146209989424855, "mean_l2_error": 0.146209989424855, "state_dim": 256}
+    },
+    {
+      "name": "highcutoff_displacement_0p1_low_c256_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "256", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "low", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 256}
+    },
+    {
+      "name": "highcutoff_displacement_0p1_stress_c256_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "256", "force_dense_fock": "true", "initial_profile": "stress", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 0.311899853539472, "max_fidelity_deviation": 0.484878461068587, "max_l2_error": 0.751835068056407, "mean_l2_error": 0.751835068056407, "state_dim": 256}
+    },
+    {
+      "name": "highcutoff_displacement_0p1_stress_c256_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "256", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "stress", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 256}
+    },
+    {
+      "name": "highcutoff_displacement_0p5_low_c256_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "256", "force_dense_fock": "true", "initial_profile": "low", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 0.360554555299918, "max_fidelity_deviation": 0.330961438722782, "max_l2_error": 0.631317800236719, "mean_l2_error": 0.631317800236719, "state_dim": 256}
+    },
+    {
+      "name": "highcutoff_displacement_0p5_low_c256_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "256", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "low", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 256}
+    },
+    {
+      "name": "highcutoff_displacement_0p5_stress_c256_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "256", "force_dense_fock": "true", "initial_profile": "stress", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 2133.65260508806, "max_fidelity_deviation": 0.987160601211201, "max_l2_error": 4861.63718888241, "mean_l2_error": 4861.63718888241, "state_dim": 256}
+    },
+    {
+      "name": "highcutoff_displacement_0p5_stress_c256_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "256", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "stress", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 256}
+    },
+    {
+      "name": "highcutoff_displacement_pi_over_2_low_c256_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "256", "force_dense_fock": "true", "initial_profile": "low", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 54.9503006767086, "max_fidelity_deviation": 0.996037654827135, "max_l2_error": 92.2017525780819, "mean_l2_error": 92.2017525780819, "state_dim": 256}
+    },
+    {
+      "name": "highcutoff_displacement_pi_over_2_low_c256_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "256", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "low", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 256}
+    },
+    {
+      "name": "highcutoff_displacement_pi_over_2_stress_c256_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "256", "force_dense_fock": "true", "initial_profile": "stress", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 304088299.737427, "max_fidelity_deviation": 0.977277630002635, "max_l2_error": 549157283.805428, "mean_l2_error": 549157283.805428, "state_dim": 256}
+    },
+    {
+      "name": "highcutoff_displacement_pi_over_2_stress_c256_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "256", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "stress", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 256}
+    },
+    {
+      "name": "highcutoff_displacement_pi_low_c256_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "256", "force_dense_fock": "true", "initial_profile": "low", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 62162.0292359371, "max_fidelity_deviation": 0.990474677685776, "max_l2_error": 122374.446530682, "mean_l2_error": 122374.446530682, "state_dim": 256}
+    },
+    {
+      "name": "highcutoff_displacement_pi_low_c256_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "256", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "low", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 256}
+    },
+    {
+      "name": "highcutoff_displacement_pi_stress_c256_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "256", "force_dense_fock": "true", "initial_profile": "stress", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 323801827504.55, "max_fidelity_deviation": 0.975924115821989, "max_l2_error": 571945696429.355, "mean_l2_error": 571945696429.355, "state_dim": 256}
+    },
+    {
+      "name": "highcutoff_displacement_pi_stress_c256_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "256", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "stress", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 0, "max_abs_error": 0, "relative_error": 0, "state_dim": 256}
+    },
+    {
+      "name": "highcutoff_squeezing_0p25_low_c256_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "256", "force_dense_fock": "true", "initial_profile": "low", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 1.27946881663023e-16, "max_fidelity_deviation": 0, "max_l2_error": 2.52141561390443e-16, "mean_l2_error": 2.52141561390443e-16, "state_dim": 256}
+    },
+    {
+      "name": "highcutoff_squeezing_0p25_low_c256_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "256", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "low", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 0, "gpu_norm": 1, "initial_norm": 1, "l2_error": 6.83667550328226e-16, "max_abs_error": 4.51828035988303e-16, "relative_error": 6.83667550328226e-16, "state_dim": 256}
+    },
+    {
+      "name": "highcutoff_squeezing_0p25_stress_c256_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "256", "force_dense_fock": "true", "initial_profile": "stress", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 0.0398240543302419, "max_fidelity_deviation": 0.0201341932558515, "max_l2_error": 0.146678989279947, "mean_l2_error": 0.146678989279947, "state_dim": 256}
+    },
+    {
+      "name": "highcutoff_squeezing_0p25_stress_c256_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "256", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "stress", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 9.8113457587083e-07, "fidelity_deviation": 0.999999018865424, "gpu_norm": 1028.22423207341, "initial_norm": 1, "l2_error": 1028.22372783079, "max_abs_error": 439.958276027726, "relative_error": 1028.22372783079, "state_dim": 256}
+    },
+    {
+      "name": "highcutoff_squeezing_0p5_low_c256_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "256", "force_dense_fock": "true", "initial_profile": "low", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 1.70109075050152e-16, "max_fidelity_deviation": 0, "max_l2_error": 3.61574952605639e-16, "mean_l2_error": 3.61574952605639e-16, "state_dim": 256}
+    },
+    {
+      "name": "highcutoff_squeezing_0p5_low_c256_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "256", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "low", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 1, "fidelity_deviation": 2.22044604925031e-16, "gpu_norm": 1, "initial_norm": 1, "l2_error": 1.47091882937358e-13, "max_abs_error": 2.5009060354448e-14, "relative_error": 1.47091882937358e-13, "state_dim": 256}
+    },
+    {
+      "name": "highcutoff_squeezing_0p5_stress_c256_per_gate",
+      "category": "gate_cpu_dense_vs_gpu",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "256", "force_dense_fock": "true", "initial_profile": "stress", "num_gates": "1", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"max_abs_error": 2096508576.97158, "max_fidelity_deviation": 0.684031720058193, "max_l2_error": 5667627133.60271, "mean_l2_error": 5667627133.60271, "state_dim": 256}
+    },
+    {
+      "name": "highcutoff_squeezing_0p5_stress_c256_reverse_identity",
+      "category": "reverse_identity",
+      "status": "ok",
+      "note": "",
+      "params": {"cutoff": "256", "force_dense_fock": "true", "forward_gates": "1", "identity_gates": "2", "initial_profile": "stress", "num_qubits": "0", "num_qumodes": "1", "workload": "high_cutoff_gate_precision"},
+      "metrics": {"fidelity": 4.17838035620929e-15, "fidelity_deviation": 0.999999999999996, "gpu_norm": 7.29820957911516e+24, "initial_norm": 1, "l2_error": 7.29820957911516e+24, "max_abs_error": 4.64199759376214e+24, "relative_error": 7.29820957911517e+24, "state_dim": 256}
+    }
+  ]
+}

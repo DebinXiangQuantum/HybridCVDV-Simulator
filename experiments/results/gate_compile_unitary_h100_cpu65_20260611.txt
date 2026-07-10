@@ -1,0 +1,21 @@
+Gantry gate compilation microbenchmark
+CPU: AMD EPYC 9554 64-Core Processor
+Host threads: benchmark driver=1 process_threads=3 affinity_cpus=1 hardware_concurrency=256
+GPU: NVIDIA H100 PCIe
+samples=64 warmup=16 cutoff=8 max_states=4096 compile_repeats=10000
+
+category          case                            nq  nm   ops        unit     mean_us   median_us      p10_us      p90_us      min_us      max_us
+Unitary_lowering  dense_4x4_to_DDAdd               2   1     1  us/unitary       0.243       0.243       0.241       0.245       0.239       0.248
+Unitary_DDAdd     dense_4x4_apply_plan             2   1     1  us/unitary     601.807     599.120     586.808     614.779     578.444     658.635
+Unitary_DDAdd     dense_4x4_lower+apply            2   1     1  us/unitary     600.323     598.809     583.942     624.394     568.930     643.472
+Sparse_unitary    CNOT_4x4_to_DDAdd                2   1     1     us/gate       7.098       6.860       6.602       7.147       6.319      15.634
+Gaussian_compile  BeamSplitter                     0   2     1     us/gate       0.298       0.297       0.295       0.300       0.294       0.305
+Gaussian_compile  BS_block_x16                     0   2    16     us/gate       0.280       0.281       0.275       0.282       0.273       0.284
+Gaussian_compile  D_S_BS_block                     0   2     4     us/gate       0.254       0.255       0.247       0.256       0.243       0.258
+Gaussian_compile  Cond_BS_metadata                 1   2     1     us/gate       0.204       0.204       0.203       0.205       0.200       0.229
+
+extra counters:
+  dense_4x4_nonzero_terms: 16
+  dense_4x4_apply_plan_nodes: 7
+  dense_4x4_lower_apply_nodes: 7
+  CNOT_as_dense_unitary_nodes: 7

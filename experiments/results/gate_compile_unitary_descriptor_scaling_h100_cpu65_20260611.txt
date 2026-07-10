@@ -1,0 +1,39 @@
+Gantry full-unitary descriptor lowering microbenchmark
+CPU: AMD EPYC 9554 64-Core Processor
+Host threads: benchmark driver=1 process_threads=1 affinity_cpus=1 hardware_concurrency=256
+GPU: NVIDIA H100 PCIe (queried only for host/runtime context)
+samples=64 warmup=16 cutoff=8 max_states=4096 compile_repeats=20000
+
+category          case                            nq  nm terms        unit     mean_us   median_us      p10_us      p90_us      min_us      max_us
+Unitary_lowering  DFT_4x4                          2   0    16  us/unitary       0.301       0.252       0.247       0.474       0.245       0.674
+Unitary_lowering  Hadamard_4x4                     2   0    16  us/unitary       0.283       0.227       0.218       0.475       0.199       0.616
+Unitary_lowering  DFT_8x8                          3   0    64  us/unitary       1.081       0.856       0.843       1.842       0.823       2.424
+Unitary_lowering  Hadamard_8x8                     3   0    64  us/unitary       0.857       0.712       0.691       1.508       0.607       1.730
+Unitary_lowering  DFT_16x16                        4   0   256  us/unitary       3.921       3.210       3.196       6.499       3.186       8.907
+Unitary_lowering  Hadamard_16x16                   4   0   256  us/unitary       4.187       3.131       2.484       6.359       2.334      10.630
+Unitary_lowering  DFT_32x32                        5   0  1024  us/unitary      15.336      11.921      11.854      25.177      11.701      32.515
+Unitary_lowering  Hadamard_32x32                   5   0  1024  us/unitary      11.117       8.968       8.831      20.664       8.528      26.015
+Unitary_lowering  DFT_64x64                        6   0  4096  us/unitary      55.055      47.300      46.295      81.043      46.065     111.447
+Unitary_lowering  Hadamard_64x64                   6   0  4096  us/unitary      40.140      33.834      32.884      69.627      30.355      99.460
+
+extra counters:
+  DFT_4_terms: 16
+  DFT_4_repeats_per_sample: 15625
+  Hadamard_4_terms: 16
+  Hadamard_4_repeats_per_sample: 15625
+  DFT_8_terms: 64
+  DFT_8_repeats_per_sample: 3906
+  Hadamard_8_terms: 64
+  Hadamard_8_repeats_per_sample: 3906
+  DFT_16_terms: 256
+  DFT_16_repeats_per_sample: 976
+  Hadamard_16_terms: 256
+  Hadamard_16_repeats_per_sample: 976
+  DFT_32_terms: 1024
+  DFT_32_repeats_per_sample: 244
+  Hadamard_32_terms: 1024
+  Hadamard_32_repeats_per_sample: 244
+  DFT_64_terms: 4096
+  DFT_64_repeats_per_sample: 61
+  Hadamard_64_terms: 4096
+  Hadamard_64_repeats_per_sample: 61

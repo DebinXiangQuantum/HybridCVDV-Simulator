@@ -9,6 +9,33 @@
 
 using namespace circuit_internal;
 
+namespace {
+
+bool gaussian_moments_are_vacuum(const std::vector<double>& displacement,
+                                 const std::vector<double>& covariance,
+                                 double tolerance) {
+    const size_t dim = displacement.size();
+    if (dim == 0 || covariance.size() != dim * dim) {
+        return false;
+    }
+    for (double value : displacement) {
+        if (std::abs(value) > tolerance) {
+            return false;
+        }
+    }
+    for (size_t row = 0; row < dim; ++row) {
+        for (size_t col = 0; col < dim; ++col) {
+            const double expected = (row == col) ? 0.5 : 0.0;
+            if (std::abs(covariance[row * dim + col] - expected) > tolerance) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+}  // namespace
+
 bool QuantumCircuit::try_execute_gaussian_block_with_ede(
     const CompiledExecutionBlock& compiled_block) {
     ScopedNvtxRange nvtx_range("qc::gaussian_block_ede");
@@ -471,31 +498,54 @@ int QuantumCircuit::project_symbolic_terminal_to_fock_state(int terminal_id) {
             initialize_vacuum_state_device(&state_pool_, scratch_state_id, state_dim, nullptr, false);
             CHECK_CUDA(cudaGetLastError());
             CHECK_CUDA(cudaDeviceSynchronize());
-            for (size_t replay_gate_index = 0; replay_gate_index < branch.replay_gates.size(); ++replay_gate_index) {
-                const GateParams& replay_gate = branch.replay_gates[replay_gate_index];
-                FALLBACK_DEBUG_LOG << "[fallback] terminal " << terminal_id
-                                   << " branch " << (branch_index + 1)
-                                   << " gate " << (replay_gate_index + 1)
-                                   << "/" << branch.replay_gates.size()
-                                   << " " << gate_type_name(replay_gate.type)
-                                   << " target_qumodes=";
-                for (size_t tq_index = 0; tq_index < replay_gate.target_qumodes.size(); ++tq_index) {
-                    if (tq_index != 0) {
-                        FALLBACK_DEBUG_LOG << ",";
+            bool used_vacuum_projection = false;
+            if (gaussian_state_pool_ && branch.gaussian_state_id >= 0) {
+                std::vector<double> displacement;
+                std::vector<double> covariance;
+                gaussian_state_pool_->download_state(
+                    branch.gaussian_state_id,
+                    displacement,
+                    covariance);
+                used_vacuum_projection =
+                    gaussian_moments_are_vacuum(
+                        displacement,
+                        covariance,
+                        symbolic_vacuum_projection_tolerance_);
+                if (used_vacuum_projection) {
+                    FALLBACK_DEBUG_LOG << "[fallback] terminal " << terminal_id
+                                       << " branch " << (branch_index + 1)
+                                       << " materialized directly as vacuum from Gaussian moments"
+                                       << std::endl;
+                }
+            }
+
+            if (!used_vacuum_projection) {
+                for (size_t replay_gate_index = 0; replay_gate_index < branch.replay_gates.size(); ++replay_gate_index) {
+                    const GateParams& replay_gate = branch.replay_gates[replay_gate_index];
+                    FALLBACK_DEBUG_LOG << "[fallback] terminal " << terminal_id
+                                       << " branch " << (branch_index + 1)
+                                       << " gate " << (replay_gate_index + 1)
+                                       << "/" << branch.replay_gates.size()
+                                       << " " << gate_type_name(replay_gate.type)
+                                       << " target_qumodes=";
+                    for (size_t tq_index = 0; tq_index < replay_gate.target_qumodes.size(); ++tq_index) {
+                        if (tq_index != 0) {
+                            FALLBACK_DEBUG_LOG << ",";
+                        }
+                        FALLBACK_DEBUG_LOG << replay_gate.target_qumodes[tq_index];
                     }
-                    FALLBACK_DEBUG_LOG << replay_gate.target_qumodes[tq_index];
+                    if (!replay_gate.params.empty()) {
+                        FALLBACK_DEBUG_LOG << " param0=" << replay_gate.params[0];
+                    }
+                    FALLBACK_DEBUG_LOG << std::endl;
+                    apply_replayable_gaussian_gate_to_state(scratch_state_id, replay_gate);
+                    CHECK_CUDA(cudaGetLastError());
+                    CHECK_CUDA(cudaDeviceSynchronize());
+                    FALLBACK_DEBUG_LOG << "[fallback] terminal " << terminal_id
+                                       << " branch " << (branch_index + 1)
+                                       << " gate " << (replay_gate_index + 1)
+                                       << " complete" << std::endl;
                 }
-                if (!replay_gate.params.empty()) {
-                    FALLBACK_DEBUG_LOG << " param0=" << replay_gate.params[0];
-                }
-                FALLBACK_DEBUG_LOG << std::endl;
-                apply_replayable_gaussian_gate_to_state(scratch_state_id, replay_gate);
-                CHECK_CUDA(cudaGetLastError());
-                CHECK_CUDA(cudaDeviceSynchronize());
-                FALLBACK_DEBUG_LOG << "[fallback] terminal " << terminal_id
-                                   << " branch " << (branch_index + 1)
-                                   << " gate " << (replay_gate_index + 1)
-                                   << " complete" << std::endl;
             }
 
             FALLBACK_DEBUG_LOG << "[fallback] terminal " << terminal_id
