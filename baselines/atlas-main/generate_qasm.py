@@ -12,7 +12,7 @@ import concurrent.futures
 import multiprocessing
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), 'qasm')
-ALLOWED_CUTOFFS = [4, 8, 16]
+ALLOWED_CUTOFFS = [4, 8, 16, 32]
 MAX_WORKERS = 4
 
 
