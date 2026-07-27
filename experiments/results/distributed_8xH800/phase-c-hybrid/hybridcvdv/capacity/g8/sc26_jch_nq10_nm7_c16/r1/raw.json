@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0",
+  "generated_at_utc": "2026-07-20T00:51:40Z",
+  "simulator": "HybridCVDV-Simulator",
+  "single_gpu_only": false,
+  "num_gpus": 8,
+  "requested_suite": "scaling",
+  "gaussian_symbolic_mode_limit": 4,
+  "symbolic_branch_limit": 64,
+  "gaussian_symbolic_enabled": true,
+  "diagonal_mixture_enabled": true,
+  "fused_diagonal_enabled": true,
+  "eager_symbolic_materialization_enabled": false,
+  "force_dense_fock": false,
+  "use_interaction_picture": false,
+  "device": {
+    "available": true,
+    "device_index": 0,
+    "name": "NVIDIA H800",
+    "compute_capability": "9.0",
+    "multiprocessor_count": 132,
+    "total_global_mem_bytes": 84942979072,
+    "shared_mem_per_block_bytes": 49152
+  },
+  "results": [
+    {
+      "name": "sc26_jch_nq10_nm7_c16",
+      "category": "scaling",
+      "status": "error",
+      "note": "无法扩展GPU状态池: out of memory (device=0, required_elements=3221225472, previous_capacity=2952790016, live_elements=2952790016, scratch_target_bytes=52, scratch_temp_bytes=0, scratch_aux_bytes=3368)",
+      "params": {
+        "source_circuit": "circuit/src/jch_simulation_circuit.cpp"
+      },
+      "metrics": {
+      }
+    }
+  ]
+}

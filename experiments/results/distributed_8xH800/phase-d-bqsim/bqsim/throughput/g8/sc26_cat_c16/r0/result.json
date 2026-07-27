@@ -1,0 +1,788 @@
+{
+  "schema_version": "3.0",
+  "generated_at_utc": "2026-07-27T01:09:04Z",
+  "system": "bqsim",
+  "case_name": "sc26_cat_c16",
+  "phase": "throughput",
+  "gpu_count": 8,
+  "gpu_ids": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "process_repetition": 0,
+  "status": "ok",
+  "cutoff": 16,
+  "num_modes": 1,
+  "num_qubits": 1,
+  "warmup_runs": 0,
+  "measured_runs": 256,
+  "timing": {
+    "total_wall_ms": 4327.851768583059,
+    "simulation_ms": 4327.851768583059
+  },
+  "throughput": {
+    "completed_circuit_evaluations": 256,
+    "circuit_evaluations_per_sec": 59.15174864776261,
+    "completed_input_states": 65536
+  },
+  "memory": {
+    "per_gpu": {},
+    "aggregate": {}
+  },
+  "communication": {},
+  "correctness": {},
+  "telemetry": {
+    "per_gpu": {
+      "0": {
+        "samples": [
+          {
+            "timestamp_unix": 1785114545.4221792,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 0.0,
+            "power_draw": 119.94,
+            "temperature_gpu": 38.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785114546.838449,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 3.0,
+            "power_draw": 119.9,
+            "temperature_gpu": 38.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785114548.8705497,
+            "utilization_gpu": 1.0,
+            "utilization_memory": 0.0,
+            "memory_used": 529.0,
+            "power_draw": 119.89,
+            "temperature_gpu": 38.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785114549.4557192,
+            "utilization_gpu": 1.0,
+            "utilization_memory": 0.0,
+            "memory_used": 0.0,
+            "power_draw": 119.9,
+            "temperature_gpu": 38.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          }
+        ],
+        "samples_retained": 4,
+        "samples_truncated": false,
+        "summary": {
+          "sample_count": 4.0,
+          "avg_utilization_gpu": 0.5,
+          "peak_utilization_gpu": 1.0,
+          "avg_utilization_memory": 0.0,
+          "peak_utilization_memory": 0.0,
+          "avg_memory_used": 133.0,
+          "peak_memory_used": 529.0,
+          "avg_power_draw": 119.9075,
+          "peak_power_draw": 119.94,
+          "avg_temperature_gpu": 38.0,
+          "peak_temperature_gpu": 38.0,
+          "avg_clocks_sm": 1980.0,
+          "peak_clocks_sm": 1980.0,
+          "avg_pcie_link_gen_current": 5.0,
+          "peak_pcie_link_gen_current": 5.0,
+          "avg_pcie_link_width_current": 16.0,
+          "peak_pcie_link_width_current": 16.0,
+          "energy_joules": 483.63668629765516
+        }
+      },
+      "1": {
+        "samples": [
+          {
+            "timestamp_unix": 1785114545.4221792,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 0.0,
+            "power_draw": 112.55,
+            "temperature_gpu": 37.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785114546.838449,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 0.0,
+            "power_draw": 112.47,
+            "temperature_gpu": 37.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785114548.8705497,
+            "utilization_gpu": 2.0,
+            "utilization_memory": 0.0,
+            "memory_used": 529.0,
+            "power_draw": 112.48,
+            "temperature_gpu": 37.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785114549.4557192,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 0.0,
+            "power_draw": 112.5,
+            "temperature_gpu": 37.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          }
+        ],
+        "samples_retained": 4,
+        "samples_truncated": false,
+        "summary": {
+          "sample_count": 4.0,
+          "avg_utilization_gpu": 0.5,
+          "peak_utilization_gpu": 2.0,
+          "avg_utilization_memory": 0.0,
+          "peak_utilization_memory": 0.0,
+          "avg_memory_used": 132.25,
+          "peak_memory_used": 529.0,
+          "avg_power_draw": 112.5,
+          "peak_power_draw": 112.55,
+          "avg_temperature_gpu": 37.0,
+          "peak_temperature_gpu": 37.0,
+          "avg_clocks_sm": 1980.0,
+          "peak_clocks_sm": 1980.0,
+          "avg_pcie_link_gen_current": 5.0,
+          "peak_pcie_link_gen_current": 5.0,
+          "avg_pcie_link_width_current": 16.0,
+          "peak_pcie_link_width_current": 16.0,
+          "energy_joules": 453.7307596611977
+        }
+      },
+      "2": {
+        "samples": [
+          {
+            "timestamp_unix": 1785114545.4221792,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 0.0,
+            "power_draw": 120.22,
+            "temperature_gpu": 38.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785114546.838449,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 3.0,
+            "power_draw": 120.15,
+            "temperature_gpu": 38.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785114548.8705497,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 528.0,
+            "power_draw": 120.1,
+            "temperature_gpu": 38.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785114549.4557192,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 0.0,
+            "power_draw": 120.12,
+            "temperature_gpu": 38.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          }
+        ],
+        "samples_retained": 4,
+        "samples_truncated": false,
+        "summary": {
+          "sample_count": 4.0,
+          "avg_utilization_gpu": 0.0,
+          "peak_utilization_gpu": 0.0,
+          "avg_utilization_memory": 0.0,
+          "peak_utilization_memory": 0.0,
+          "avg_memory_used": 132.75,
+          "peak_memory_used": 528.0,
+          "avg_power_draw": 120.14750000000001,
+          "peak_power_draw": 120.22,
+          "avg_temperature_gpu": 38.0,
+          "peak_temperature_gpu": 38.0,
+          "avg_clocks_sm": 1980.0,
+          "peak_clocks_sm": 1980.0,
+          "avg_pcie_link_gen_current": 5.0,
+          "peak_pcie_link_gen_current": 5.0,
+          "avg_pcie_link_width_current": 16.0,
+          "peak_pcie_link_width_current": 16.0,
+          "energy_joules": 484.605192399025
+        }
+      },
+      "3": {
+        "samples": [
+          {
+            "timestamp_unix": 1785114545.4221792,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 0.0,
+            "power_draw": 114.89,
+            "temperature_gpu": 35.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785114546.838449,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 3.0,
+            "power_draw": 114.81,
+            "temperature_gpu": 35.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785114548.8705497,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 529.0,
+            "power_draw": 114.77,
+            "temperature_gpu": 35.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785114549.4557192,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 0.0,
+            "power_draw": 114.76,
+            "temperature_gpu": 35.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          }
+        ],
+        "samples_retained": 4,
+        "samples_truncated": false,
+        "summary": {
+          "sample_count": 4.0,
+          "avg_utilization_gpu": 0.0,
+          "peak_utilization_gpu": 0.0,
+          "avg_utilization_memory": 0.0,
+          "peak_utilization_memory": 0.0,
+          "avg_memory_used": 133.0,
+          "peak_memory_used": 529.0,
+          "avg_power_draw": 114.80749999999999,
+          "peak_power_draw": 114.89,
+          "avg_temperature_gpu": 35.0,
+          "peak_temperature_gpu": 35.0,
+          "avg_clocks_sm": 1980.0,
+          "peak_clocks_sm": 1980.0,
+          "avg_pcie_link_gen_current": 5.0,
+          "peak_pcie_link_gen_current": 5.0,
+          "avg_pcie_link_width_current": 16.0,
+          "peak_pcie_link_width_current": 16.0,
+          "energy_joules": 463.0804047477245
+        }
+      },
+      "4": {
+        "samples": [
+          {
+            "timestamp_unix": 1785114545.4221792,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 0.0,
+            "power_draw": 114.91,
+            "temperature_gpu": 34.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785114546.838449,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 0.0,
+            "power_draw": 114.89,
+            "temperature_gpu": 34.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785114548.8705497,
+            "utilization_gpu": 1.0,
+            "utilization_memory": 0.0,
+            "memory_used": 529.0,
+            "power_draw": 114.95,
+            "temperature_gpu": 34.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785114549.4557192,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 0.0,
+            "power_draw": 114.98,
+            "temperature_gpu": 34.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          }
+        ],
+        "samples_retained": 4,
+        "samples_truncated": false,
+        "summary": {
+          "sample_count": 4.0,
+          "avg_utilization_gpu": 0.25,
+          "peak_utilization_gpu": 1.0,
+          "avg_utilization_memory": 0.0,
+          "peak_utilization_memory": 0.0,
+          "avg_memory_used": 132.25,
+          "peak_memory_used": 529.0,
+          "avg_power_draw": 114.9325,
+          "peak_power_draw": 114.98,
+          "avg_temperature_gpu": 34.0,
+          "peak_temperature_gpu": 34.0,
+          "avg_clocks_sm": 1980.0,
+          "peak_clocks_sm": 1980.0,
+          "avg_pcie_link_gen_current": 5.0,
+          "peak_pcie_link_gen_current": 5.0,
+          "avg_pcie_link_width_current": 16.0,
+          "peak_pcie_link_width_current": 16.0,
+          "energy_joules": 463.5324252355099
+        }
+      },
+      "5": {
+        "samples": [
+          {
+            "timestamp_unix": 1785114545.4221792,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 0.0,
+            "power_draw": 114.65,
+            "temperature_gpu": 37.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785114546.838449,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 0.0,
+            "power_draw": 114.65,
+            "temperature_gpu": 37.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785114548.8705497,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 529.0,
+            "power_draw": 114.67,
+            "temperature_gpu": 37.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785114549.4557192,
+            "utilization_gpu": 1.0,
+            "utilization_memory": 0.0,
+            "memory_used": 0.0,
+            "power_draw": 114.67,
+            "temperature_gpu": 37.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          }
+        ],
+        "samples_retained": 4,
+        "samples_truncated": false,
+        "summary": {
+          "sample_count": 4.0,
+          "avg_utilization_gpu": 0.25,
+          "peak_utilization_gpu": 1.0,
+          "avg_utilization_memory": 0.0,
+          "peak_utilization_memory": 0.0,
+          "avg_memory_used": 132.25,
+          "peak_memory_used": 529.0,
+          "avg_power_draw": 114.66000000000001,
+          "peak_power_draw": 114.67,
+          "avg_temperature_gpu": 37.0,
+          "peak_temperature_gpu": 37.0,
+          "avg_clocks_sm": 1980.0,
+          "peak_clocks_sm": 1980.0,
+          "avg_pcie_link_gen_current": 5.0,
+          "peak_pcie_link_gen_current": 5.0,
+          "avg_pcie_link_width_current": 16.0,
+          "peak_pcie_link_width_current": 16.0,
+          "energy_joules": 462.47738659620285
+        }
+      },
+      "6": {
+        "samples": [
+          {
+            "timestamp_unix": 1785114545.4221792,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 0.0,
+            "power_draw": 114.62,
+            "temperature_gpu": 37.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785114546.838449,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 3.0,
+            "power_draw": 114.66,
+            "temperature_gpu": 37.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785114548.8705497,
+            "utilization_gpu": 1.0,
+            "utilization_memory": 0.0,
+            "memory_used": 529.0,
+            "power_draw": 114.66,
+            "temperature_gpu": 37.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785114549.4557192,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 0.0,
+            "power_draw": 114.64,
+            "temperature_gpu": 37.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          }
+        ],
+        "samples_retained": 4,
+        "samples_truncated": false,
+        "summary": {
+          "sample_count": 4.0,
+          "avg_utilization_gpu": 0.25,
+          "peak_utilization_gpu": 1.0,
+          "avg_utilization_memory": 0.0,
+          "peak_utilization_memory": 0.0,
+          "avg_memory_used": 133.0,
+          "peak_memory_used": 529.0,
+          "avg_power_draw": 114.645,
+          "peak_power_draw": 114.66,
+          "avg_temperature_gpu": 37.0,
+          "peak_temperature_gpu": 37.0,
+          "avg_clocks_sm": 1980.0,
+          "peak_clocks_sm": 1980.0,
+          "avg_pcie_link_gen_current": 5.0,
+          "peak_pcie_link_gen_current": 5.0,
+          "avg_pcie_link_width_current": 16.0,
+          "peak_pcie_link_width_current": 16.0,
+          "energy_joules": 462.45152050733566
+        }
+      },
+      "7": {
+        "samples": [
+          {
+            "timestamp_unix": 1785114545.4221792,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 0.0,
+            "power_draw": 109.3,
+            "temperature_gpu": 33.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785114546.838449,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 0.0,
+            "power_draw": 109.29,
+            "temperature_gpu": 33.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785114548.8705497,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 529.0,
+            "power_draw": 109.33,
+            "temperature_gpu": 33.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785114549.4557192,
+            "utilization_gpu": 1.0,
+            "utilization_memory": 0.0,
+            "memory_used": 0.0,
+            "power_draw": 109.31,
+            "temperature_gpu": 33.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          }
+        ],
+        "samples_retained": 4,
+        "samples_truncated": false,
+        "summary": {
+          "sample_count": 4.0,
+          "avg_utilization_gpu": 0.25,
+          "peak_utilization_gpu": 1.0,
+          "avg_utilization_memory": 0.0,
+          "peak_utilization_memory": 0.0,
+          "avg_memory_used": 132.25,
+          "peak_memory_used": 529.0,
+          "avg_power_draw": 109.3075,
+          "peak_power_draw": 109.33,
+          "avg_temperature_gpu": 33.0,
+          "peak_temperature_gpu": 33.0,
+          "avg_clocks_sm": 1980.0,
+          "peak_clocks_sm": 1980.0,
+          "avg_pcie_link_gen_current": 5.0,
+          "peak_pcie_link_gen_current": 5.0,
+          "avg_pcie_link_width_current": 16.0,
+          "peak_pcie_link_width_current": 16.0,
+          "energy_joules": 440.89086619138715
+        }
+      }
+    },
+    "aggregate": {
+      "sample_count": 32.0,
+      "energy_joules": 3714.4052416360378,
+      "gpu_util_imbalance_pct": 0.5
+    }
+  },
+  "environment": {},
+  "workers": [
+    {
+      "command": [
+        "/root/workspace/HybridCVDV-Simulator/baselines/BQSim-main/build-H800/apps/BQSim",
+        "--ps",
+        "--batch_size",
+        "256",
+        "--num_batch",
+        "32",
+        "--conversion_type",
+        "2",
+        "--file",
+        "/root/workspace/HybridCVDV-Simulator/experiments/generated/sc26_baseline_qasm/sc26_cat_c16.qasm",
+        "--output",
+        "/root/workspace/HybridCVDV-Simulator/experiments/results/distributed_8xH800/phase-d-bqsim/bqsim/throughput/g8/sc26_cat_c16/r0/worker-0.json"
+      ],
+      "returncode": 0,
+      "stdout": "Checking input_batch file for: /root/workspace/HybridCVDV-Simulator/experiments/generated/sc26_baseline_qasm/sc26_cat_c16.qasm\nNo qubit pattern found in filename: /root/workspace/HybridCVDV-Simulator/experiments/generated/sc26_baseline_qasm/sc26_cat_c16.qasm\nfusing 1 out of 10\nfusing 2 out of 10\nfusing 3 out of 10\nfusing 4 out of 10\nfusing 5 out of 10\nfusing 6 out of 10\nfusing 7 out of 10\nfusing 8 out of 10\nfusing 9 out of 10\nAverage Coefficient of variation: 0\n[Stage 1: Gate Fusion] time: 5\nConverting fused gate #0 using GPU\n919 5 15 5\nConverting fused gate #1 using GPU\n121 5 15 5\nConverting fused gate #2 using GPU\n115 11 31 5\n[Stage 2: DD-to-ELL Conversion] time: 1\nfused gates num. = 3\ntotal macs = 10\n[Stage 3: ELL-based batch simulation] time: 26\n\u4f20\u8f93\u65f6\u95f4: 0.997376 ms\n\u8ba1\u7b97\u65f6\u95f4: 15.9698 ms\n\u5cf0\u503c\u5185\u5b58\u4f7f\u7528: 556859392 \u5b57\u8282\nSimulation finished\nInitial check: 1\n{\n  \"statistics\": {\n    \"applied_gates\": 14,\n    \"benchmark\": \"sc26_cat_c16\",\n    \"n_qubits\": 5,\n    \"simulation_time\": 37\n  }\n}\n",
+      "stderr": "",
+      "timed_out": false,
+      "wall_time_ms": 4253.116382285953,
+      "raw_output": "/root/workspace/HybridCVDV-Simulator/experiments/results/distributed_8xH800/phase-d-bqsim/bqsim/throughput/g8/sc26_cat_c16/r0/worker-0.json"
+    },
+    {
+      "command": [
+        "/root/workspace/HybridCVDV-Simulator/baselines/BQSim-main/build-H800/apps/BQSim",
+        "--ps",
+        "--batch_size",
+        "256",
+        "--num_batch",
+        "32",
+        "--conversion_type",
+        "2",
+        "--file",
+        "/root/workspace/HybridCVDV-Simulator/experiments/generated/sc26_baseline_qasm/sc26_cat_c16.qasm",
+        "--output",
+        "/root/workspace/HybridCVDV-Simulator/experiments/results/distributed_8xH800/phase-d-bqsim/bqsim/throughput/g8/sc26_cat_c16/r0/worker-1.json"
+      ],
+      "returncode": 0,
+      "stdout": "Checking input_batch file for: /root/workspace/HybridCVDV-Simulator/experiments/generated/sc26_baseline_qasm/sc26_cat_c16.qasm\nNo qubit pattern found in filename: /root/workspace/HybridCVDV-Simulator/experiments/generated/sc26_baseline_qasm/sc26_cat_c16.qasm\nfusing 1 out of 10\nfusing 2 out of 10\nfusing 3 out of 10\nfusing 4 out of 10\nfusing 5 out of 10\nfusing 6 out of 10\nfusing 7 out of 10\nfusing 8 out of 10\nfusing 9 out of 10\nAverage Coefficient of variation: 0\n[Stage 1: Gate Fusion] time: 5\nConverting fused gate #0 using GPU\n941 5 15 5\nConverting fused gate #1 using GPU\n115 5 15 5\nConverting fused gate #2 using GPU\n120 11 31 5\n[Stage 2: DD-to-ELL Conversion] time: 1\nfused gates num. = 3\ntotal macs = 10\n[Stage 3: ELL-based batch simulation] time: 29\n\u4f20\u8f93\u65f6\u95f4: 0.987136 ms\n\u8ba1\u7b97\u65f6\u95f4: 19.4485 ms\n\u5cf0\u503c\u5185\u5b58\u4f7f\u7528: 556859392 \u5b57\u8282\nSimulation finished\nInitial check: 1\n{\n  \"statistics\": {\n    \"applied_gates\": 14,\n    \"benchmark\": \"sc26_cat_c16\",\n    \"n_qubits\": 5,\n    \"simulation_time\": 39\n  }\n}\n",
+      "stderr": "",
+      "timed_out": false,
+      "wall_time_ms": 4038.6431217193604,
+      "raw_output": "/root/workspace/HybridCVDV-Simulator/experiments/results/distributed_8xH800/phase-d-bqsim/bqsim/throughput/g8/sc26_cat_c16/r0/worker-1.json"
+    },
+    {
+      "command": [
+        "/root/workspace/HybridCVDV-Simulator/baselines/BQSim-main/build-H800/apps/BQSim",
+        "--ps",
+        "--batch_size",
+        "256",
+        "--num_batch",
+        "32",
+        "--conversion_type",
+        "2",
+        "--file",
+        "/root/workspace/HybridCVDV-Simulator/experiments/generated/sc26_baseline_qasm/sc26_cat_c16.qasm",
+        "--output",
+        "/root/workspace/HybridCVDV-Simulator/experiments/results/distributed_8xH800/phase-d-bqsim/bqsim/throughput/g8/sc26_cat_c16/r0/worker-2.json"
+      ],
+      "returncode": 0,
+      "stdout": "Checking input_batch file for: /root/workspace/HybridCVDV-Simulator/experiments/generated/sc26_baseline_qasm/sc26_cat_c16.qasm\nNo qubit pattern found in filename: /root/workspace/HybridCVDV-Simulator/experiments/generated/sc26_baseline_qasm/sc26_cat_c16.qasm\nfusing 1 out of 10\nfusing 2 out of 10\nfusing 3 out of 10\nfusing 4 out of 10\nfusing 5 out of 10\nfusing 6 out of 10\nfusing 7 out of 10\nfusing 8 out of 10\nfusing 9 out of 10\nAverage Coefficient of variation: 0\n[Stage 1: Gate Fusion] time: 6\nConverting fused gate #0 using GPU\n965 5 15 5\nConverting fused gate #1 using GPU\n115 5 15 5\nConverting fused gate #2 using GPU\n116 11 31 5\n[Stage 2: DD-to-ELL Conversion] time: 1\nfused gates num. = 3\ntotal macs = 10\n[Stage 3: ELL-based batch simulation] time: 16\n\u4f20\u8f93\u65f6\u95f4: 1.00147 ms\n\u8ba1\u7b97\u65f6\u95f4: 6.34912 ms\n\u5cf0\u503c\u5185\u5b58\u4f7f\u7528: 556859392 \u5b57\u8282\nSimulation finished\nInitial check: 1\n{\n  \"statistics\": {\n    \"applied_gates\": 14,\n    \"benchmark\": \"sc26_cat_c16\",\n    \"n_qubits\": 5,\n    \"simulation_time\": 26\n  }\n}\n",
+      "stderr": "",
+      "timed_out": false,
+      "wall_time_ms": 3792.8536841645837,
+      "raw_output": "/root/workspace/HybridCVDV-Simulator/experiments/results/distributed_8xH800/phase-d-bqsim/bqsim/throughput/g8/sc26_cat_c16/r0/worker-2.json"
+    },
+    {
+      "command": [
+        "/root/workspace/HybridCVDV-Simulator/baselines/BQSim-main/build-H800/apps/BQSim",
+        "--ps",
+        "--batch_size",
+        "256",
+        "--num_batch",
+        "32",
+        "--conversion_type",
+        "2",
+        "--file",
+        "/root/workspace/HybridCVDV-Simulator/experiments/generated/sc26_baseline_qasm/sc26_cat_c16.qasm",
+        "--output",
+        "/root/workspace/HybridCVDV-Simulator/experiments/results/distributed_8xH800/phase-d-bqsim/bqsim/throughput/g8/sc26_cat_c16/r0/worker-3.json"
+      ],
+      "returncode": 0,
+      "stdout": "Checking input_batch file for: /root/workspace/HybridCVDV-Simulator/experiments/generated/sc26_baseline_qasm/sc26_cat_c16.qasm\nNo qubit pattern found in filename: /root/workspace/HybridCVDV-Simulator/experiments/generated/sc26_baseline_qasm/sc26_cat_c16.qasm\nfusing 1 out of 10\nfusing 2 out of 10\nfusing 3 out of 10\nfusing 4 out of 10\nfusing 5 out of 10\nfusing 6 out of 10\nfusing 7 out of 10\nfusing 8 out of 10\nfusing 9 out of 10\nAverage Coefficient of variation: 0\n[Stage 1: Gate Fusion] time: 6\nConverting fused gate #0 using GPU\n1003 5 15 5\nConverting fused gate #1 using GPU\n119 5 15 5\nConverting fused gate #2 using GPU\n116 11 31 5\n[Stage 2: DD-to-ELL Conversion] time: 1\nfused gates num. = 3\ntotal macs = 10\n[Stage 3: ELL-based batch simulation] time: 13\n\u4f20\u8f93\u65f6\u95f4: 1.0455 ms\n\u8ba1\u7b97\u65f6\u95f4: 3.92486 ms\n\u5cf0\u503c\u5185\u5b58\u4f7f\u7528: 556859392 \u5b57\u8282\nSimulation finished\nInitial check: 1\n{\n  \"statistics\": {\n    \"applied_gates\": 14,\n    \"benchmark\": \"sc26_cat_c16\",\n    \"n_qubits\": 5,\n    \"simulation_time\": 25\n  }\n}\n",
+      "stderr": "",
+      "timed_out": false,
+      "wall_time_ms": 3969.200205989182,
+      "raw_output": "/root/workspace/HybridCVDV-Simulator/experiments/results/distributed_8xH800/phase-d-bqsim/bqsim/throughput/g8/sc26_cat_c16/r0/worker-3.json"
+    },
+    {
+      "command": [
+        "/root/workspace/HybridCVDV-Simulator/baselines/BQSim-main/build-H800/apps/BQSim",
+        "--ps",
+        "--batch_size",
+        "256",
+        "--num_batch",
+        "32",
+        "--conversion_type",
+        "2",
+        "--file",
+        "/root/workspace/HybridCVDV-Simulator/experiments/generated/sc26_baseline_qasm/sc26_cat_c16.qasm",
+        "--output",
+        "/root/workspace/HybridCVDV-Simulator/experiments/results/distributed_8xH800/phase-d-bqsim/bqsim/throughput/g8/sc26_cat_c16/r0/worker-4.json"
+      ],
+      "returncode": 0,
+      "stdout": "Checking input_batch file for: /root/workspace/HybridCVDV-Simulator/experiments/generated/sc26_baseline_qasm/sc26_cat_c16.qasm\nNo qubit pattern found in filename: /root/workspace/HybridCVDV-Simulator/experiments/generated/sc26_baseline_qasm/sc26_cat_c16.qasm\nfusing 1 out of 10\nfusing 2 out of 10\nfusing 3 out of 10\nfusing 4 out of 10\nfusing 5 out of 10\nfusing 6 out of 10\nfusing 7 out of 10\nfusing 8 out of 10\nfusing 9 out of 10\nAverage Coefficient of variation: 0\n[Stage 1: Gate Fusion] time: 5\nConverting fused gate #0 using GPU\n943 5 15 5\nConverting fused gate #1 using GPU\n146 5 15 5\nConverting fused gate #2 using GPU\n132 11 31 5\n[Stage 2: DD-to-ELL Conversion] time: 1\nfused gates num. = 3\ntotal macs = 10\n[Stage 3: ELL-based batch simulation] time: 18\n\u4f20\u8f93\u65f6\u95f4: 1.08134 ms\n\u8ba1\u7b97\u65f6\u95f4: 9.09837 ms\n\u5cf0\u503c\u5185\u5b58\u4f7f\u7528: 556859392 \u5b57\u8282\nSimulation finished\nInitial check: 1\n{\n  \"statistics\": {\n    \"applied_gates\": 14,\n    \"benchmark\": \"sc26_cat_c16\",\n    \"n_qubits\": 5,\n    \"simulation_time\": 29\n  }\n}\n",
+      "stderr": "",
+      "timed_out": false,
+      "wall_time_ms": 4113.659610040486,
+      "raw_output": "/root/workspace/HybridCVDV-Simulator/experiments/results/distributed_8xH800/phase-d-bqsim/bqsim/throughput/g8/sc26_cat_c16/r0/worker-4.json"
+    },
+    {
+      "command": [
+        "/root/workspace/HybridCVDV-Simulator/baselines/BQSim-main/build-H800/apps/BQSim",
+        "--ps",
+        "--batch_size",
+        "256",
+        "--num_batch",
+        "32",
+        "--conversion_type",
+        "2",
+        "--file",
+        "/root/workspace/HybridCVDV-Simulator/experiments/generated/sc26_baseline_qasm/sc26_cat_c16.qasm",
+        "--output",
+        "/root/workspace/HybridCVDV-Simulator/experiments/results/distributed_8xH800/phase-d-bqsim/bqsim/throughput/g8/sc26_cat_c16/r0/worker-5.json"
+      ],
+      "returncode": 0,
+      "stdout": "Checking input_batch file for: /root/workspace/HybridCVDV-Simulator/experiments/generated/sc26_baseline_qasm/sc26_cat_c16.qasm\nNo qubit pattern found in filename: /root/workspace/HybridCVDV-Simulator/experiments/generated/sc26_baseline_qasm/sc26_cat_c16.qasm\nfusing 1 out of 10\nfusing 2 out of 10\nfusing 3 out of 10\nfusing 4 out of 10\nfusing 5 out of 10\nfusing 6 out of 10\nfusing 7 out of 10\nfusing 8 out of 10\nfusing 9 out of 10\nAverage Coefficient of variation: 0\n[Stage 1: Gate Fusion] time: 5\nConverting fused gate #0 using GPU\n951 5 15 5\nConverting fused gate #1 using GPU\n122 5 15 5\nConverting fused gate #2 using GPU\n117 11 31 5\n[Stage 2: DD-to-ELL Conversion] time: 1\nfused gates num. = 3\ntotal macs = 10\n[Stage 3: ELL-based batch simulation] time: 23\n\u4f20\u8f93\u65f6\u95f4: 1.05165 ms\n\u8ba1\u7b97\u65f6\u95f4: 11.9869 ms\n\u5cf0\u503c\u5185\u5b58\u4f7f\u7528: 556859392 \u5b57\u8282\nSimulation finished\nInitial check: 1\n{\n  \"statistics\": {\n    \"applied_gates\": 14,\n    \"benchmark\": \"sc26_cat_c16\",\n    \"n_qubits\": 5,\n    \"simulation_time\": 33\n  }\n}\n",
+      "stderr": "",
+      "timed_out": false,
+      "wall_time_ms": 4180.705836974084,
+      "raw_output": "/root/workspace/HybridCVDV-Simulator/experiments/results/distributed_8xH800/phase-d-bqsim/bqsim/throughput/g8/sc26_cat_c16/r0/worker-5.json"
+    },
+    {
+      "command": [
+        "/root/workspace/HybridCVDV-Simulator/baselines/BQSim-main/build-H800/apps/BQSim",
+        "--ps",
+        "--batch_size",
+        "256",
+        "--num_batch",
+        "32",
+        "--conversion_type",
+        "2",
+        "--file",
+        "/root/workspace/HybridCVDV-Simulator/experiments/generated/sc26_baseline_qasm/sc26_cat_c16.qasm",
+        "--output",
+        "/root/workspace/HybridCVDV-Simulator/experiments/results/distributed_8xH800/phase-d-bqsim/bqsim/throughput/g8/sc26_cat_c16/r0/worker-6.json"
+      ],
+      "returncode": 0,
+      "stdout": "Checking input_batch file for: /root/workspace/HybridCVDV-Simulator/experiments/generated/sc26_baseline_qasm/sc26_cat_c16.qasm\nNo qubit pattern found in filename: /root/workspace/HybridCVDV-Simulator/experiments/generated/sc26_baseline_qasm/sc26_cat_c16.qasm\nfusing 1 out of 10\nfusing 2 out of 10\nfusing 3 out of 10\nfusing 4 out of 10\nfusing 5 out of 10\nfusing 6 out of 10\nfusing 7 out of 10\nfusing 8 out of 10\nfusing 9 out of 10\nAverage Coefficient of variation: 0\n[Stage 1: Gate Fusion] time: 5\nConverting fused gate #0 using GPU\n921 5 15 5\nConverting fused gate #1 using GPU\n119 5 15 5\nConverting fused gate #2 using GPU\n114 11 31 5\n[Stage 2: DD-to-ELL Conversion] time: 1\nfused gates num. = 3\ntotal macs = 10\n[Stage 3: ELL-based batch simulation] time: 23\n\u4f20\u8f93\u65f6\u95f4: 1.08544 ms\n\u8ba1\u7b97\u65f6\u95f4: 12.0408 ms\n\u5cf0\u503c\u5185\u5b58\u4f7f\u7528: 556859392 \u5b57\u8282\nSimulation finished\nInitial check: 1\n{\n  \"statistics\": {\n    \"applied_gates\": 14,\n    \"benchmark\": \"sc26_cat_c16\",\n    \"n_qubits\": 5,\n    \"simulation_time\": 34\n  }\n}\n",
+      "stderr": "",
+      "timed_out": false,
+      "wall_time_ms": 3875.173720996827,
+      "raw_output": "/root/workspace/HybridCVDV-Simulator/experiments/results/distributed_8xH800/phase-d-bqsim/bqsim/throughput/g8/sc26_cat_c16/r0/worker-6.json"
+    },
+    {
+      "command": [
+        "/root/workspace/HybridCVDV-Simulator/baselines/BQSim-main/build-H800/apps/BQSim",
+        "--ps",
+        "--batch_size",
+        "256",
+        "--num_batch",
+        "32",
+        "--conversion_type",
+        "2",
+        "--file",
+        "/root/workspace/HybridCVDV-Simulator/experiments/generated/sc26_baseline_qasm/sc26_cat_c16.qasm",
+        "--output",
+        "/root/workspace/HybridCVDV-Simulator/experiments/results/distributed_8xH800/phase-d-bqsim/bqsim/throughput/g8/sc26_cat_c16/r0/worker-7.json"
+      ],
+      "returncode": 0,
+      "stdout": "Checking input_batch file for: /root/workspace/HybridCVDV-Simulator/experiments/generated/sc26_baseline_qasm/sc26_cat_c16.qasm\nNo qubit pattern found in filename: /root/workspace/HybridCVDV-Simulator/experiments/generated/sc26_baseline_qasm/sc26_cat_c16.qasm\nfusing 1 out of 10\nfusing 2 out of 10\nfusing 3 out of 10\nfusing 4 out of 10\nfusing 5 out of 10\nfusing 6 out of 10\nfusing 7 out of 10\nfusing 8 out of 10\nfusing 9 out of 10\nAverage Coefficient of variation: 0\n[Stage 1: Gate Fusion] time: 6\nConverting fused gate #0 using GPU\n979 5 15 5\nConverting fused gate #1 using GPU\n121 5 15 5\nConverting fused gate #2 using GPU\n115 11 31 5\n[Stage 2: DD-to-ELL Conversion] time: 1\nfused gates num. = 3\ntotal macs = 10\n[Stage 3: ELL-based batch simulation] time: 17\n\u4f20\u8f93\u65f6\u95f4: 1.03731 ms\n\u8ba1\u7b97\u65f6\u95f4: 7.59946 ms\n\u5cf0\u503c\u5185\u5b58\u4f7f\u7528: 556859392 \u5b57\u8282\nSimulation finished\nInitial check: 1\n{\n  \"statistics\": {\n    \"applied_gates\": 14,\n    \"benchmark\": \"sc26_cat_c16\",\n    \"n_qubits\": 5,\n    \"simulation_time\": 26\n  }\n}\n",
+      "stderr": "",
+      "timed_out": false,
+      "wall_time_ms": 4324.382769875228,
+      "raw_output": "/root/workspace/HybridCVDV-Simulator/experiments/results/distributed_8xH800/phase-d-bqsim/bqsim/throughput/g8/sc26_cat_c16/r0/worker-7.json"
+    }
+  ]
+}

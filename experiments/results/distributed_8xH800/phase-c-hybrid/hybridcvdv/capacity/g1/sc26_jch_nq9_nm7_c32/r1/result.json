@@ -1,0 +1,100 @@
+{
+  "schema_version": "3.0",
+  "generated_at_utc": "2026-07-20T00:56:54Z",
+  "system": "hybridcvdv",
+  "case_name": "sc26_jch_nq9_nm7_c32",
+  "phase": "capacity",
+  "gpu_count": 1,
+  "gpu_ids": [
+    0
+  ],
+  "process_repetition": 1,
+  "status": "crash_host",
+  "cutoff": 32,
+  "num_modes": 7,
+  "num_qubits": 9,
+  "warmup_runs": 2,
+  "measured_runs": 10,
+  "timing": {},
+  "throughput": {},
+  "memory": {
+    "per_gpu": {},
+    "aggregate": {}
+  },
+  "communication": {},
+  "correctness": {},
+  "telemetry": {
+    "per_gpu": {
+      "0": {
+        "samples": [
+          {
+            "timestamp_unix": 1784509014.2739117,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 0.0,
+            "power_draw": 120.85,
+            "temperature_gpu": 40.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1784509014.7958016,
+            "utilization_gpu": 2.0,
+            "utilization_memory": 0.0,
+            "memory_used": 0.0,
+            "power_draw": 120.88,
+            "temperature_gpu": 39.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          }
+        ],
+        "samples_retained": 2,
+        "samples_truncated": false,
+        "summary": {
+          "sample_count": 2.0,
+          "avg_utilization_gpu": 1.0,
+          "peak_utilization_gpu": 2.0,
+          "avg_utilization_memory": 0.0,
+          "peak_utilization_memory": 0.0,
+          "avg_memory_used": 0.0,
+          "peak_memory_used": 0.0,
+          "avg_power_draw": 120.865,
+          "peak_power_draw": 120.88,
+          "avg_temperature_gpu": 39.5,
+          "peak_temperature_gpu": 40.0,
+          "avg_clocks_sm": 1980.0,
+          "peak_clocks_sm": 1980.0,
+          "avg_pcie_link_gen_current": 5.0,
+          "peak_pcie_link_gen_current": 5.0,
+          "avg_pcie_link_width_current": 16.0,
+          "peak_pcie_link_width_current": 16.0,
+          "energy_joules": 63.07822578549385
+        }
+      }
+    },
+    "aggregate": {
+      "sample_count": 2.0,
+      "energy_joules": 63.07822578549385,
+      "gpu_util_imbalance_pct": 0.0
+    }
+  },
+  "environment": {},
+  "runner": {
+    "command": [
+      "/root/workspace/HybridCVDV-Simulator/build-H800/hybridcvdv_single_gpu_experiments",
+      "--suite",
+      "scaling",
+      "--name-filter",
+      "sc26_jch_nq9_nm7_c32",
+      "--output",
+      "/root/workspace/HybridCVDV-Simulator/experiments/results/distributed_8xH800/phase-c-hybrid/hybridcvdv/capacity/g1/sc26_jch_nq9_nm7_c32/r1/raw.json"
+    ],
+    "returncode": 1,
+    "stdout": "[GPUContext] Initialized with 1 device(s)\n[MultiGPU] Initialized 1 GPU(s)\n\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n\u2551          GPU Context Summary                    \u2551\n\u2560\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2563\n\u2551 GPU 0: NVIDIA H800                              \u2551\n\u2551   Compute: SM 9.0  |  SMs: 132   |  Warp: 32   \u2551\n\u2551   Memory:  81007 MiB total / 80482 MiB free    \u2551\n\u2551   SharedMem/Block:    48 KB  /SM:   228 KB    \u2551\n\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n",
+    "stderr": "Experiment runner failed: no experiments were selected\n",
+    "timed_out": false,
+    "wall_time_ms": 535.3521080687642
+  }
+}

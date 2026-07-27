@@ -1,0 +1,162 @@
+{
+  "schema_version": "3.0",
+  "generated_at_utc": "2026-07-20T06:26:45Z",
+  "system": "atlas",
+  "case_name": "sc26_jch_nq3_nm7_c16",
+  "phase": "capacity",
+  "gpu_count": 1,
+  "gpu_ids": [
+    0
+  ],
+  "process_repetition": 1,
+  "status": "oom_single_gpu_pool",
+  "cutoff": 16,
+  "num_modes": 7,
+  "num_qubits": 3,
+  "warmup_runs": 2,
+  "measured_runs": 10,
+  "timing": {},
+  "throughput": {},
+  "memory": {
+    "per_gpu": {},
+    "aggregate": {}
+  },
+  "communication": {},
+  "correctness": {},
+  "telemetry": {
+    "per_gpu": {
+      "0": {
+        "samples": [
+          {
+            "timestamp_unix": 1784528805.2989237,
+            "utilization_gpu": 2.0,
+            "utilization_memory": 0.0,
+            "memory_used": 0.0,
+            "power_draw": 122.38,
+            "temperature_gpu": 36.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1784528806.52243,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 0.0,
+            "power_draw": 117.78,
+            "temperature_gpu": 36.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1784528807.6197941,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 22.0,
+            "power_draw": 117.86,
+            "temperature_gpu": 36.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1784528808.6714432,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 0.0,
+            "power_draw": 117.91,
+            "temperature_gpu": 36.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1784528809.7285645,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 0.0,
+            "power_draw": 117.8,
+            "temperature_gpu": 36.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1784528810.2601416,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 0.0,
+            "power_draw": 117.82,
+            "temperature_gpu": 36.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          }
+        ],
+        "samples_retained": 6,
+        "samples_truncated": false,
+        "summary": {
+          "sample_count": 6.0,
+          "avg_utilization_gpu": 0.3333333333333333,
+          "peak_utilization_gpu": 2.0,
+          "avg_utilization_memory": 0.0,
+          "peak_utilization_memory": 0.0,
+          "avg_memory_used": 3.6666666666666665,
+          "peak_memory_used": 22.0,
+          "avg_power_draw": 118.59166666666665,
+          "peak_power_draw": 122.38,
+          "avg_temperature_gpu": 36.0,
+          "peak_temperature_gpu": 36.0,
+          "avg_clocks_sm": 1980.0,
+          "peak_clocks_sm": 1980.0,
+          "avg_pcie_link_gen_current": 5.0,
+          "peak_pcie_link_gen_current": 5.0,
+          "avg_pcie_link_width_current": 16.0,
+          "peak_pcie_link_width_current": 16.0,
+          "energy_joules": 587.3958553552627
+        }
+      }
+    },
+    "aggregate": {
+      "sample_count": 6.0,
+      "energy_joules": 587.3958553552627,
+      "gpu_util_imbalance_pct": 0.0
+    }
+  },
+  "environment": {},
+  "runner": {
+    "command": [
+      "mpirun",
+      "-np",
+      "1",
+      "--bind-to",
+      "none",
+      "/root/workspace/HybridCVDV-Simulator/baselines/atlas-main/build-H800/examples/mpi-based/run_generated_qasm",
+      "--qasm-path",
+      "/root/workspace/HybridCVDV-Simulator/experiments/generated/sc26_baseline_qasm/sc26_jch_nq3_nm7_c16.qasm",
+      "--n",
+      "31",
+      "--local",
+      "31",
+      "--device",
+      "1",
+      "--use-ilp",
+      "--output",
+      "/root/workspace/HybridCVDV-Simulator/experiments/results/distributed_8xH800/phase-c-atlas/atlas/capacity/g1/sc26_jch_nq3_nm7_c16/r1/warmup-0.json"
+    ],
+    "returncode": 139,
+    "stdout": ", Q23)\n  Q24 = ry(Q24, P48)\n  Q24 = rz(Q24, P49)\n  [Q23, Q24] = cx(Q23, Q24)\n}\n\nGate 0: [kernel.gates = 0x556422da9630, kernel.gates->gates.size() = 12, kernel.gates->gates[0] = 0x556422edc840, input_wires.size() = 2, gate = 0x556422cbab70, input_wire = 0x556422f7ac50, is_qubit = 1, 21, input_wire = 0x556422d9a370, is_qubit = 0, Param 42, ctx pointer: 0x7fff5aab3bc0, Using default param value 0, ]\nBefore getMat_per_device loop, n_devices = 1\nd = 0, myRank = 0, calling getMat_per_device\nFusing gate 4(0) for rank 0, params size: 1\nt 21\nMatrix Multiplication (5, 1), mask 2\nGate 1: [kernel.gates = 0x556422da9630, kernel.gates->gates.size() = 12, kernel.gates->gates[1] = 0x556422f34260, input_wires.size() = 2, gate = 0x556422d88520, input_wire = 0x556422dcbbc0, is_qubit = 1, 21, input_wire = 0x556422d9a5f0, is_qubit = 0, Param 43, ctx pointer: 0x7fff5aab3bc0, Using default param value 0, ]\nBefore getMat_per_device loop, n_devices = 1\nd = 0, myRank = 0, calling getMat_per_device\nFusing gate 5(0) for rank 0, params size: 1\nt 21\nMatrix Multiplication (5, 1), mask 2\nGate 2: [kernel.gates = 0x556422da9630, kernel.gates->gates.size() = 12, kernel.gates->gates[2] = 0x556422f7aef0, input_wires.size() = 2, gate = 0x556422cb4e00, input_wire = 0x556422f7ac10, is_qubit = 1, 20, input_wire = 0x556422dcbbc0, is_qubit = 1, 21, ]\nBefore getMat_per_device loop, n_devices = 1\nd = 0, myRank = 0, calling getMat_per_device\nFusing gate 6(1) for rank 0, params size: 0\nc,t 20,21\nMatrix Multiplication (5, 2), mask 3\nGate 3: [kernel.gates = 0x556422da9630, kernel.gates->gates.size() = 12, kernel.gates->gates[3] = 0x556422dc83c0, input_wires.size() = 2, gate = 0x556422cbab70, input_wire = 0x556422f7ac90, is_qubit = 1, 22, input_wire = 0x556422d9a850, is_qubit = 0, Param 44, ctx pointer: 0x7fff5aab3bc0, Using default param value 0, ]\nBefore getMat_per_device loop, n_devices = 1\nd = 0, myRank = 0, calling getMat_per_device\nFusing gate 4(0) for rank 0, params size: 1\nt 22\nMatrix Multiplication (5, 1), mask 4\nGate 4: [kernel.gates = 0x556422da9630, kernel.gates->gates.size() = 12, kernel.gates->gates[4] = 0x556422f818f0, input_wires.size() = 2, gate = 0x556422d88520, input_wire = 0x556422efec00, is_qubit = 1, 22, input_wire = 0x556422d9a9d0, is_qubit = 0, Param 45, ctx pointer: 0x7fff5aab3bc0, Using default param value 0, ]\nBefore getMat_per_device loop, n_devices = 1\nd = 0, myRank = 0, calling getMat_per_device\nFusing gate 5(0) for rank 0, params size: 1\nt 22\nMatrix Multiplication (5, 1), mask 4\nGate 5: [kernel.gates = 0x556422da9630, kernel.gates->gates.size() = 12, kernel.gates->gates[5] = 0x556422f7b290, input_wires.size() = 2, gate = 0x556422cb4e00, input_wire = 0x556422f7b1f0, is_qubit = 1, 21, input_wire = 0x556422efec00, is_qubit = 1, 22, ]\nBefore getMat_per_device loop, n_devices = 1\nd = 0, myRank = 0, calling getMat_per_device\nFusing gate 6(1) for rank 0, params size: 0\nc,t 21,22\nMatrix Multiplication (5, 2), mask 6\nGate 6: [kernel.gates = 0x556422da9630, kernel.gates->gates.size() = 12, kernel.gates->gates[6] = 0x556422ea39f0, input_wires.size() = 2, gate = 0x556422cbab70, input_wire = 0x556422f7acd0, is_qubit = 1, 23, input_wire = 0x556422d9aaf0, is_qubit = 0, Param 46, ctx pointer: 0x7fff5aab3bc0, Using default param value 0, ]\nBefore getMat_per_device loop, n_devices = 1\nd = 0, myRank = 0, calling getMat_per_device\nFusing gate 4(0) for rank 0, params size: 1\nt 23\nMatrix Multiplication (5, 1), mask 8\nGate 7: [kernel.gates = 0x556422da9630, kernel.gates->gates.size() = 12, kernel.gates->gates[7] = 0x556422f92960, input_wires.size() = 2, gate = 0x556422d88520, input_wire = 0x556422ee5f10, is_qubit = 1, 23, input_wire = 0x556422d9ad10, is_qubit = 0, Param 47, ctx pointer: 0x7fff5aab3bc0, Using default param value 0, ]\nBefore getMat_per_device loop, n_devices = 1\nd = 0, myRank = 0, calling getMat_per_device\nFusing gate 5(0) for rank 0, params size: 1\nt 23\nMatrix Multiplication (5, 1), mask 8\nGate 8: [kernel.gates = 0x556422da9630, kernel.gates->gates.size() = 12, kernel.gates->gates[8] = 0x556422f7b410, input_wires.size() = 2, gate = 0x556422cb4e00, input_wire = 0x556422f7b390, is_qubit = 1, 22, input_wire = 0x556422ee5f10, is_qubit = 1, 23, ]\nBefore getMat_per_device loop, n_devices = 1\nd = 0, myRank = 0, calling getMat_per_device\nFusing gate 6(1) for rank 0, params size: 0\nc,t 22,23\nMatrix Multiplication (5, 2), mask 12\nGate 9: [kernel.gates = 0x556422da9630, kernel.gates->gates.size() = 12, kernel.gates->gates[9] = 0x556422eb2eb0, input_wires.size() = 2, gate = 0x556422cbab70, input_wire = 0x556422f7ad10, is_qubit = 1, 24, input_wire = 0x556422d9b010, is_qubit = 0, Param 48, ctx pointer: 0x7fff5aab3bc0, Using default param value 0, ]\nBefore getMat_per_device loop, n_devices = 1\nd = 0, myRank = 0, calling getMat_per_device\nFusing gate 4(0) for rank 0, params size: 1\nt 24\nMatrix Multiplication (5, 1), mask 16\nGate 10: [kernel.gates = 0x556422da9630, kernel.gates->gates.size() = 12, kernel.gates->gates[10] = 0x556422edd030, input_wires.size() = 2, gate = 0x556422d88520, input_wire = 0x556422e942d0, is_qubit = 1, 24, input_wire = 0x556422d9b250, is_qubit = 0, Param 49, ctx pointer: 0x7fff5aab3bc0, Using default param value 0, ]\nBefore getMat_per_device loop, n_devices = 1\nd = 0, myRank = 0, calling getMat_per_device\nFusing gate 5(0) for rank 0, params size: 1\nt 24\nMatrix Multiplication (5, 1), mask 16\nGate 11: [kernel.gates = 0x556422da9630, kernel.gates->gates.size() = 12, kernel.gates->gates[11] = 0x556422f7b5c0, input_wires.size() = 2, gate = 0x556422cb4e00, input_wire = 0x556422f7b510, is_qubit = 1, 23, input_wire = 0x556422e942d0, is_qubit = 1, 24, ]\nBefore getMat_per_device loop, n_devices = 1\nd = 0, myRank = 0, calling getMat_per_device\nFusing gate 6(1) for rank 0, params size: 0\nc,t 23,24\nMatrix Multiplication (5, 2), mask 24\nAfter loop, before Gate creation\ng_type = 0, n_target = 5, n_control = 0\ntarget size = 5, control size = 0\nres_mats size = 1\nFuseGates returning true\nStart fusing gates...\nReset qubit group map\n(24, 24) (25, 25) (26, 26) (27, 27) current Layout: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,]\nFusing Kernel (9 gates): qubits [24, 25, 26, 27], gates fusion, qubits [24, 25, 26, 27], gates CircuitSeq {\n  Q25 = ry(Q25, P50)\n  Q25 = rz(Q25, P51)\n  [Q24, Q25] = cx(Q24, Q25)\n  Q26 = ry(Q26, P52)\n  Q26 = rz(Q26, P53)\n  [Q25, Q26] = cx(Q25, Q26)\n  Q27 = ry(Q27, P54)\n  Q27 = rz(Q27, P55)\n  [Q26, Q27] = cx(Q26, Q27)\n}\n\nGate 0: [kernel.gates = 0x556422da96c0, kernel.gates->gates.size() = 9, kernel.gates->gates[0] = 0x556422e630a0, input_wires.size() = 2, gate = 0x556422cbab70, input_wire = 0x556422f7be60, is_qubit = 1, 25, input_wire = 0x556422d9b3f0, is_qubit = 0, Param 50, ctx pointer: 0x7fff5aab3bc0, Using default param value 0, ]\nBefore getMat_per_device loop, n_devices = 1\nd = 0, myRank = 0, calling getMat_per_device\nFusing gate 4(0) for rank 0, params size: 1\nt 25\nMatrix Multiplication (4, 1), mask 2\nGate 1: [kernel.gates = 0x556422da96c0, kernel.gates->gates.size() = 9, kernel.gates->gates[1] = 0x556422f3c980, input_wires.size() = 2, gate = 0x556422d88520, input_wire = 0x556422db3720, is_qubit = 1, 25, input_wire = 0x556422d9b690, is_qubit = 0, Param 51, ctx pointer: 0x7fff5aab3bc0, Using default param value 0, ]\nBefore getMat_per_device loop, n_devices = 1\nd = 0, myRank = 0, calling getMat_per_device\nFusing gate 5(0) for rank 0, params size: 1\nt 25\nMatrix Multiplication (4, 1), mask 2\nGate 2: [kernel.gates = 0x556422da96c0, kernel.gates->gates.size() = 9, kernel.gates->gates[2] = 0x556422f7c000, input_wires.size() = 2, gate = 0x556422cb4e00, input_wire = 0x556422f7be20, is_qubit = 1, 24, input_wire = 0x556422db3720, is_qubit = 1, 25, ]\nBefore getMat_per_device loop, n_devices = 1\nd = 0, myRank = 0, calling getMat_per_device\nFusing gate 6(1) for rank 0, params size: 0\nc,t 24,25\nMatrix Multiplication (4, 2), mask 3\nGate 3: [kernel.gates = 0x556422da96c0, kernel.gates->gates.size() = 9, kernel.gates->gates[3] = 0x556422ed7f70, input_wires.size() = 2, gate = 0x556422cbab70, input_wire = 0x556422f7bea0, is_qubit = 1, 26, input_wire = 0x556422d9b810, is_qubit = 0, Param 52, ctx pointer: 0x7fff5aab3bc0, Using default param value 0, ]\nBefore getMat_per_device loop, n_devices = 1\nd = 0, myRank = 0, calling getMat_per_device\nFusing gate 4(0) for rank 0, params size: 1\nt 26\nMatrix Multiplication (4, 1), mask 4\nGate 4: [kernel.gates = 0x556422da96c0, kernel.gates->gates.size() = 9, kernel.gates->gates[4] = 0x556422f8e2a0, input_wires.size() = 2, gate = 0x556422d88520, input_wire = 0x556422e9aa20, is_qubit = 1, 26, input_wire = 0x556422d9ba50, is_qubit = 0, Param 53, ctx pointer: 0x7fff5aab3bc0, Using default param value 0, ]\nBefore getMat_per_device loop, n_devices = 1\nd = 0, myRank = 0, calling getMat_per_device\nFusing gate 5(0) for rank 0, params size: 1\nt 26\nMatrix Multiplication (4, 1), mask 4\nGate 5: [kernel.gates = 0x556422da96c0, kernel.gates->gates.size() = 9, kernel.gates->gates[5] = 0x556422f7c3a0, input_wires.size() = 2, gate = 0x556422cb4e00, input_wire = 0x556422f7c300, is_qubit = 1, 25, input_wire = 0x556422e9aa20, is_qubit = 1, 26, ]\nBefore getMat_per_device loop, n_devices = 1\nd = 0, myRank = 0, calling getMat_per_device\nFusing gate 6(1) for rank 0, params size: 0\nc,t 25,26\nMatrix Multiplication (4, 2), mask 6\nGate 6: [kernel.gates = 0x556422da96c0, kernel.gates->gates.size() = 9, kernel.gates->gates[6] = 0x556422f6ed40, input_wires.size() = 2, gate = 0x556422cbab70, input_wire = 0x556422f7bee0, is_qubit = 1, 27, input_wire = 0x556422d9bcb0, is_qubit = 0, Param 54, ctx pointer: 0x7fff5aab3bc0, Using default param value 0, ]\nBefore getMat_per_device loop, n_devices = 1\nd = 0, myRank = 0, calling getMat_per_device\nFusing gate 4(0) for rank 0, params size: 1\nt 27\nMatrix Multiplication (4, 1), mask 8\nGate 7: [kernel.gates = 0x556422da96c0, kernel.gates->gates.size() = 9, kernel.gates->gates[7] = 0x556422fa5580, input_wires.size() = 2, gate = 0x556422d88520, input_wire = 0x556422e83ce0, is_qubit = 1, 27, input_wire = 0x556422d9be90, is_qubit = 0, Param 55, ctx pointer: 0x7fff5aab3bc0, Using default param value 0, ]\nBefore getMat_per_device loop, n_devices = 1\nd = 0, myRank = 0, calling getMat_per_device\nFusing gate 5(0) for rank 0, params size: 1\nt 27\nMatrix Multiplication (4, 1), mask 8\nGate 8: [kernel.gates = 0x556422da96c0, kernel.gates->gates.size() = 9, kernel.gates->gates[8] = 0x556422f7c520, input_wires.size() = 2, gate = 0x556422cb4e00, input_wire = 0x556422f7c4a0, is_qubit = 1, 26, input_wire = 0x556422e83ce0, is_qubit = 1, 27, ]\nBefore getMat_per_device loop, n_devices = 1\nd = 0, myRank = 0, calling getMat_per_device\nFusing gate 6(1) for rank 0, params size: 0\nc,t 26,27\nMatrix Multiplication (4, 2), mask 12\nAfter loop, before Gate creation\ng_type = 0, n_target = 4, n_control = 0\ntarget size = 4, control size = 0\nres_mats size = 1\nFuseGates returning true\nStart fusing gates...\nReset qubit group map\n(27, 27) (28, 28) (29, 29) (30, 30) current Layout: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,]\nFusing Kernel (9 gates): qubits [27, 28, 29, 30], gates fusion, qubits [27, 28, 29, 30], gates CircuitSeq {\n  Q28 = ry(Q28, P56)\n  Q28 = rz(Q28, P57)\n  [Q27, Q28] = cx(Q27, Q28)\n  Q29 = ry(Q29, P58)\n  Q29 = rz(Q29, P59)\n  [Q28, Q29] = cx(Q28, Q29)\n  Q30 = ry(Q30, P60)\n  Q30 = rz(Q30, P61)\n  [Q29, Q30] = cx(Q29, Q30)\n}\n\nGate 0: [kernel.gates = 0x556422f7c6d0, kernel.gates->gates.size() = 9, kernel.gates->gates[0] = 0x556422e633b0, input_wires.size() = 2, gate = 0x556422cbab70, input_wire = 0x556422fa0480, is_qubit = 1, 28, input_wire = 0x556422d9c110, is_qubit = 0, Param 56, ctx pointer: 0x7fff5aab3bc0, Using default param value 0, ]\nBefore getMat_per_device loop, n_devices = 1\nd = 0, myRank = 0, calling getMat_per_device\nFusing gate 4(0) for rank 0, params size: 1\nt 28\nMatrix Multiplication (4, 1), mask 2\nGate 1: [kernel.gates = 0x556422f7c6d0, kernel.gates->gates.size() = 9, kernel.gates->gates[1] = 0x556422dca580, input_wires.size() = 2, gate = 0x556422d88520, input_wire = 0x556422db0f00, is_qubit = 1, 28, input_wire = 0x556422d9c410, is_qubit = 0, Param 57, ctx pointer: 0x7fff5aab3bc0, Using default param value 0, ]\nBefore getMat_per_device loop, n_devices = 1\nd = 0, myRank = 0, calling getMat_per_device\nFusing gate 5(0) for rank 0, params size: 1\nt 28\nMatrix Multiplication (4, 1), mask 2\nGate 2: [kernel.gates = 0x556422f7c6d0, kernel.gates->gates.size() = 9, kernel.gates->gates[2] = 0x556422fa0540, input_wires.size() = 2, gate = 0x556422cb4e00, input_wire = 0x556422e92560, is_qubit = 1, 27, input_wire = 0x556422db0f00, is_qubit = 1, 28, ]\nBefore getMat_per_device loop, n_devices = 1\nd = 0, myRank = 0, calling getMat_per_device\nFusing gate 6(1) for rank 0, params size: 0\nc,t 27,28\nMatrix Multiplication (4, 2), mask 3\nGate 3: [kernel.gates = 0x556422f7c6d0, kernel.gates->gates.size() = 9, kernel.gates->gates[3] = 0x556422e98f60, input_wires.size() = 2, gate = 0x556422cbab70, input_wire = 0x556422fa04c0, is_qubit = 1, 29, input_wire = 0x556422d9c590, is_qubit = 0, Param 58, ctx pointer: 0x7fff5aab3bc0, Using default param value 0, ]\nBefore getMat_per_device loop, n_devices = 1\nd = 0, myRank = 0, calling getMat_per_device\nFusing gate 4(0) for rank 0, params size: 1\nt 29\nMatrix Multiplication (4, 1), mask 4\nGate 4: [kernel.gates = 0x556422f7c6d0, kernel.gates->gates.size() = 9, kernel.gates->gates[4] = 0x556422e8b270, input_wires.size() = 2, gate = 0x556422d88520, input_wire = 0x556422e68d50, is_qubit = 1, 29, input_wire = 0x556422d9c750, is_qubit = 0, Param 59, ctx pointer: 0x7fff5aab3bc0, Using default param value 0, ]\nBefore getMat_per_device loop, n_devices = 1\nd = 0, myRank = 0, calling getMat_per_device\nFusing gate 5(0) for rank 0, params size: 1\nt 29\nMatrix Multiplication (4, 1), mask 4\nGate 5: [kernel.gates = 0x556422f7c6d0, kernel.gates->gates.size() = 9, kernel.gates->gates[5] = 0x556422f52c60, input_wires.size() = 2, gate = 0x556422cb4e00, input_wire = 0x556422f52bc0, is_qubit = 1, 28, input_wire = 0x556422e68d50, is_qubit = 1, 29, ]\nBefore getMat_per_device loop, n_devices = 1\nd = 0, myRank = 0, calling getMat_per_device\nFusing gate 6(1) for rank 0, params size: 0\nc,t 28,29\nMatrix Multiplication (4, 2), mask 6\nGate 6: [kernel.gates = 0x556422f7c6d0, kernel.gates->gates.size() = 9, kernel.gates->gates[6] = 0x556422ebbf40, input_wires.size() = 2, gate = 0x556422cbab70, input_wire = 0x556422fa0500, is_qubit = 1, 30, input_wire = 0x556422d9c930, is_qubit = 0, Param 60, ctx pointer: 0x7fff5aab3bc0, Using default param value 0, ]\nBefore getMat_per_device loop, n_devices = 1\nd = 0, myRank = 0, calling getMat_per_device\nFusing gate 4(0) for rank 0, params size: 1\nt 30\nMatrix Multiplication (4, 1), mask 8\nGate 7: [kernel.gates = 0x556422f7c6d0, kernel.gates->gates.size() = 9, kernel.gates->gates[7] = 0x556422f9b700, input_wires.size() = 2, gate = 0x556422d88520, input_wire = 0x556422f832e0, is_qubit = 1, 30, input_wire = 0x556422d9cb90, is_qubit = 0, Param 61, ctx pointer: 0x7fff5aab3bc0, Using default param value 0, ]\nBefore getMat_per_device loop, n_devices = 1\nd = 0, myRank = 0, calling getMat_per_device\nFusing gate 5(0) for rank 0, params size: 1\nt 30\nMatrix Multiplication (4, 1), mask 8\nGate 8: [kernel.gates = 0x556422f7c6d0, kernel.gates->gates.size() = 9, kernel.gates->gates[8] = 0x556422f52de0, input_wires.size() = 2, gate = 0x556422cb4e00, input_wire = 0x556422f52d60, is_qubit = 1, 29, input_wire = 0x556422f832e0, is_qubit = 1, 30, ]\nBefore getMat_per_device loop, n_devices = 1\nd = 0, myRank = 0, calling getMat_per_device\nFusing gate 6(1) for rank 0, params size: 0\nc,t 29,30\nMatrix Multiplication (4, 2), mask 12\nAfter loop, before Gate creation\ng_type = 0, n_target = 4, n_control = 0\ntarget size = 4, control size = 0\nres_mats size = 1\nFuseGates returning true\nCompilation Done! \nNum Shuffles: 0\nNum FUSION Kernel: 8\nNum SHM Kernel: 0\nStart Simulating...\nError allocating device memory for d_sv[0]: out of memory\n",
+    "stderr": "Assumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\nAssumption that all parameters are rational multiples of PI is violated. The result might not be accurate.\n[n122-200-068:1427137] *** Process received signal ***\n[n122-200-068:1427137] Signal: Segmentation fault (11)\n[n122-200-068:1427137] Signal code:  (128)\n[n122-200-068:1427137] Failing at address: (nil)\n[n122-200-068:1427137] [ 0] /usr/lib/x86_64-linux-gnu/libc.so.6(+0x3c050)[0x7fe4b9455050]\n[n122-200-068:1427137] [ 1] /usr/lib/x86_64-linux-gnu/libcuda.so.1(+0x24a10a)[0x7fe491d2c10a]\n[n122-200-068:1427137] [ 2] /usr/lib/x86_64-linux-gnu/libcuda.so.1(+0x24a618)[0x7fe491d2c618]\n[n122-200-068:1427137] [ 3] /usr/lib/x86_64-linux-gnu/libcuda.so.1(+0x4bd1b9)[0x7fe491f9f1b9]\n[n122-200-068:1427137] [ 4] /usr/lib/x86_64-linux-gnu/libcuda.so.1(+0x141349)[0x7fe491c23349]\n[n122-200-068:1427137] [ 5] /usr/lib/x86_64-linux-gnu/libcuda.so.1(+0x2eae09)[0x7fe491dcce09]\n[n122-200-068:1427137] [ 6] /root/workspace/HybridCVDV-Simulator/baselines/atlas-main/build-H800/libquansim.so(+0xa2259)[0x7fe4cfa8d259]\n[n122-200-068:1427137] [ 7] /root/workspace/HybridCVDV-Simulator/baselines/atlas-main/build-H800/libquansim.so(+0x6e492)[0x7fe4cfa59492]\n[n122-200-068:1427137] [ 8] /root/workspace/HybridCVDV-Simulator/baselines/atlas-main/build-H800/libquansim.so(+0xcbe5c)[0x7fe4cfab6e5c]\n[n122-200-068:1427137] [ 9] /root/workspace/HybridCVDV-Simulator/baselines/atlas-main/build-H800/libquansim.so(_Z14initControlIdxiPP11CUstream_st+0x69d)[0x7fe4cfa4420d]\n[n122-200-068:1427137] [10] /root/workspace/HybridCVDV-Simulator/baselines/atlas-main/build-H800/libquansim.so(_ZN3sim18SimulatorCuQuantumIdE14InitStateMultiERKSt6vectorIjSaIjEE+0x3b2)[0x7fe4cfa4a8c2]\n[n122-200-068:1427137] [11] /root/workspace/HybridCVDV-Simulator/baselines/atlas-main/build-H800/libquansim.so(_ZN3sim8qcircuit7CircuitIdE8simulateEb+0x4c5)[0x7fe4cfa19475]\n[n122-200-068:1427137] [12] /root/workspace/HybridCVDV-Simulator/baselines/atlas-main/build-H800/examples/mpi-based/run_generated_qasm(main+0xa27)[0x5564208ece97]\n[n122-200-068:1427137] [13] /usr/lib/x86_64-linux-gnu/libc.so.6(+0x2724a)[0x7fe4b944024a]\n[n122-200-068:1427137] [14] /usr/lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0x85)[0x7fe4b9440305]\n[n122-200-068:1427137] [15] /root/workspace/HybridCVDV-Simulator/baselines/atlas-main/build-H800/examples/mpi-based/run_generated_qasm(_start+0x21)[0x5564208ee821]\n[n122-200-068:1427137] *** End of error message ***\n--------------------------------------------------------------------------\nPrimary job  terminated normally, but 1 process returned\na non-zero exit code. Per user-direction, the job has been aborted.\n--------------------------------------------------------------------------\n--------------------------------------------------------------------------\nmpirun noticed that process rank 0 with PID 0 on node n122-200-068 exited on signal 11 (Segmentation fault).\n--------------------------------------------------------------------------\n",
+    "timed_out": false,
+    "wall_time_ms": 4957.071385113522,
+    "attempts": [
+      {
+        "returncode": 139,
+        "timed_out": false,
+        "wall_time_ms": 4957.071385113522,
+        "output": "/root/workspace/HybridCVDV-Simulator/experiments/results/distributed_8xH800/phase-c-atlas/atlas/capacity/g1/sc26_jch_nq3_nm7_c16/r1/warmup-0.json"
+      }
+    ]
+  }
+}
