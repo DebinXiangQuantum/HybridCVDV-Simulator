@@ -223,11 +223,15 @@ bool qcircuit::Circuit<DT>::compile(quartz::CircuitSeq *seq,
   //     /*shared_memory_init_cost=*/10,
   //     /*shared_memory_gate_cost=*/[](quartz::GateType type) { if (type == quartz::GateType::swap) return 1000.0; else return 0.8; },
   //     /*shared_memory_total_qubits=*/10, /*shared_memory_cacheline_qubits=*/3);
+  const int shared_memory_cacheline_qubits =
+      std::min(3, std::max(0, static_cast<int>(n_local) - 1));
+  const int shared_memory_total_qubits =
+      std::min(10, static_cast<int>(n_local) + shared_memory_cacheline_qubits);
   quartz::KernelCost kernel_cost(
       /*fusion_kernel_costs=*/{0, 6.4, 6.2, 6.5, 6.4, 6.4, 25.8, 32.4},
       /*shared_memory_init_cost=*/6,
       /*shared_memory_gate_cost=*/[](quartz::GateType type) { if (type == quartz::GateType::swap) return 1000.0; else return 0.5; },
-      /*shared_memory_total_qubits=*/10, /*shared_memory_cacheline_qubits=*/3);
+      shared_memory_total_qubits, shared_memory_cacheline_qubits);
   // quartz::KernelCost kernel_cost(
   //     /*fusion_kernel_costs=*/{0, 20, 20, 20, 20, 20, 25.8, 32.4},
   //     /*shared_memory_init_cost=*/3,
@@ -488,6 +492,7 @@ void qcircuit::Circuit<DT>::simulate(bool use_mpi) {
 
   // 在 Destroy 释放显存之前采样峰值
   if (auto* pm = sim::GlobalPerfMonitor::get()) pm->update_memory_peak();
+  last_state_checksum = simulator.StateChecksum();
 
   simulator.Destroy(false);
   auto end= std::chrono::system_clock::now();

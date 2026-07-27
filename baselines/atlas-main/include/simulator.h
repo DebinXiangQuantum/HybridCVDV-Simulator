@@ -74,6 +74,7 @@ public:
                         qindex logicQubitset);
   bool ApplyShuffle(Gate<DT> &gate);
   bool ApplyRecordedShuffle(unsigned global_swap, const std::vector<int2> &local_swap);
+  double StateChecksum();
   bool Destroy(bool dump_results);
 
 private:

@@ -19,11 +19,16 @@ struct PerformanceMetrics {
   double d2h_transfer_time = 0.0;  // Device to Host
   double d2d_transfer_time = 0.0;  // Device to Device (NCCL)
   double compute_time = 0.0;       // 纯GPU计算时间
+  size_t h2d_bytes = 0;
+  size_t d2h_bytes = 0;
+  size_t d2d_bytes = 0;
+  size_t transfer_count = 0;
 
   // 内存指标 (字节)
   size_t cpu_memory_peak = 0;      // CPU内存峰值
   size_t gpu_memory_peak = 0;      // GPU显存峰值
   size_t gpu_memory_allocated = 0; // GPU显存分配总量
+  std::vector<size_t> gpu_memory_peak_per_device;
 
   // GPU 运行指标
   double gpu_power_peak_w = 0.0;        // GPU 功耗峰值 (瓦)
@@ -64,6 +69,22 @@ public:
   // 获取完整指标
   PerformanceMetrics get_metrics() const { return metrics_; }
   void set_metrics(const PerformanceMetrics& metrics) { metrics_ = metrics; }
+  void add_compute_time_ms(double elapsed_ms) { metrics_.compute_time += elapsed_ms / 1000.0; }
+  void add_h2d_time_ms(double elapsed_ms, size_t bytes) {
+    metrics_.h2d_transfer_time += elapsed_ms / 1000.0;
+    metrics_.h2d_bytes += bytes;
+    ++metrics_.transfer_count;
+  }
+  void add_d2h_time_ms(double elapsed_ms, size_t bytes) {
+    metrics_.d2h_transfer_time += elapsed_ms / 1000.0;
+    metrics_.d2h_bytes += bytes;
+    ++metrics_.transfer_count;
+  }
+  void add_d2d_time_ms(double elapsed_ms, size_t bytes) {
+    metrics_.d2d_transfer_time += elapsed_ms / 1000.0;
+    metrics_.d2d_bytes += bytes;
+    ++metrics_.transfer_count;
+  }
 
   // 打印报告
   void print_report(const std::string& circuit_name) const;

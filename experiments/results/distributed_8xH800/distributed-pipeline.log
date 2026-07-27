@@ -460,3 +460,22 @@ VALIDATE run=phase-d-hybridcvdv status=complete artifacts=120 statuses={'ok': 12
 2026-07-27T09:08:38+08:00 SKIP completed phase-d-atlas
 VALIDATE run=phase-d-atlas status=complete artifacts=120 statuses={'ok': 120}
 2026-07-27T09:08:38+08:00 START phase-d-bqsim
+Wrote distributed run to /root/workspace/HybridCVDV-Simulator/experiments/results/distributed_8xH800/phase-d-bqsim
+2026-07-27T09:13:38+08:00 DONE phase-d-bqsim
+VALIDATE run=phase-d-bqsim status=complete artifacts=120 statuses={'ok': 120}
+2026-07-27T09:13:39+08:00 START phase-e-feasibility-hybridcvdv
+2026-07-27T09:32:03+08:00 PIPELINE start
+VALIDATE run=phase-b-hybrid-fixed status=complete artifacts=120 statuses={'ok': 120}
+2026-07-27T09:32:03+08:00 SKIP completed phase-b-atlas
+VALIDATE run=phase-b-atlas status=complete artifacts=360 statuses={'ok': 279, 'oom_single_gpu_pool': 9, 'unsupported_gpu_count': 72}
+2026-07-27T09:32:03+08:00 SKIP completed phase-c-hybrid
+VALIDATE run=phase-c-hybrid status=complete artifacts=360 statuses={'crash_host': 240, 'ok': 90, 'oom_single_gpu_pool': 30}
+2026-07-27T09:32:03+08:00 SKIP completed phase-c-atlas
+VALIDATE run=phase-c-atlas status=complete artifacts=360 statuses={'oom_single_gpu_pool': 10, 'ok': 266, 'unsupported_gpu_count': 72, 'crash_host': 12}
+2026-07-27T09:32:03+08:00 SKIP completed phase-d-hybridcvdv
+VALIDATE run=phase-d-hybridcvdv status=complete artifacts=120 statuses={'ok': 120}
+2026-07-27T09:32:03+08:00 SKIP completed phase-d-atlas
+VALIDATE run=phase-d-atlas status=complete artifacts=120 statuses={'ok': 120}
+2026-07-27T09:32:03+08:00 SKIP completed phase-d-bqsim
+VALIDATE run=phase-d-bqsim status=complete artifacts=120 statuses={'ok': 120}
+2026-07-27T09:32:03+08:00 START phase-e-feasibility-hybridcvdv

@@ -3,6 +3,7 @@
 #include "reference_gates.h"
 #include "symplectic_math.h"
 #include "gpu_context.h"
+#include "state_checksum.h"
 
 #include <cuda_runtime.h>
 #include <cuComplex.h>
@@ -61,6 +62,11 @@ struct CircuitRunResult {
     QuantumCircuit::CircuitStats circuit_stats{};
     size_t memory_bytes = 0;
     Reference::Vector final_state;
+    double aggregate_output_norm = 0.0;
+    double aggregate_output_checksum = 0.0;
+    double correctness_reduction_ms = 0.0;
+    std::vector<CVStatePool::DeviceMemoryStats> device_memory;
+    CVStatePool::TransferCounters transfer_counters;
 };
 
 struct GaussianVacuumDiagnostics {
@@ -132,6 +138,10 @@ struct BenchmarkSummary {
     double median_total_ms = 0.0;
     double median_transfer_ms = 0.0;
     double median_compute_ms = 0.0;
+    double median_planning_ms = 0.0;
+    double median_host_orchestration_ms = 0.0;
+    double median_host_fraction = 0.0;
+    double median_correctness_reduction_ms = 0.0;
     double min_total_ms = 0.0;
     double max_total_ms = 0.0;
     double p25_total_ms = 0.0;
@@ -146,7 +156,37 @@ struct BenchmarkSummary {
     double median_symbolic_materializations = 0.0;
     int warmup_runs = 0;
     int measured_runs = 0;
+    double output_norm = 0.0;
+    double output_checksum = 0.0;
+    std::vector<CVStatePool::DeviceMemoryStats> device_memory;
+    CVStatePool::TransferCounters transfer_counters;
 };
+
+void append_distributed_metrics(ExperimentResult& result, const BenchmarkSummary& summary) {
+    result.metrics["output_norm"] = summary.output_norm;
+    result.metrics["output_checksum"] = summary.output_checksum;
+    result.metrics["circuit_throughput_per_sec"] =
+        summary.median_total_ms > 0.0 ? 1000.0 / summary.median_total_ms : 0.0;
+    result.metrics["p2p_bytes"] = static_cast<double>(summary.transfer_counters.p2p_bytes);
+    result.metrics["p2p_time_ms"] = summary.transfer_counters.p2p_time_ms;
+    result.metrics["p2p_transfer_count"] =
+        static_cast<double>(summary.transfer_counters.p2p_count);
+    result.metrics["host_staged_bytes"] =
+        static_cast<double>(summary.transfer_counters.host_staged_bytes);
+    result.metrics["host_staged_time_ms"] = summary.transfer_counters.host_staged_time_ms;
+    result.metrics["host_staged_transfer_count"] =
+        static_cast<double>(summary.transfer_counters.host_staged_count);
+    result.metrics["state_migrations"] =
+        static_cast<double>(summary.transfer_counters.state_migrations);
+    for (const auto& device : summary.device_memory) {
+        const std::string suffix = "_gpu_" + std::to_string(device.device_id);
+        result.metrics["states" + suffix] = static_cast<double>(device.active_state_count);
+        result.metrics["active_bytes" + suffix] = static_cast<double>(device.active_bytes);
+        result.metrics["reserved_bytes" + suffix] = static_cast<double>(device.reserved_bytes);
+        result.metrics["scratch_bytes" + suffix] = static_cast<double>(device.scratch_bytes);
+        result.metrics["metadata_bytes" + suffix] = static_cast<double>(device.metadata_bytes);
+    }
+}
 
 struct CliOptions {
     std::string suite = "all";
@@ -1121,8 +1161,19 @@ CircuitRunResult run_circuit_once(int num_qubits,
         result.ok = true;
         result.time_stats = circuit.get_time_stats();
         result.circuit_stats = circuit.get_stats();
-        result.memory_bytes = circuit.get_state_pool().get_memory_usage();
+        CVStatePool& state_pool = circuit.get_state_pool();
+        result.memory_bytes = state_pool.get_memory_usage();
         result.final_state = extract_terminal_state(circuit);
+        const auto correctness_start = Clock::now();
+        const StateChecksumResult checksum = reduce_state_pool_checksum(state_pool);
+        const auto correctness_end = Clock::now();
+        result.aggregate_output_norm = checksum.norm;
+        result.aggregate_output_checksum = checksum.checksum;
+        result.correctness_reduction_ms =
+            std::chrono::duration<double, std::milli>(
+                correctness_end - correctness_start).count();
+        result.device_memory = state_pool.get_device_memory_stats();
+        result.transfer_counters = state_pool.get_transfer_counters();
     } catch (const std::exception& e) {
         result.error = e.what();
     }
@@ -1154,6 +1205,10 @@ BenchmarkSummary benchmark_circuit_case(int num_qubits,
     std::vector<double> total_times;
     std::vector<double> transfer_times;
     std::vector<double> compute_times;
+    std::vector<double> planning_times;
+    std::vector<double> host_orchestration_times;
+    std::vector<double> host_fractions;
+    std::vector<double> correctness_reduction_times;
     std::vector<double> memory_bytes;
     std::vector<double> active_states;
     std::vector<double> hdd_nodes;
@@ -1173,6 +1228,18 @@ BenchmarkSummary benchmark_circuit_case(int num_qubits,
         total_times.push_back(run.time_stats.total_time);
         transfer_times.push_back(run.time_stats.transfer_time);
         compute_times.push_back(run.time_stats.computation_time);
+        planning_times.push_back(run.time_stats.planning_time);
+        const double accounted_time =
+            run.time_stats.transfer_time + run.time_stats.computation_time +
+            run.time_stats.planning_time;
+        const double host_orchestration_time =
+            std::max(0.0, run.time_stats.total_time - accounted_time);
+        host_orchestration_times.push_back(host_orchestration_time);
+        host_fractions.push_back(
+            run.time_stats.total_time > 0.0
+                ? host_orchestration_time / run.time_stats.total_time
+                : 0.0);
+        correctness_reduction_times.push_back(run.correctness_reduction_ms);
         memory_bytes.push_back(static_cast<double>(run.memory_bytes));
         active_states.push_back(static_cast<double>(run.circuit_stats.active_states));
         hdd_nodes.push_back(static_cast<double>(run.circuit_stats.hdd_nodes));
@@ -1185,12 +1252,22 @@ BenchmarkSummary benchmark_circuit_case(int num_qubits,
         exact_blocks.push_back(static_cast<double>(run.circuit_stats.exact_blocks));
         symbolic_materializations.push_back(
             static_cast<double>(run.circuit_stats.symbolic_materializations));
+        summary.device_memory = run.device_memory;
+        summary.transfer_counters = run.transfer_counters;
+        summary.output_norm = run.aggregate_output_norm;
+        summary.output_checksum = run.aggregate_output_checksum;
     }
 
     summary.ok = true;
     summary.median_total_ms = percentile(total_times, 0.5);
     summary.median_transfer_ms = percentile(transfer_times, 0.5);
     summary.median_compute_ms = percentile(compute_times, 0.5);
+    summary.median_planning_ms = percentile(planning_times, 0.5);
+    summary.median_host_orchestration_ms =
+        percentile(host_orchestration_times, 0.5);
+    summary.median_host_fraction = percentile(host_fractions, 0.5);
+    summary.median_correctness_reduction_ms =
+        percentile(correctness_reduction_times, 0.5);
     summary.min_total_ms = *std::min_element(total_times.begin(), total_times.end());
     summary.max_total_ms = *std::max_element(total_times.begin(), total_times.end());
     summary.p25_total_ms = percentile(total_times, 0.25);
@@ -1817,6 +1894,12 @@ ExperimentResult run_microbenchmark_case(const std::string& name,
     result.metrics["median_total_ms"] = summary.median_total_ms;
     result.metrics["median_transfer_ms"] = summary.median_transfer_ms;
     result.metrics["median_compute_ms"] = summary.median_compute_ms;
+    result.metrics["median_planning_ms"] = summary.median_planning_ms;
+    result.metrics["median_host_orchestration_ms"] =
+        summary.median_host_orchestration_ms;
+    result.metrics["median_host_fraction"] = summary.median_host_fraction;
+    result.metrics["median_correctness_reduction_ms"] =
+        summary.median_correctness_reduction_ms;
     result.metrics["min_total_ms"] = summary.min_total_ms;
     result.metrics["max_total_ms"] = summary.max_total_ms;
     result.metrics["p25_total_ms"] = summary.p25_total_ms;
@@ -1826,6 +1909,7 @@ ExperimentResult run_microbenchmark_case(const std::string& name,
     result.metrics["median_hdd_nodes"] = summary.median_hdd_nodes;
     result.metrics["throughput_ops_per_sec"] =
         summary.median_total_ms > 0.0 ? 1000.0 / summary.median_total_ms : 0.0;
+    append_distributed_metrics(result, summary);
     return result;
 }
 
@@ -2043,6 +2127,12 @@ ExperimentResult run_scaling_case(const std::string& name,
     result.metrics["median_total_ms"] = summary.median_total_ms;
     result.metrics["median_transfer_ms"] = summary.median_transfer_ms;
     result.metrics["median_compute_ms"] = summary.median_compute_ms;
+    result.metrics["median_planning_ms"] = summary.median_planning_ms;
+    result.metrics["median_host_orchestration_ms"] =
+        summary.median_host_orchestration_ms;
+    result.metrics["median_host_fraction"] = summary.median_host_fraction;
+    result.metrics["median_correctness_reduction_ms"] =
+        summary.median_correctness_reduction_ms;
     result.metrics["throughput_ops_per_sec"] =
         summary.median_total_ms > 0.0 ? 1000.0 / summary.median_total_ms : 0.0;
     result.metrics["median_memory_bytes"] = summary.median_memory_bytes;
@@ -2056,6 +2146,7 @@ ExperimentResult run_scaling_case(const std::string& name,
     result.metrics["median_exact_blocks"] = summary.median_exact_blocks;
     result.metrics["median_symbolic_materializations"] =
         summary.median_symbolic_materializations;
+    append_distributed_metrics(result, summary);
     return result;
 }
 

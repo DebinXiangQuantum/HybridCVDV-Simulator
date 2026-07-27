@@ -139,6 +139,7 @@ if(CUDA_FOUND)
         src/gpu/gpu_context.cu
         src/gpu/stream_pool.cu
         src/gpu/peer_transfer.cu
+        src/gpu/state_checksum.cu
     )
 else()
     set(GPU_SOURCES
@@ -342,7 +343,6 @@ if(HYBRIDCVDV_BUILD_TESTS)
         tests/test_gaussian_symplectic.cpp
         tests/test_gaussian_mixture.cpp
         tests/test_sf_precision.cpp
-        tests/support/gaussian_circuit.cpp
     )
 
     add_executable(${PROJECT_NAME}_tests ${TEST_SOURCES})

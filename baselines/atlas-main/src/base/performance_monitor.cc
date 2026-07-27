@@ -13,6 +13,7 @@ PerformanceMonitor::PerformanceMonitor(int num_devices)
   gpu_events_.resize(num_devices_);
   gpu_memory_baseline_.resize(num_devices_, 0);
   gpu_memory_peak_.resize(num_devices_, 0);
+  metrics_.gpu_memory_peak_per_device.resize(num_devices_, 0);
 
   // 记录初始GPU内存状态
   for (int i = 0; i < num_devices_; i++) {
@@ -174,6 +175,7 @@ void PerformanceMonitor::update_memory_peak() {
     if (gpu_mem > gpu_memory_peak_[i]) {
       gpu_memory_peak_[i] = gpu_mem;
     }
+    metrics_.gpu_memory_peak_per_device[i] = gpu_memory_peak_[i];
     total_gpu_mem += gpu_mem;
   }
 

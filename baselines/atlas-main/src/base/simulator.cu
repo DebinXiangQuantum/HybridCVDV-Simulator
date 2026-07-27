@@ -1,24 +1,26 @@
 #include <assert.h>
 #include <fstream>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <unistd.h>
 #include <vector>
 
 #include "kernel.h"
+#include "performance_monitor_global.h"
 #include "simulator.h"
 
-__global__ void initData(int* ptr, int data) {
+__global__ void initData(int* ptr, int data, int count) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
-  ptr[i] = data;
+  if (i < count) ptr[i] = data;
   // printf("%d\n", ptr[i]);
 }
 
-__global__ void checkData(int* ptr, int size) {
+__global__ void checkData(int* ptr, int count, int source_chunk_size) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i==0)
     printf("hello checking all2all\n");
-  assert(ptr[i] == (int) i / size);
+  if (i < count) assert(ptr[i] == (int) i / source_chunk_size);
 }
 
 __global__ void checkState(qComplex* ptr, qComplex* ptr2) {
@@ -74,6 +76,10 @@ bool SimulatorCuQuantum<DT>::ApplyGate(Gate<DT> &gate, int device_id) {
   }
 
   // apply gate
+  auto* perf_monitor = GlobalPerfMonitor::get();
+  if (perf_monitor) {
+    perf_monitor->record_event_start(device_id, "apply_gate");
+  }
   HANDLE_ERROR(custatevecApplyMatrix(
       /* custatevecHandle_t */ handle_[device_id],
       /* void* */ d_sv[device_id],
@@ -91,6 +97,11 @@ bool SimulatorCuQuantum<DT>::ApplyGate(Gate<DT> &gate, int device_id) {
       /* custatevecComputeType_t */ compute_type,
       /* void* */ extraWorkspace,
       /* size_t */ extraWorkspaceSizeInBytes));
+  if (perf_monitor) {
+    perf_monitor->record_event_end(device_id, "apply_gate");
+    perf_monitor->add_compute_time_ms(
+        perf_monitor->get_event_elapsed_time(device_id, "apply_gate"));
+  }
 
   if (extraWorkspaceSizeInBytes)
     HANDLE_CUDA_ERROR(cudaFree(extraWorkspace));
@@ -291,7 +302,7 @@ bool SimulatorCuQuantum<DT>::ApplyShuffle(Gate<DT> &gate) {
     }
     printf("]\n");
   } else { // else transpose + all2all + update curr perm
-    if (nRanks > 1) {
+    if (nRanks * n_devices > 1) {
       printf("Using NCCL for cross-node shuffle\n");
     } else {
       printf("Skipping NCCL for cross-node shuffle (single node)\n");
@@ -339,7 +350,7 @@ bool SimulatorCuQuantum<DT>::ApplyShuffle(Gate<DT> &gate) {
     }
 
     // 只有当 sendsize > 0 时才执行 NCCL 通信
-    if (sendsize > 0 && nRanks > 1) {
+    if (sendsize > 0 && nRanks * n_devices > 1) {
       NCCLCHECK(ncclGroupStart());
       for (int i = 0; i < n_devices; ++i) {
         printf("My physical id:%d, %d\n", myRank * n_devices + i, global_mask);
@@ -412,7 +423,7 @@ bool SimulatorCuQuantum<DT>::ApplyRecordedShuffle(unsigned global_swap, const st
 
   printf("Using NCCL for cross-node shuffle\n");
   
-  if (nRanks == 1) {
+  if (nRanks * n_devices == 1) {
     printf("Note: Running in single-node mode, NCCL operations will be skipped\n");
   }
   
@@ -449,7 +460,7 @@ bool SimulatorCuQuantum<DT>::ApplyRecordedShuffle(unsigned global_swap, const st
   }
 
   // 只有当 sendsize > 0 时才执行 NCCL 通信
-  if (sendsize > 0 && nRanks > 1) {
+  if (sendsize > 0 && nRanks * n_devices > 1) {
     NCCLCHECK(ncclGroupStart());
     for (int i = 0; i < n_devices; ++i) {
       printf("My physical id:%d, %d\n", myRank * n_devices + i, global_swap);
@@ -578,6 +589,11 @@ bool SimulatorCuQuantum<DT>::InitStateSingle(
 template <typename DT>
 bool SimulatorCuQuantum<DT>::InitStateMulti(
     std::vector<unsigned> const &init_perm) {
+  const unsigned total_devices = static_cast<unsigned>(nRanks * n_devices);
+  if (total_devices == 0 || (total_devices & (total_devices - 1)) != 0) {
+    throw std::runtime_error(
+        "unsupported_gpu_count: ATLAS distributed state vector requires a power-of-two GPU count");
+  }
 
   // MPICHECK(MPI_Comm_rank(MPI_COMM_WORLD, &myRank));
   // MPICHECK(MPI_Comm_size(MPI_COMM_WORLD, &nRanks));
@@ -667,8 +683,8 @@ bool SimulatorCuQuantum<DT>::InitStateMulti(
     HANDLE_CUDA_ERROR(cudaMalloc(&threadBias[i], sizeof(qindex) << THREAD_DEP));
   }
 
-  // init NCCL (only if n_devices > 0 and nRanks > 1)
-  if (n_devices > 0 && nRanks > 1) {
+  // A single MPI rank can still own multiple NCCL ranks on one node.
+  if (n_devices > 0 && nRanks * n_devices > 1) {
     if (myRank == 0)
       ncclGetUniqueId(&id);
     MPICHECK(MPI_Bcast((void *)&id, sizeof(id), MPI_BYTE, 0, MPI_COMM_WORLD));
@@ -724,7 +740,12 @@ bool SimulatorCuQuantum<DT>::InitStateMulti(
       printf("[InitStateMulti] Error setting device %d: %s\n", devices[i], cudaGetErrorString(error));
       continue;
     }
-    initData<<<4*subSvSize/1024, 1024, 0, s[i]>>>((int*)d_sv[i], myRank * n_devices + i);
+    constexpr int warmup_threads = 256;
+    const int warmup_elements = 4 * subSvSize;
+    const int warmup_blocks =
+        std::max(1, (warmup_elements + warmup_threads - 1) / warmup_threads);
+    initData<<<warmup_blocks, warmup_threads, 0, s[i]>>>(
+        (int*)d_sv[i], myRank * n_devices + i, warmup_elements);
     error = cudaGetLastError();
     if (error != cudaSuccess) {
       printf("[InitStateMulti] Error launching initData kernel on device %d: %s\n", devices[i], cudaGetErrorString(error));
@@ -753,7 +774,7 @@ bool SimulatorCuQuantum<DT>::InitStateMulti(
     }
   }
   // 只有当 sendsize > 0 时才执行 NCCL 通信
-  if (sendsize > 0 && nRanks > 1) {
+  if (sendsize > 0 && nRanks * n_devices > 1) {
     NCCLCHECK(ncclGroupStart());
     for (int i = 0; i < n_devices; ++i) {
       if (d_sv[i] == nullptr || recv_buf[i] == nullptr || s[i] == nullptr) {
@@ -773,11 +794,12 @@ bool SimulatorCuQuantum<DT>::InitStateMulti(
     if (sendsize == 0) {
       printf("[InitStateMulti] Skipping NCCL warmup because sendsize = 0\n");
     } else {
-      printf("[InitStateMulti] Skipping NCCL warmup because nRanks = 1 (single node)\n");
+      printf("[InitStateMulti] Skipping NCCL warmup because only one GPU is active\n");
     }
   }
   printf("[InitStateMulti] ncclGroupEnd returned\n");
   for (int i = 0; i < n_devices; i++) {
+    HANDLE_CUDA_ERROR(cudaSetDevice(devices[i]));
     if (s[i] == nullptr) {
       printf("[InitStateMulti] Skipping device %d because s is nullptr\n", i);
       continue;
@@ -787,12 +809,20 @@ bool SimulatorCuQuantum<DT>::InitStateMulti(
       printf("[InitStateMulti] Error synchronizing stream for device %d: %s\n", i, cudaGetErrorString(error));
       continue;
     }
-    checkData<<<4*subSvSize/1024, 1024, 0, s[i]>>>((int*)recv_buf[i], 4*subSvSize/(nRanks*n_devices));
+    constexpr int warmup_threads = 256;
+    const int check_elements = 4 * subSvSize;
+    const int source_chunk_elements = 4 * sendsize;
+    if (source_chunk_elements == 0) continue;
+    const int warmup_blocks =
+        std::max(1, (check_elements + warmup_threads - 1) / warmup_threads);
+    checkData<<<warmup_blocks, warmup_threads, 0, s[i]>>>(
+        (int*)recv_buf[i], check_elements, source_chunk_elements);
     error = cudaGetLastError();
     if (error != cudaSuccess) {
       printf("[InitStateMulti] Error launching checkData kernel on device %d: %s\n", i, cudaGetErrorString(error));
       continue;
     }
+    HANDLE_CUDA_ERROR(cudaStreamSynchronize(s[i]));
   }
   cudaError_t error_after_checkData = cudaDeviceSynchronize();
   if (error_after_checkData != cudaSuccess) {
@@ -800,6 +830,7 @@ bool SimulatorCuQuantum<DT>::InitStateMulti(
   }
   printf("[InitStateMulti] After checkData\n");
   for (int i = 0; i < n_devices; i++) {
+    HANDLE_CUDA_ERROR(cudaSetDevice(devices[i]));
     if (recv_buf[i] == nullptr) {
       printf("[InitStateMulti] Skipping device %d because recv_buf is nullptr\n", i);
       continue;
@@ -884,6 +915,33 @@ bool SimulatorCuQuantum<DT>::InitStateMulti(
   return true;
 }
 
+template <typename DT> double SimulatorCuQuantum<DT>::StateChecksum() {
+  double local_checksum = 0.0;
+  const int total_devices = nRanks * n_devices;
+  for (int i = 0; i < n_devices; ++i) {
+    const int global_device = myRank * n_devices + i;
+    HANDLE_CUDA_ERROR(cudaSetDevice(devices[i]));
+    if (global_device == 0) {
+      qComplex sample = {};
+      HANDLE_CUDA_ERROR(cudaMemcpy(
+          &sample, d_sv[i], sizeof(qComplex), cudaMemcpyDeviceToHost));
+      local_checksum += sample.x + 3.0 * sample.y;
+    }
+    if (global_device == total_devices - 1) {
+      qComplex sample = {};
+      HANDLE_CUDA_ERROR(cudaMemcpy(
+          &sample,
+          static_cast<qComplex*>(d_sv[i]) + (subSvSize - 1),
+          sizeof(qComplex),
+          cudaMemcpyDeviceToHost));
+      local_checksum += 5.0 * sample.x + 7.0 * sample.y;
+    }
+  }
+  double checksum = 0.0;
+  MPI_Allreduce(&local_checksum, &checksum, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+  return checksum;
+}
+
 template <typename DT> bool SimulatorCuQuantum<DT>::Destroy(bool dump_results) {
 
   // profiling
@@ -925,8 +983,7 @@ template <typename DT> bool SimulatorCuQuantum<DT>::Destroy(bool dump_results) {
     HANDLE_CUDA_ERROR(cudaSetDevice(devices[i]));
     HANDLE_ERROR(custatevecDestroy(handle_[i]));
     HANDLE_CUDA_ERROR(cudaFree(d_sv[i]));
-    // 只在多节点环境中销毁 NCCL 通信
-    if (nRanks > 1 && comms[i] != nullptr) {
+    if (nRanks * n_devices > 1 && comms[i] != nullptr) {
       ncclResult_t nccl_error = ncclCommDestroy(comms[i]);
       if (nccl_error != ncclSuccess) {
         printf("[MPI Rank %d]: Warning: ncclCommDestroy failed: %s\n", myRank, ncclGetErrorString(nccl_error));
@@ -951,12 +1008,15 @@ ncclResult_t SimulatorCuQuantum<DT>::all2all(
     void *sendbuff, size_t sendcount, ncclDataType_t senddatatype,
     void *recvbuff, size_t recvcount, ncclDataType_t recvdatatype,
     ncclComm_t comm, cudaStream_t stream, unsigned mask, unsigned myncclrank) {
-  // 在单节点环境中，跳过 NCCL 通信
-  if (nRanks == 1) {
-    printf("[all2all] Skipping NCCL communication in single-node mode\n");
+  if (nRanks * n_devices == 1) {
+    printf("[all2all] Skipping NCCL communication with one GPU\n");
     return ncclSuccess;
   }
-  
+  const int local_device = static_cast<int>(myncclrank % n_devices);
+  auto* perf_monitor = GlobalPerfMonitor::get();
+  if (perf_monitor) {
+    perf_monitor->record_event_start(local_device, "all2all");
+  }
   ncclGroupStart();
   int ncclnRanks;
   ncclCommCount(comm, &ncclnRanks);
@@ -1002,6 +1062,13 @@ ncclResult_t SimulatorCuQuantum<DT>::all2all(
       return a;
   }
   ncclGroupEnd();
+  if (perf_monitor) {
+    perf_monitor->record_event_end(local_device, "all2all");
+    const size_t total_bytes =
+        (subSvSize / sendcount) * sendcount * 2 * ncclTypeSize(senddatatype);
+    perf_monitor->add_d2d_time_ms(
+        perf_monitor->get_event_elapsed_time(local_device, "all2all"), total_bytes);
+  }
   return ncclSuccess;
 }
 
@@ -1009,9 +1076,8 @@ template <typename DT>
 ncclResult_t SimulatorCuQuantum<DT>::NCCLSendrecv(
     void *sendbuff, size_t sendcount, ncclDataType_t datatype, int peer,
     void *recvbuff, size_t recvcount, ncclComm_t comm, cudaStream_t stream) {
-  // 在单节点环境中，跳过 NCCL 通信
-  if (nRanks == 1) {
-    printf("[NCCLSendrecv] Skipping NCCL communication in single-node mode\n");
+  if (nRanks * n_devices == 1) {
+    printf("[NCCLSendrecv] Skipping NCCL communication with one GPU\n");
     return ncclSuccess;
   }
   

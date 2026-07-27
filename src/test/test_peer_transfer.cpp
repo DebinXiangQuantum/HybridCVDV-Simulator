@@ -231,6 +231,11 @@ TEST_F(PeerTransferTest, CumulativeStats) {
 
     stats = xfer.cumulative_stats();
     EXPECT_EQ(stats.bytes_transferred, N * sizeof(cuDoubleComplex));
+    EXPECT_GE(stats.elapsed_ms, 0.0);
+
+    const auto aggregate = xfer.aggregate_stats();
+    EXPECT_EQ(aggregate.p2p_bytes, 0u);
+    EXPECT_EQ(aggregate.host_staged_bytes, 0u);
 
     cudaFree(d_src);
     cudaFree(d_dst);

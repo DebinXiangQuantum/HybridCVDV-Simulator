@@ -147,6 +147,33 @@ TEST_F(MultiGPUStateTest, SinglePoolDistributesLargeReservationsAcrossDevices) {
     pool.free_state(sid1);
 }
 
+TEST_F(MultiGPUStateTest, ReportsPerDeviceMemoryAndStatePlacement) {
+    CVStatePool pool(8, 16, 1, 0);
+    const int device_count = pool.get_device_count();
+    ASSERT_GT(device_count, 0);
+
+    std::vector<int> state_ids;
+    for (int device = 0; device < device_count; ++device) {
+        const int state_id = pool.allocate_state(device);
+        ASSERT_GE(state_id, 0);
+        pool.reserve_state_storage(state_id, 8);
+        state_ids.push_back(state_id);
+    }
+
+    const auto stats = pool.get_device_memory_stats();
+    ASSERT_EQ(stats.size(), static_cast<size_t>(device_count));
+    for (const auto& device : stats) {
+        EXPECT_EQ(device.active_state_count, 1u);
+        EXPECT_EQ(device.active_bytes, 8u * sizeof(cuDoubleComplex));
+        EXPECT_GE(device.reserved_bytes, device.active_bytes);
+        EXPECT_GT(device.metadata_bytes, 0u);
+    }
+
+    for (int state_id : state_ids) {
+        pool.free_state(state_id);
+    }
+}
+
 // ─── Upload/Download ─────────────────────────────────────────────────────────
 
 TEST_F(MultiGPUStateTest, UploadDownloadRoundTrip) {

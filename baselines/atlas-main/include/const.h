@@ -30,7 +30,7 @@ typedef cuDoubleComplex qComplex;
 #define THREAD_DEP 7
 #define MAX_KERNEL_SIZE 6
 #define MAX_BATCHED_TASKS 80
-#define MAX_DEVICES 4
+#define MAX_DEVICES 8
 #define MAX_QUBIT 40
 
 enum class KernelGateType {

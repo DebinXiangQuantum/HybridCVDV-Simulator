@@ -1,0 +1,21 @@
+OPENQASM 2.0;
+include "qelib1.inc";
+// canonical encoded-QASM surrogate for sc26_qft_nq3_c4
+qreg q[5];
+h q[0];
+rz(1.4870604316234983) q[1];
+cx q[0],q[1];
+h q[1];
+rz(2.5681336062855697) q[2];
+cx q[1],q[2];
+h q[2];
+rz(-1.6653553903510938) q[3];
+cx q[2],q[3];
+h q[3];
+rz(-0.32111343547597038) q[4];
+cx q[3],q[4];
+h q[4];
+cx q[0],q[1];
+cx q[1],q[2];
+cx q[2],q[3];
+cx q[3],q[4];

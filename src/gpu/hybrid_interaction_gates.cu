@@ -237,8 +237,12 @@ void apply_jaynes_cummings_on_mode(CVStatePool* state_pool,
         const int id0 = qubit0_states[pair_idx];
         const int id1 = qubit1_states[pair_idx];
         const int dev0 = state_pool->get_state_device_id(id0);
-        const int dev1 = state_pool->get_state_device_id(id1);
-        if (dev0 < 0 || dev1 < 0 || dev0 != dev1) {
+        int dev1 = state_pool->get_state_device_id(id1);
+        if (dev0 >= 0 && dev1 >= 0 && dev0 != dev1) {
+            state_pool->migrate_state_to_device(id1, dev0);
+            dev1 = dev0;
+        }
+        if (dev0 < 0 || dev1 < 0) {
             throw std::runtime_error(
                 "JaynesCummings requires each low/high pair to be co-located on one GPU");
         }
@@ -547,8 +551,12 @@ void apply_anti_jaynes_cummings_on_mode(CVStatePool* state_pool,
         const int id0 = qubit0_states[pair_idx];
         const int id1 = qubit1_states[pair_idx];
         const int dev0 = state_pool->get_state_device_id(id0);
-        const int dev1 = state_pool->get_state_device_id(id1);
-        if (dev0 < 0 || dev1 < 0 || dev0 != dev1) {
+        int dev1 = state_pool->get_state_device_id(id1);
+        if (dev0 >= 0 && dev1 >= 0 && dev0 != dev1) {
+            state_pool->migrate_state_to_device(id1, dev0);
+            dev1 = dev0;
+        }
+        if (dev0 < 0 || dev1 < 0) {
             throw std::runtime_error(
                 "AntiJaynesCummings requires each low/high pair to be co-located on one GPU");
         }

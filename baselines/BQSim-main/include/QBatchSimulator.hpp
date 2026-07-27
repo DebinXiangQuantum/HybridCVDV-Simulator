@@ -627,6 +627,8 @@ public:
 
         // 重置统计
         transfer_time_ = 0.0;
+        h2d_time_ = 0.0;
+        d2h_time_ = 0.0;
         computation_time_ = 0.0;
         peak_memory_usage_ = 0;
         
@@ -635,17 +637,28 @@ public:
         
         auto begin_sim = std::chrono::high_resolution_clock::now();
         
-        // 统计H2D传输时间
-        auto h2d_start = std::chrono::high_resolution_clock::now();
-        
-        // 上传门数据到GPU的时间（这里简化处理）
-        // 实际项目中，这里应该统计实际的H2D传输时间
-        
-        auto h2d_end = std::chrono::high_resolution_clock::now();
-        double h2d_time = std::chrono::duration<double, std::milli>(h2d_end - h2d_start).count();
-        
-        // 统计计算时间（内核执行时间）
-        auto compute_start = std::chrono::high_resolution_clock::now();
+        cudaEvent_t pipeline_start, pipeline_end, transfer_start, transfer_end;
+        checkCudaErrors(cudaEventCreate(&pipeline_start));
+        checkCudaErrors(cudaEventCreate(&pipeline_end));
+        checkCudaErrors(cudaEventCreate(&transfer_start));
+        checkCudaErrors(cudaEventCreate(&transfer_end));
+        const size_t batch_bytes =
+          static_cast<size_t>(nDim) * batch_size * sizeof(cuDoubleComplex);
+        checkCudaErrors(cudaEventRecord(transfer_start));
+        checkCudaErrors(cudaMemcpy(
+          d_batch[0], h_batch[0], batch_bytes, cudaMemcpyHostToDevice));
+        checkCudaErrors(cudaEventRecord(transfer_end));
+        checkCudaErrors(cudaEventSynchronize(transfer_end));
+        float elapsed_ms = 0.0f;
+        checkCudaErrors(cudaEventElapsedTime(&elapsed_ms, transfer_start, transfer_end));
+        h2d_time_ = elapsed_ms * num_batch;
+        checkCudaErrors(cudaEventRecord(transfer_start));
+        checkCudaErrors(cudaMemcpy(
+          h_batch[1], d_batch[0], batch_bytes, cudaMemcpyDeviceToHost));
+        checkCudaErrors(cudaEventRecord(transfer_end));
+        checkCudaErrors(cudaEventSynchronize(transfer_end));
+        checkCudaErrors(cudaEventElapsedTime(&elapsed_ms, transfer_start, transfer_end));
+        d2h_time_ = elapsed_ms * num_batch;
         
         tf::Taskflow taskflow("ELL-sim");
         tf::Executor executor;
@@ -689,7 +702,8 @@ public:
           // Dependencies
           for (int batch_id = 0; batch_id < num_batch; batch_id++) {
             // dependencies between H2D and the kernels
-            input_copies[batch_id].precede(simulate_fused_gate[batch_id*fused_num_nonzero.size()]);
+            input_copies[batch_id].precede(
+              simulate_fused_gate[batch_id*fused_num_nonzero.size()]);
             if (batch_id > 1) {
               simulate_fused_gate[(batch_id-1)*fused_num_nonzero.size()-1].precede(input_copies[batch_id]);
             }
@@ -703,41 +717,28 @@ public:
             }
 
             // dependencies between D2H and the kernels
-            simulate_fused_gate[(batch_id+1)*fused_num_nonzero.size()-1].precede(output_copies[batch_id]);
+            simulate_fused_gate[(batch_id+1)*fused_num_nonzero.size()-1].precede(
+              output_copies[batch_id]);
             if (batch_id < num_batch-2) {
               output_copies[batch_id].precede(simulate_fused_gate[(batch_id+2)*fused_num_nonzero.size()]);
             }
           }
           
           tf::cudaStream stream;
+          checkCudaErrors(cudaEventRecord(pipeline_start, stream));
           cudaflow.run(stream);
+          checkCudaErrors(cudaEventRecord(pipeline_end, stream));
           stream.synchronize(); 
         });
 
         executor.run(taskflow).wait();
-
-        auto compute_end = std::chrono::high_resolution_clock::now();
-        computation_time_ = std::chrono::duration<double, std::milli>(compute_end - compute_start).count();
-        
-        // 统计D2H传输时间
-        auto d2h_start = std::chrono::high_resolution_clock::now();
-        // 这里应该有从GPU下载结果的代码
-        // 由于代码结构问题，我们假设这部分时间包含在总传输时间中
-        auto d2h_end = std::chrono::high_resolution_clock::now();
-        double d2h_time = std::chrono::duration<double, std::milli>(d2h_end - d2h_start).count();
-        
-        // 总传输时间 = H2D时间 + D2H时间
-        transfer_time_ = h2d_time + d2h_time;
-        
-        // 如果传输时间为0，设置一个合理的默认值
-        if (transfer_time_ == 0) {
-            transfer_time_ = 8.0; // 保持之前的传输时间值
-        }
-        
-        // 如果计算时间为0，确保它至少为1
-        if (computation_time_ == 0) {
-            computation_time_ = 1.0;
-        }
+        checkCudaErrors(cudaEventElapsedTime(&elapsed_ms, pipeline_start, pipeline_end));
+        transfer_time_ = h2d_time_ + d2h_time_;
+        computation_time_ = std::max(0.0, static_cast<double>(elapsed_ms) - transfer_time_);
+        cudaEventDestroy(pipeline_start);
+        cudaEventDestroy(pipeline_end);
+        cudaEventDestroy(transfer_start);
+        cudaEventDestroy(transfer_end);
         
         // 模拟完成后检查内存
         calculate_peak_memory_usage();
@@ -768,40 +769,17 @@ public:
     
     // 统计相关方法
     double get_transfer_time() const { return transfer_time_; }
+    double get_h2d_time() const { return h2d_time_; }
+    double get_d2h_time() const { return d2h_time_; }
     double get_computation_time() const { return computation_time_; }
     size_t get_peak_memory_usage() const { return peak_memory_usage_; }
     
     // 获取峰值内存使用情况
     size_t calculate_peak_memory_usage() {
-        size_t current_usage = 0;
-        
-        // 从系统中获取实际内存使用情况
-        #ifdef __linux__
-        // Linux系统：读取/proc/self/status文件
-        std::ifstream status_file("/proc/self/status");
-        std::string line;
-        while (std::getline(status_file, line)) {
-            if (line.substr(0, 6) == "VmRSS:") {
-                std::istringstream iss(line.substr(6));
-                size_t rss_kb;
-                iss >> rss_kb;
-                current_usage = rss_kb * 1024; // 转换为字节
-                break;
-            }
-        }
-        #elif __APPLE__
-        // macOS系统：使用sysctl获取内存使用情况
-        #include <sys/sysctl.h>
-        #include <mach/mach.h>
-        struct mach_task_basic_info info;
-        mach_msg_type_number_t size = MACH_TASK_BASIC_INFO_COUNT;
-        if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &size) == KERN_SUCCESS) {
-            current_usage = info.resident_size;
-        }
-        #else
-        // 其他系统：使用计算方法作为 fallback
-        current_usage = nDim * batch_size * sizeof(cuDoubleComplex) * 4; // 估计内存使用
-        #endif
+        size_t free_bytes = 0;
+        size_t total_bytes = 0;
+        checkCudaErrors(cudaMemGetInfo(&free_bytes, &total_bytes));
+        const size_t current_usage = total_bytes - free_bytes;
         
         // 更新峰值内存使用量
         if (current_usage > peak_memory_usage_) {
@@ -825,6 +803,8 @@ public:
     
     // 时间和内存统计
     double transfer_time_ = 0.0;
+    double h2d_time_ = 0.0;
+    double d2h_time_ = 0.0;
     double computation_time_ = 0.0;
     size_t peak_memory_usage_ = 0;
 

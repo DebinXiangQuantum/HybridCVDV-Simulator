@@ -43,6 +43,15 @@ struct TransferStats {
     int dst_device;
 };
 
+struct TransferAggregateStats {
+    size_t p2p_bytes = 0;
+    size_t host_staged_bytes = 0;
+    uint64_t p2p_count = 0;
+    uint64_t host_staged_count = 0;
+    double p2p_time_ms = 0.0;
+    double host_staged_time_ms = 0.0;
+};
+
 // ─── Peer Transfer Engine ────────────────────────────────────────────────────
 
 /**
@@ -120,7 +129,10 @@ public:
     TransferStats cumulative_stats() const { return cumulative_stats_; }
 
     /** @brief Reset cumulative statistics. */
-    void reset_stats() { cumulative_stats_ = {}; }
+    void reset_stats() { cumulative_stats_ = {}; aggregate_stats_ = {}; }
+
+    /** @brief Get strategy-separated cumulative transfer statistics. */
+    TransferAggregateStats aggregate_stats() const { return aggregate_stats_; }
 
 private:
     /**
@@ -149,6 +161,7 @@ private:
     int num_devices_ = 0;
     bool initialized_ = false;
     TransferStats cumulative_stats_ = {};
+    TransferAggregateStats aggregate_stats_ = {};
 };
 
 } // namespace hybridcvdv

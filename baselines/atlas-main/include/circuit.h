@@ -73,6 +73,7 @@ public:
   int num_fuse = 0;
   int num_shm = 0;
   int num_shuffle = 0;
+  double last_state_checksum = 0.0;
 };
 } // namespace qcircuit
 

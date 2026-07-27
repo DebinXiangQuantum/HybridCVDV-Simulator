@@ -116,6 +116,25 @@ struct PinnedHostBuffer {
  * - 内存管理：按需分配，避免浪费
  */
 struct CVStatePool {
+    struct DeviceMemoryStats {
+        int device_id = -1;
+        size_t active_state_count = 0;
+        size_t active_bytes = 0;
+        size_t reserved_bytes = 0;
+        size_t scratch_bytes = 0;
+        size_t metadata_bytes = 0;
+    };
+
+    struct TransferCounters {
+        size_t p2p_bytes = 0;
+        size_t host_staged_bytes = 0;
+        uint64_t p2p_count = 0;
+        uint64_t host_staged_count = 0;
+        uint64_t state_migrations = 0;
+        double p2p_time_ms = 0.0;
+        double host_staged_time_ms = 0.0;
+    };
+
     // 物理存储：动态分配的GPU内存
     cuDoubleComplex* data = nullptr;
 
@@ -285,6 +304,7 @@ struct CVStatePool {
      */
     std::vector<int> get_active_state_ids() const;
     int get_state_device_id(int state_id) const;
+    void migrate_state_to_device(int state_id, int target_device);
     int get_active_device_view() const { return active_device_id_; }
     int get_device_count() const { return static_cast<int>(device_ids_.size()); }
     size_t get_active_storage_elements_on_device(int device_id) const;
@@ -295,6 +315,9 @@ struct CVStatePool {
     std::vector<std::pair<int, std::vector<int>>> bucket_state_ids_by_device(
         const std::vector<int>& state_ids) const;
     bool spans_multiple_devices(const std::vector<int>& state_ids) const;
+    std::vector<DeviceMemoryStats> get_device_memory_stats() const;
+    TransferCounters get_transfer_counters() const { return transfer_counters_; }
+    void reset_transfer_counters() { transfer_counters_ = {}; }
 
     // ── Scratch buffers (reused across gate executions) ──────────────
     GPUScratchBuffer scratch_target_ids;  // for d_target_ids (int arrays)
@@ -367,6 +390,7 @@ private:
     std::vector<DeviceStorage> device_views_;
     int active_device_id_ = -1;
     int next_round_robin_device_index_ = 0;
+    mutable TransferCounters transfer_counters_;
 
     void release_device_scratch_buffers();
     size_t active_storage_elements() const;

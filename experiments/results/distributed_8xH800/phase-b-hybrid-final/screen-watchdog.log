@@ -1,0 +1,9 @@
+watching existing Phase B pid 555950
+Phase B interrupted; resuming
+Traceback (most recent call last):
+  File "/root/workspace/HybridCVDV-Simulator/experiments/python/run_distributed_scaling.py", line 690, in <module>
+    raise SystemExit(main())
+                     ~~~~^^
+  File "/root/workspace/HybridCVDV-Simulator/experiments/python/run_distributed_scaling.py", line 597, in main
+    raise RuntimeError("GPU node has active compute processes: " + "; ".join(busy[:8]))
+RuntimeError: GPU node has active compute processes: GPU-04e1f242-2a68-2d0e-b993-c1f9ec45f1d9, 3715175, [Not Found], 632

@@ -32,10 +32,15 @@ macro(CHECK_SUBMODULE_PRESENT modulename)
   endif()
 endmacro()
 
-set(CUSTATEVEC_LIBRARY $ENV{CUSTATEVEC_LIBRARY})
-set(CUQUANTUM_ROOT $ENV{CUQUANTUM_ROOT})
-if(NOT CUQUANTUM_ROOT)
-    set(CUQUANTUM_ROOT /root/cuquantum/var/cuquantum-local-repo-ubuntu2204-24.11.0/libcuquantum-dev/usr)
+set(CUQUANTUM_ROOT "$ENV{CUQUANTUM_ROOT}" CACHE PATH "cuQuantum installation root")
+find_path(CUSTATEVEC_INCLUDE_DIR NAMES custatevec.h
+    HINTS ${CUQUANTUM_ROOT} $ENV{CUQUANTUM_DIR}
+    PATH_SUFFIXES include)
+find_library(CUSTATEVEC_LIBRARY NAMES custatevec
+    HINTS ${CUQUANTUM_ROOT} $ENV{CUQUANTUM_DIR}
+    PATH_SUFFIXES lib lib64 lib/x86_64-linux-gnu)
+if(NOT CUSTATEVEC_INCLUDE_DIR OR NOT CUSTATEVEC_LIBRARY)
+    message(FATAL_ERROR "cuStateVec not found; set CUQUANTUM_ROOT.")
 endif()
 message("-- Found custatevec library: ${CUSTATEVEC_LIBRARY}")
 message("-- Found custatevec include: ${CUQUANTUM_ROOT}/include")
@@ -44,7 +49,10 @@ find_package(OpenMP REQUIRED)
 find_package(Threads REQUIRED)
 
 include_directories(${CUDA_INCLUDE_DIRS})
-include_directories(${CUQUANTUM_ROOT}/include/libcuquantum/12)
+include_directories(${CUSTATEVEC_INCLUDE_DIR})
+if(NOT CMAKE_CUDA_ARCHITECTURES)
+    set(CMAKE_CUDA_ARCHITECTURES 90)
+endif()
 message(STATUS "CUDA_INCLUDE_DIRS: " ${CUDA_INCLUDE_DIRS})
 # check_submodule_present(cxxopts)
 check_submodule_present(taskflow)

@@ -18,7 +18,6 @@
 #include "../include/stream_pool.h"
 #include <cuda_runtime.h>
 #include <algorithm>
-#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
@@ -109,7 +108,11 @@ TransferStats PeerTransfer::transfer_state(
     if (src_device == dst_device) {
         size_t bytes = num_elements * sizeof(cuDoubleComplex);
         MGPU_CHECK_CUDA(cudaSetDevice(src_device));
-        auto t0 = std::chrono::steady_clock::now();
+        cudaEvent_t started = nullptr;
+        cudaEvent_t ended = nullptr;
+        MGPU_CHECK_CUDA(cudaEventCreate(&started));
+        MGPU_CHECK_CUDA(cudaEventCreate(&ended));
+        MGPU_CHECK_CUDA(cudaEventRecord(started, stream));
 
         if (stream) {
             MGPU_CHECK_CUDA(cudaMemcpyAsync(
@@ -119,12 +122,18 @@ TransferStats PeerTransfer::transfer_state(
                 dst_ptr, src_ptr, bytes, cudaMemcpyDeviceToDevice));
         }
 
-        auto t1 = std::chrono::steady_clock::now();
-        double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-        TransferStats stats{bytes, ms, (bytes / (ms * 1e6)),
+        MGPU_CHECK_CUDA(cudaEventRecord(ended, stream));
+        MGPU_CHECK_CUDA(cudaEventSynchronize(ended));
+        float elapsed = 0.0f;
+        MGPU_CHECK_CUDA(cudaEventElapsedTime(&elapsed, started, ended));
+        cudaEventDestroy(started);
+        cudaEventDestroy(ended);
+        double ms = elapsed;
+        TransferStats stats{bytes, ms, ms > 0.0 ? (bytes / (ms * 1e6)) : 0.0,
                             TransferStrategy::P2P_DIRECT,
                             src_device, dst_device};
         cumulative_stats_.bytes_transferred += stats.bytes_transferred;
+        cumulative_stats_.elapsed_ms += stats.elapsed_ms;
         return stats;
     }
 
@@ -146,6 +155,20 @@ TransferStats PeerTransfer::transfer_state(
 
     // Accumulate
     cumulative_stats_.bytes_transferred += stats.bytes_transferred;
+    cumulative_stats_.elapsed_ms += stats.elapsed_ms;
+    cumulative_stats_.bandwidth_gbps =
+        cumulative_stats_.elapsed_ms > 0.0
+            ? cumulative_stats_.bytes_transferred / (cumulative_stats_.elapsed_ms * 1e6)
+            : 0.0;
+    if (stats.strategy_used == TransferStrategy::P2P_DIRECT) {
+        aggregate_stats_.p2p_bytes += stats.bytes_transferred;
+        aggregate_stats_.p2p_time_ms += stats.elapsed_ms;
+        ++aggregate_stats_.p2p_count;
+    } else {
+        aggregate_stats_.host_staged_bytes += stats.bytes_transferred;
+        aggregate_stats_.host_staged_time_ms += stats.elapsed_ms;
+        ++aggregate_stats_.host_staged_count;
+    }
     return stats;
 }
 
@@ -157,7 +180,13 @@ TransferStats PeerTransfer::transfer_p2p(
     int64_t num_elements, cudaStream_t stream) {
 
     size_t bytes = num_elements * sizeof(cuDoubleComplex);
-    auto t0 = std::chrono::steady_clock::now();
+    // The caller-provided stream belongs to the source device in StreamPool.
+    MGPU_CHECK_CUDA(cudaSetDevice(src_device));
+    cudaEvent_t started = nullptr;
+    cudaEvent_t ended = nullptr;
+    MGPU_CHECK_CUDA(cudaEventCreate(&started));
+    MGPU_CHECK_CUDA(cudaEventCreate(&ended));
+    MGPU_CHECK_CUDA(cudaEventRecord(started, stream));
 
     if (stream) {
         MGPU_CHECK_CUDA(cudaMemcpyPeerAsync(
@@ -171,8 +200,13 @@ TransferStats PeerTransfer::transfer_p2p(
             bytes));
     }
 
-    auto t1 = std::chrono::steady_clock::now();
-    double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+    MGPU_CHECK_CUDA(cudaEventRecord(ended, stream));
+    MGPU_CHECK_CUDA(cudaEventSynchronize(ended));
+    float elapsed = 0.0f;
+    MGPU_CHECK_CUDA(cudaEventElapsedTime(&elapsed, started, ended));
+    cudaEventDestroy(started);
+    cudaEventDestroy(ended);
+    double ms = elapsed;
     double gbps = (ms > 0) ? (bytes / (ms * 1e6)) : 0.0;
 
     return {bytes, ms, gbps, TransferStrategy::P2P_DIRECT,
@@ -187,18 +221,30 @@ TransferStats PeerTransfer::transfer_host_staged(
     int64_t num_elements, cudaStream_t stream) {
 
     size_t total_bytes = num_elements * sizeof(cuDoubleComplex);
-    auto t0 = std::chrono::steady_clock::now();
+    cudaEvent_t source_started = nullptr;
+    cudaEvent_t source_ended = nullptr;
+    cudaEvent_t destination_started = nullptr;
+    cudaEvent_t destination_ended = nullptr;
+    MGPU_CHECK_CUDA(cudaSetDevice(src_device));
+    MGPU_CHECK_CUDA(cudaEventCreate(&source_started));
+    MGPU_CHECK_CUDA(cudaEventCreate(&source_ended));
+    MGPU_CHECK_CUDA(cudaSetDevice(dst_device));
+    MGPU_CHECK_CUDA(cudaEventCreate(&destination_started));
+    MGPU_CHECK_CUDA(cudaEventCreate(&destination_ended));
+    float elapsed = 0.0f;
 
     // Get staging buffer (use source device's buffer)
     void* staging = (src_device < num_devices_)
                         ? staging_buffers_[src_device]
                         : nullptr;
 
+    bool temporary_staging = false;
     if (!staging) {
         // Emergency: allocate temporary pinned buffer
         MGPU_CHECK_CUDA(cudaHostAlloc(&staging, std::min(total_bytes,
                                       staging_capacity_),
                                       cudaHostAllocPortable));
+        temporary_staging = true;
     }
 
     size_t chunk_size = std::min(staging_capacity_, kPipelineChunkBytes);
@@ -214,19 +260,40 @@ TransferStats PeerTransfer::transfer_host_staged(
 
         // Stage 1: GPU src → Host (pinned)
         MGPU_CHECK_CUDA(cudaSetDevice(src_device));
+        MGPU_CHECK_CUDA(cudaEventRecord(source_started));
         MGPU_CHECK_CUDA(cudaMemcpy(staging, src_byte, this_chunk,
                                    cudaMemcpyDeviceToHost));
+        MGPU_CHECK_CUDA(cudaEventRecord(source_ended));
+        MGPU_CHECK_CUDA(cudaEventSynchronize(source_ended));
+        float source_ms = 0.0f;
+        MGPU_CHECK_CUDA(cudaEventElapsedTime(&source_ms, source_started, source_ended));
+        elapsed += source_ms;
 
         // Stage 2: Host (pinned) → GPU dst
         MGPU_CHECK_CUDA(cudaSetDevice(dst_device));
+        MGPU_CHECK_CUDA(cudaEventRecord(destination_started));
         MGPU_CHECK_CUDA(cudaMemcpy(dst_byte, staging, this_chunk,
                                    cudaMemcpyHostToDevice));
+        MGPU_CHECK_CUDA(cudaEventRecord(destination_ended));
+        MGPU_CHECK_CUDA(cudaEventSynchronize(destination_ended));
+        float destination_ms = 0.0f;
+        MGPU_CHECK_CUDA(cudaEventElapsedTime(
+            &destination_ms, destination_started, destination_ended));
+        elapsed += destination_ms;
 
         transferred += this_chunk;
     }
 
-    auto t1 = std::chrono::steady_clock::now();
-    double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+    MGPU_CHECK_CUDA(cudaSetDevice(src_device));
+    cudaEventDestroy(source_started);
+    cudaEventDestroy(source_ended);
+    MGPU_CHECK_CUDA(cudaSetDevice(dst_device));
+    cudaEventDestroy(destination_started);
+    cudaEventDestroy(destination_ended);
+    if (temporary_staging) {
+        MGPU_CHECK_CUDA(cudaFreeHost(staging));
+    }
+    double ms = elapsed;
     double gbps = (ms > 0) ? (total_bytes / (ms * 1e6)) : 0.0;
 
     return {total_bytes, ms, gbps, TransferStrategy::HOST_STAGED,

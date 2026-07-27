@@ -256,10 +256,27 @@ sc26_transfer_DVtoCV_nq16_c{4,8,16,32}
 warmup_runs = 2
 measured_runs = 10
 process_repetitions = 3
-telemetry_interval_ms = 100
+telemetry_interval_ms = 1000
 ```
 
 三个 process repetition 的 GPU-count 顺序应交错或使用固定随机种子打乱，减少温度、boost clock 和运行顺序偏差。
+
+正式参数运行前必须增加 1 GPU feasibility/eligibility pilot：
+
+```text
+warmup_runs = 0
+measured_runs = 1
+process_repetitions = 1
+per_case_timeout = 5 min
+telemetry_interval_ms = 1000
+```
+
+只有 `status=ok`、Host orchestration 占比不超过 50%、平均 GPU
+利用率不低于 10%、单次 simulation time 不低于 10 ms 的 case 才进入
+GPU strong-scaling 主曲线。未通过的 transfer/single-state case 作为
+`host_bound_control` 单独报告，不计算 GPU speedup 或 parallel efficiency。
+正式长任务同样使用 1000 ms telemetry；100 ms 的逐次 `nvidia-smi`
+进程采样会扰动 CUDA workload，不能用于论文性能数字。
 
 ### 5.3 Phase C：容量和弱扩展实验
 
@@ -324,7 +341,11 @@ process_repetitions = 1
 per_case_timeout = 30 min；large case 可单独放宽到 2 h
 ```
 
-如果总运行时间过长，先用 `warmup=0, measured=1` 完成 feasibility pass，再只对 `ok` case 执行 `warmup=1, measured=3`。全量结果主要用于：
+如果总运行时间过长，先用 `warmup=0, measured=1, per_case_timeout=5 min`
+完成 feasibility pass，再只对 `ok` case 执行 `warmup=1, measured=3`。
+HybridCVDV 已知 host-bound 负载（例如 `transfer_DVtoCV_nq16`）在覆盖扫描中
+直接记为 `host_bound_skipped`，不进入 GPU strong-scaling 或 Phase E 正式复跑。
+全量结果主要用于：
 
 - 成功率和失败分类；
 - 最大可模拟规模；
@@ -641,6 +662,22 @@ bash experiments/scripts/run_distributed_scaling.sh \
 ```
 
 然后分别运行 ATLAS 和 BQSim。长任务必须使用 checkpoint/resume，不依赖单个 SSH 会话。
+
+也可以使用可恢复的总控脚本一次跑完剩余阶段。脚本会等待已在运行的
+ATLAS Phase B，逐步验收 manifest，然后自动执行 Phase C、Phase D、
+Phase E feasibility、仅成功组合的 Phase E 正式复跑，最后合并并画图：
+
+```bash
+screen -L \
+  -Logfile experiments/results/distributed_8xH800/distributed-pipeline.log \
+  -dmS distributed-pipeline \
+  bash -lc 'cd /root/workspace/HybridCVDV-Simulator && \
+    experiments/scripts/run_distributed_pipeline.sh'
+```
+
+每个步骤都有独立 `run_id` 和 manifest；脚本重复启动时会跳过
+`status=complete` 的步骤，并对未完成步骤使用 `--resume`。文件锁会阻止两个
+总控流水线并发占用节点。
 
 ### Step 6：合并和画图
 

@@ -3,6 +3,7 @@
 #include <cuda_runtime.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <iostream>
 #include <limits>
@@ -846,7 +847,7 @@ int CVStatePool::choose_device_for_storage(size_t required_elements, int preferr
     size_t fallback_free_bytes = 0;
     size_t fallback_rr_rank = device_ids_.size();
     int best_fit_device = -1;
-    size_t best_fit_free_bytes = 0;
+    size_t best_fit_reserved_bytes = std::numeric_limits<size_t>::max();
     size_t best_fit_rr_rank = device_ids_.size();
     size_t preferred_free_bytes = 0;
 
@@ -867,10 +868,16 @@ int CVStatePool::choose_device_for_storage(size_t required_elements, int preferr
             fallback_device = device_id;
             fallback_rr_rank = rr_rank;
         }
+        size_t reserved_bytes = 0;
+        for (size_t state_id = 0; state_id < host_state_devices_.size(); ++state_id) {
+            if (host_state_devices_[state_id] == device_id) {
+                reserved_bytes += bytes_for_elements(host_state_capacities[state_id]);
+            }
+        }
         if (free_bytes > required_bytes + kSafetyBytes &&
-            (free_bytes > best_fit_free_bytes ||
-             (free_bytes == best_fit_free_bytes && rr_rank < best_fit_rr_rank))) {
-            best_fit_free_bytes = free_bytes;
+            (reserved_bytes < best_fit_reserved_bytes ||
+             (reserved_bytes == best_fit_reserved_bytes && rr_rank < best_fit_rr_rank))) {
+            best_fit_reserved_bytes = reserved_bytes;
             best_fit_device = device_id;
             best_fit_rr_rank = rr_rank;
         }
@@ -1165,6 +1172,41 @@ int CVStatePool::get_state_device_id(int state_id) const {
     return host_state_devices_[static_cast<size_t>(state_id)];
 }
 
+void CVStatePool::migrate_state_to_device(int state_id, int target_device) {
+    if (!is_valid_state(state_id)) {
+        throw std::invalid_argument("无法迁移无效状态ID: " + std::to_string(state_id));
+    }
+    if (std::find(device_ids_.begin(), device_ids_.end(), target_device) == device_ids_.end()) {
+        throw std::invalid_argument("无法迁移到无效CUDA设备: " + std::to_string(target_device));
+    }
+
+    const int source_device = host_state_devices_[static_cast<size_t>(state_id)];
+    if (source_device == target_device) {
+        return;
+    }
+    const size_t elements = static_cast<size_t>(host_state_dims[static_cast<size_t>(state_id)]);
+    if (source_device < 0 || elements == 0) {
+        host_state_devices_[static_cast<size_t>(state_id)] = target_device;
+        activate_device_view(target_device);
+        sync_state_metadata_to_device(state_id);
+        return;
+    }
+
+    activate_device_view(source_device);
+    const cuDoubleComplex* source_ptr =
+        data + host_state_offsets[static_cast<size_t>(state_id)];
+    release_storage_block(state_id);
+
+    host_state_devices_[static_cast<size_t>(state_id)] = target_device;
+    activate_device_view(target_device);
+    assign_state_storage(state_id, elements);
+    cuDoubleComplex* target_ptr =
+        data + host_state_offsets[static_cast<size_t>(state_id)];
+    copy_state_between_devices(
+        source_ptr, source_device, target_ptr, target_device, elements);
+    sync_state_metadata_to_device(state_id);
+}
+
 std::vector<std::pair<int, std::vector<int>>> CVStatePool::bucket_state_ids_by_device(
     const std::vector<int>& state_ids) const {
     std::vector<std::pair<int, std::vector<int>>> buckets;
@@ -1205,6 +1247,40 @@ bool CVStatePool::spans_multiple_devices(const std::vector<int>& state_ids) cons
         }
     }
     return false;
+}
+
+std::vector<CVStatePool::DeviceMemoryStats> CVStatePool::get_device_memory_stats() const {
+    std::vector<DeviceMemoryStats> stats;
+    stats.reserve(device_ids_.size());
+    for (int device_id : device_ids_) {
+        DeviceMemoryStats item;
+        item.device_id = device_id;
+        for (int state_id = 0; state_id < capacity; ++state_id) {
+            if (active_flags[static_cast<size_t>(state_id)] &&
+                host_state_devices_[static_cast<size_t>(state_id)] == device_id) {
+                ++item.active_state_count;
+                item.active_bytes +=
+                    bytes_for_elements(host_state_capacities[static_cast<size_t>(state_id)]);
+            }
+        }
+
+        if (device_id == active_device_id_) {
+            item.reserved_bytes = bytes_for_elements(data_capacity_elements_);
+            item.metadata_bytes = metadata_memory_size_;
+            item.scratch_bytes = scratch_target_ids.capacity_bytes +
+                                 scratch_temp.capacity_bytes +
+                                 scratch_aux.capacity_bytes;
+        } else {
+            const DeviceStorage& storage = device_views_[static_cast<size_t>(device_id)];
+            item.reserved_bytes = bytes_for_elements(storage.data_capacity_elements);
+            item.metadata_bytes = storage.metadata_memory_size;
+            item.scratch_bytes = storage.scratch_target_ids.capacity_bytes +
+                                 storage.scratch_temp.capacity_bytes +
+                                 storage.scratch_aux.capacity_bytes;
+        }
+        stats.push_back(item);
+    }
+    return stats;
 }
 
 void CVStatePool::reset() {
@@ -1301,22 +1377,60 @@ void CVStatePool::copy_state_between_devices(const cuDoubleComplex* src_ptr,
         return;
     }
 
+    const auto started_at = std::chrono::steady_clock::now();
     int can_access_peer = 0;
     check_cuda(cudaDeviceCanAccessPeer(&can_access_peer, dst_device, src_device),
                "无法查询CUDA peer access");
-    if (!can_access_peer) {
-        throw std::runtime_error("跨GPU状态复制需要P2P access");
+    if (can_access_peer) {
+        for (size_t offset = 0; offset < total_bytes; offset += kChunkBytes) {
+            const size_t chunk = std::min(kChunkBytes, total_bytes - offset);
+            check_cuda(cudaMemcpyPeer(dst_bytes + offset,
+                                      dst_device,
+                                      src_bytes + offset,
+                                      src_device,
+                                      chunk),
+                       "无法执行跨GPU状态复制");
+        }
+        const auto ended_at = std::chrono::steady_clock::now();
+        transfer_counters_.p2p_bytes += total_bytes;
+        transfer_counters_.p2p_count += 1;
+        transfer_counters_.state_migrations += 1;
+        transfer_counters_.p2p_time_ms +=
+            std::chrono::duration<double, std::milli>(ended_at - started_at).count();
+        return;
     }
 
-    for (size_t offset = 0; offset < total_bytes; offset += kChunkBytes) {
-        const size_t chunk = std::min(kChunkBytes, total_bytes - offset);
-        check_cuda(cudaMemcpyPeer(dst_bytes + offset,
-                                  dst_device,
+    constexpr size_t kStagingBytes = 64ULL * 1024ULL * 1024ULL;
+    void* staging = nullptr;
+    check_cuda(cudaHostAlloc(&staging, std::min(kStagingBytes, total_bytes), cudaHostAllocPortable),
+               "无法分配跨GPU pinned host staging");
+    try {
+        for (size_t offset = 0; offset < total_bytes; offset += kStagingBytes) {
+            const size_t chunk = std::min(kStagingBytes, total_bytes - offset);
+            check_cuda(cudaSetDevice(src_device), "无法设置源CUDA设备执行host-staged复制");
+            check_cuda(cudaMemcpy(staging,
                                   src_bytes + offset,
-                                  src_device,
-                                  chunk),
-                   "无法执行跨GPU状态复制");
+                                  chunk,
+                                  cudaMemcpyDeviceToHost),
+                       "无法执行跨GPU D2H staging");
+            check_cuda(cudaSetDevice(dst_device), "无法设置目标CUDA设备执行host-staged复制");
+            check_cuda(cudaMemcpy(dst_bytes + offset,
+                                  staging,
+                                  chunk,
+                                  cudaMemcpyHostToDevice),
+                       "无法执行跨GPU H2D staging");
+        }
+    } catch (...) {
+        cudaFreeHost(staging);
+        throw;
     }
+    check_cuda(cudaFreeHost(staging), "无法释放跨GPU pinned host staging");
+    const auto ended_at = std::chrono::steady_clock::now();
+    transfer_counters_.host_staged_bytes += total_bytes;
+    transfer_counters_.host_staged_count += 1;
+    transfer_counters_.state_migrations += 1;
+    transfer_counters_.host_staged_time_ms +=
+        std::chrono::duration<double, std::milli>(ended_at - started_at).count();
 }
 
 int CVStatePool::duplicate_state(int state_id) {

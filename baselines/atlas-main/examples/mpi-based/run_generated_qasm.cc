@@ -4,6 +4,7 @@
 #include <sstream>
 #include <vector>
 #include <iomanip>
+#include <filesystem>
 #include <sys/resource.h>
 
 #include "circuit.h"
@@ -37,6 +38,8 @@ int main(int argc, char *argv[]) {
   printf("Num ranks: %d, myrank: %d\n", nRanks, myRank);
 
   std::string circuit_file;
+  std::string qasm_path;
+  std::string output_path;
   unsigned nqubits = 2; // 设置默认值为2
   unsigned nlocal = 2; // 设置默认值为2
   int ndevice = 1; // 设置默认值为1
@@ -44,6 +47,15 @@ int main(int argc, char *argv[]) {
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--import-circuit")) {
       circuit_file = std::string(argv[++i]);
+      continue;
+    }
+    if (!strcmp(argv[i], "--qasm-path")) {
+      qasm_path = std::string(argv[++i]);
+      circuit_file = std::filesystem::path(qasm_path).stem().string();
+      continue;
+    }
+    if (!strcmp(argv[i], "--output")) {
+      output_path = std::string(argv[++i]);
       continue;
     }
     if (!strcmp(argv[i], "--n")) {
@@ -80,12 +92,12 @@ int main(int argc, char *argv[]) {
                        GateType::u3, GateType::cx, GateType::cz, GateType::cp,
                        GateType::p, GateType::z, GateType::rz, GateType::swap}, param_info);
   // 加载 generate_qasm.py 生成的 QASM 文件
-  auto seq = quartz::CircuitSeq::from_qasm_file(
-      &ctx, std::string("../qasm/") + circuit_file + ".qasm");
+  if (qasm_path.empty()) qasm_path = std::string("../qasm/") + circuit_file + ".qasm";
+  auto seq = quartz::CircuitSeq::from_qasm_file(&ctx, qasm_path);
 
   // 检查 QASM 文件是否成功加载
   if (!seq) {
-    std::cerr << "Error: Failed to load QASM file: ../qasm/" << circuit_file << ".qasm" << std::endl;
+    std::cerr << "Error: Failed to load QASM file: " << qasm_path << std::endl;
     delete param_info;
     MPICHECK(MPI_Finalize());
     return 1;
@@ -104,20 +116,18 @@ int main(int argc, char *argv[]) {
     nlocal = actual_num_qubits;
   }
   
-  // 在非 ILP 模式下，使用实际的量子比特数作为本地量子比特数，确保所有门都能被处理
-  if (!use_ilp) {
-    printf("Using non-ILP mode, setting num_local_qubits to actual_num_qubits (%d)\n", actual_num_qubits);
-    nlocal = actual_num_qubits;
-  }
-
   sim::qcircuit::Circuit<double> circuit(actual_num_qubits, nlocal, ndevice, myRank, nRanks);
 
   // 开始编译时间测量
   perf_monitor->start_timer("compile");
-  circuit.compile(seq.get(), &ctx, &interpreter, use_ilp, "../schedules/" +
-                                      circuit_file +
-                                      std::to_string(nqubits) + "_" +
-                                      std::to_string(nlocal));
+  std::filesystem::path schedule_dir =
+      output_path.empty() ? std::filesystem::path("../schedules")
+                          : std::filesystem::path(output_path).parent_path() / "schedules";
+  std::filesystem::create_directories(schedule_dir);
+  const std::string schedule_prefix =
+      (schedule_dir / (circuit_file + std::to_string(nqubits) + "_" +
+                       std::to_string(nlocal))).string();
+  circuit.compile(seq.get(), &ctx, &interpreter, use_ilp, schedule_prefix);
   perf_monitor->stop_timer("compile");
   perf_monitor->update_memory_peak();
 
@@ -152,12 +162,12 @@ int main(int argc, char *argv[]) {
 
   // 保存结果到文件（只在 rank 0 执行）
   if (myRank == 0) {
+    perf_monitor->print_report(circuit_file);
+    if (output_path.empty()) {
     std::string result_dir = "../result";
     // 创建结果目录
     system(("mkdir -p " + result_dir).c_str());
-    // 打印详细报告
-    perf_monitor->print_report(circuit_file);
-    
+
     // 保存原始格式的 CSV 文件
     std::string csv_file = result_dir + "/atlas_results.csv";
     std::ifstream check_file(csv_file);
@@ -191,6 +201,39 @@ int main(int argc, char *argv[]) {
             << metrics.num_qubits << "\n";
     
     outfile.close();
+    }
+
+    if (!output_path.empty()) {
+      std::filesystem::path output_file_path(output_path);
+      if (output_file_path.has_parent_path()) {
+        std::filesystem::create_directories(output_file_path.parent_path());
+      }
+      std::ofstream json_out(output_path);
+      json_out << "{\n"
+               << "  \"schema_version\": \"3.0\",\n"
+               << "  \"status\": \"ok\",\n"
+               << "  \"system\": \"atlas\",\n"
+               << "  \"case_name\": \"" << circuit_file << "\",\n"
+               << "  \"gpu_count\": " << ndevice << ",\n"
+               << "  \"timing\": {\n"
+               << "    \"total_wall_ms\": " << metrics.total_time * 1000.0 << ",\n"
+               << "    \"compile_ms\": " << metrics.compile_time * 1000.0 << ",\n"
+               << "    \"simulation_ms\": " << metrics.simulate_time * 1000.0 << ",\n"
+               << "    \"gpu_compute_ms\": " << metrics.compute_time * 1000.0 << ",\n"
+               << "    \"h2d_ms\": " << metrics.h2d_transfer_time * 1000.0 << ",\n"
+               << "    \"d2h_ms\": " << metrics.d2h_transfer_time * 1000.0 << ",\n"
+               << "    \"communication_ms\": " << metrics.d2d_transfer_time * 1000.0 << "\n"
+               << "  },\n"
+               << "  \"communication\": {\n"
+               << "    \"p2p_bytes\": " << metrics.d2d_bytes << ",\n"
+               << "    \"transfer_count\": " << metrics.transfer_count << "\n"
+               << "  },\n"
+               << "  \"memory\": {\"gpu_memory_peak_bytes\": " << metrics.gpu_memory_peak << "},\n"
+               << "  \"throughput\": {\"completed_gate_applications\": " << gate_count << "},\n"
+               << "  \"correctness\": {\"checksum\": " << std::setprecision(17)
+               << circuit.last_state_checksum << "}\n"
+               << "}\n";
+    }
 
   }
 

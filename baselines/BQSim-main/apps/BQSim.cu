@@ -19,7 +19,7 @@ namespace fs = std::filesystem;
 void check_and_create_input_batch_file(const std::string& qasm_file);
 
 // 异常处理函数，用于捕获 CUDA 内存不足等异常
-void handle_cuda_exception(const std::string& qasm_file);
+void handle_cuda_exception(const std::string& qasm_file, const std::string& output_path);
 
 // 检查并创建对应的 input_batch 文件
 void check_and_create_input_batch_file(const std::string& qasm_file) {
@@ -80,6 +80,7 @@ int main(int argc, char** argv) { // NOLINT(bugprone-exception-escape)
         ("batch_size", "number of states in a batch (integer)", cxxopts::value<int>())
         ("num_batch", "number of batches (integer)", cxxopts::value<int>())
         ("conversion_type", "DD-to-ELL conversion type: GPU (0), CPU (1), Mixed (2)", cxxopts::value<int>())
+        ("output", "write machine-readable JSON result", cxxopts::value<std::string>())
         ("file", "simulate a quantum circuit given by file (detection by the file extension)", cxxopts::value<std::string>());
 
     // clang-format on
@@ -99,6 +100,8 @@ int main(int argc, char** argv) { // NOLINT(bugprone-exception-escape)
     std::unique_ptr<QBatchSimulator<dd::DDPackageConfig>>  qbatchsim{nullptr};
     const bool                                           verbose = vm.count("verbose") > 0;
     std::string fname = "";
+    const std::string output_path =
+        vm.count("output") > 0 ? vm["output"].as<std::string>() : "";
 
     try {
         if (vm.count("file") > 0) {
@@ -180,18 +183,16 @@ int main(int argc, char** argv) { // NOLINT(bugprone-exception-escape)
         // 输出到 CSV 文件
         std::string csv_filename = "./log/results/bqsim_results.csv";
         
-        // 确保目录存在
-        std::filesystem::create_directories("./log/results");
-        
-        // 检查文件是否存在，如果不存在则创建并写入表头
-        bool file_exists = std::filesystem::exists(csv_filename);
         std::ofstream csv_file;
-        
-        if (!file_exists) {
-            csv_file.open(csv_filename);
-            csv_file << "电路名,电路类型,总时间,传输时间,计算时间,内存占用,门数" << std::endl;
-        } else {
-            csv_file.open(csv_filename, std::ios_base::app);
+        if (output_path.empty()) {
+            std::filesystem::create_directories("./log/results");
+            bool file_exists = std::filesystem::exists(csv_filename);
+            if (!file_exists) {
+                csv_file.open(csv_filename);
+                csv_file << "电路名,电路类型,总时间,传输时间,计算时间,内存占用,门数" << std::endl;
+            } else {
+                csv_file.open(csv_filename, std::ios_base::app);
+            }
         }
         
         // 提取电路类型
@@ -221,23 +222,64 @@ int main(int argc, char** argv) { // NOLINT(bugprone-exception-escape)
         double computation_time = qbatchsim->get_computation_time();
         size_t peak_memory = qbatchsim->get_peak_memory_usage();
         int gate_count = qbatchsim->getNumberOfOps();
-        
-        // 写入 CSV 文件
-        csv_file << circuit_name << "," << circuit_type << "," << total_time << "," << transfer_time << "," << computation_time << "," << peak_memory << "," << gate_count << std::endl;
-        csv_file.close();
-        
-        std::cout << "Results saved to " << csv_filename << std::endl;
+
+        double checksum = 0.0;
+        cuDoubleComplex* final_state = qbatchsim->getVector();
+        for (size_t index = 0; index < qbatchsim->nDim; ++index) {
+            checksum += (static_cast<double>(index) + 1.0) *
+                        (final_state[index * batch_size].x + final_state[index * batch_size].y);
+        }
+
+        if (!output_path.empty()) {
+            fs::path result_path(output_path);
+            if (result_path.has_parent_path()) {
+                fs::create_directories(result_path.parent_path());
+            }
+            nl::json result = {
+                {"schema_version", "3.0"},
+                {"status", "ok"},
+                {"system", "bqsim"},
+                {"case_name", circuit_name},
+                {"gpu_count", 1},
+                {"timing", {
+                    {"total_wall_ms", total_time},
+                    {"simulation_ms", total_time},
+                    {"gpu_compute_ms", computation_time},
+                    {"h2d_ms", qbatchsim->get_h2d_time()},
+                    {"d2h_ms", qbatchsim->get_d2h_time()},
+                }},
+                {"memory", {{"gpu_memory_peak_bytes", peak_memory}}},
+                {"communication", nl::json::object()},
+                {"throughput", {
+                    {"completed_input_states", static_cast<long long>(batch_size) * num_batch},
+                    {"completed_batches", num_batch},
+                    {"completed_gate_applications",
+                     static_cast<long long>(gate_count) * batch_size * num_batch},
+                }},
+                {"correctness", {
+                    {"initial_check", identical_res},
+                    {"checksum", checksum},
+                }},
+            };
+            std::ofstream result_file(output_path);
+            result_file << std::setw(2) << result << "\n";
+        }
+        if (output_path.empty()) {
+            csv_file << circuit_name << "," << circuit_type << "," << total_time << "," << transfer_time << "," << computation_time << "," << peak_memory << "," << gate_count << std::endl;
+            std::cout << "Results saved to " << csv_filename << std::endl;
+            csv_file.close();
+        }
     } catch (const std::exception& e) {
         std::cerr << "Error running BQSim: " << e.what() << std::endl;
         // 处理异常，保存错误信息到 CSV
-        handle_cuda_exception(fname);
+        handle_cuda_exception(fname, output_path);
         return 1;
     }
     return 0;
 }
 
 // 异常处理函数，用于捕获 CUDA 内存不足等异常
-void handle_cuda_exception(const std::string& qasm_file) {
+void handle_cuda_exception(const std::string& qasm_file, const std::string& output_path) {
     // 从 QASM 文件名中提取电路名称
     std::string circuit_name = qasm_file;
     size_t last_slash = circuit_name.find_last_of('/');
@@ -269,7 +311,23 @@ void handle_cuda_exception(const std::string& qasm_file) {
         circuit_type = "gkp";
     }
     
-    // 输出到 CSV 文件
+    if (!output_path.empty()) {
+        fs::path result_path(output_path);
+        if (result_path.has_parent_path()) {
+            fs::create_directories(result_path.parent_path());
+        }
+        nl::json result = {
+            {"schema_version", "3.0"},
+            {"status", "crash_cuda"},
+            {"system", "bqsim"},
+            {"case_name", circuit_name},
+        };
+        std::ofstream result_file(output_path);
+        result_file << std::setw(2) << result << "\n";
+        return;
+    }
+
+    // Legacy CSV fallback.
     std::string csv_filename = "./log/results/bqsim_results.csv";
     
     // 确保目录存在

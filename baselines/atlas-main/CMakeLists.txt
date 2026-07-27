@@ -34,12 +34,18 @@ endif()
 # ##########################################
 # custatevec_example dependencies
 # ##########################################
-# 直接硬编码 cuQuantum 的路径
-set(CUSTATEVEC_LIBRARY /root/cuquantum/var/cuquantum-local-repo-ubuntu2204-24.11.0/libcuquantum/usr/lib/x86_64-linux-gnu/libcuquantum/12/libcustatevec.so)
-set(CUSTATEVEC_INCLUDE_DIR /root/cuquantum/var/cuquantum-local-repo-ubuntu2204-24.11.0/libcuquantum-dev/usr/include/libcuquantum/12)
+set(CUQUANTUM_ROOT "$ENV{CUQUANTUM_ROOT}" CACHE PATH "cuQuantum installation root")
+find_path(CUSTATEVEC_INCLUDE_DIR
+  NAMES custatevec.h
+  HINTS ${CUQUANTUM_ROOT} $ENV{CUQUANTUM_DIR}
+  PATH_SUFFIXES include)
+find_library(CUSTATEVEC_LIBRARY
+  NAMES custatevec
+  HINTS ${CUQUANTUM_ROOT} $ENV{CUQUANTUM_DIR}
+  PATH_SUFFIXES lib lib64 lib/x86_64-linux-gnu)
 
-if (NOT EXISTS ${CUSTATEVEC_LIBRARY} OR NOT EXISTS ${CUSTATEVEC_INCLUDE_DIR}) 
-    message(FATAL_ERROR "cuQuantum not found at specified paths.")
+if (NOT CUSTATEVEC_LIBRARY OR NOT CUSTATEVEC_INCLUDE_DIR)
+    message(FATAL_ERROR "cuStateVec not found; set CUQUANTUM_ROOT, CUSTATEVEC_LIBRARY and CUSTATEVEC_INCLUDE_DIR.")
 endif ()
 
 set(CUSTATEVEC_FOUND ON)
@@ -60,7 +66,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Global CUDA CXX flags/options
 set(CUDA_HOST_COMPILER "${CMAKE_CXX_COMPILER}")
-set(CMAKE_CUDA_COMPILER "/opt/nvidia/hpc_sdk/Linux_x86_64/22.7/cuda/11.7/bin/nvcc")
 set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_EXTENSIONS OFF)
@@ -69,9 +74,9 @@ list(APPEND NVCC_FLAGS
   -std=c++17)
 set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} ${NVCC_FLAGS})
 
-set(CMAKE_CUDA_FLAGS_ARCH_SM70 "-gencode arch=compute_70,code=sm_70")
-set(CMAKE_CUDA_FLAGS_ARCH "${CMAKE_CUDA_FLAGS_ARCH_SM70} ${CMAKE_CUDA_FLAGS_ARCH_SM75} ${CMAKE_CUDA_FLAGS_ARCH_SM80} ${CMAKE_CUDA_FLAGS_ARCH_SM90}")
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} ${CMAKE_CUDA_FLAGS_ARCH}")
+if(NOT CMAKE_CUDA_ARCHITECTURES)
+  set(CMAKE_CUDA_ARCHITECTURES 90 CACHE STRING "CUDA architectures")
+endif()
 
 message(STATUS "cuda compiler: ${CMAKE_CUDA_COMPILER}")
 message(STATUS "nvcc flags: ${CUDA_NVCC_FLAGS}")
@@ -87,13 +92,22 @@ if(USE_LEGION)
   include(legion)
 endif()
 
-# 设置 NCCL 路径
-set(NCCL_ROOT /usr/local/nccl)
+set(NCCL_ROOT "$ENV{NCCL_ROOT}" CACHE PATH "NCCL installation root")
+find_path(NCCL_INCLUDE_DIR NAMES nccl.h HINTS ${NCCL_ROOT} PATH_SUFFIXES include)
+find_library(NCCL_LIBRARY NAMES nccl HINTS ${NCCL_ROOT} PATH_SUFFIXES lib lib64)
+if(NOT NCCL_INCLUDE_DIR OR NOT NCCL_LIBRARY)
+  message(FATAL_ERROR "NCCL not found; set NCCL_ROOT, NCCL_INCLUDE_DIR and NCCL_LIBRARY.")
+endif()
 
-list(APPEND QSIM_INCLUDE_DIRS
-  ${NCCL_ROOT}/include)
-list(APPEND QSIM_EXT_LIBRARIES
-  ${NCCL_ROOT}/lib/libnccl${LIBEXT})
+find_library(NVML_LIBRARY
+  NAMES nvidia-ml
+  HINTS /usr/local/cuda /usr/local/cuda/targets/x86_64-linux
+  PATH_SUFFIXES lib64/stubs lib/stubs)
+if(NOT NVML_LIBRARY)
+  message(FATAL_ERROR "NVML link library not found.")
+endif()
+list(APPEND QSIM_INCLUDE_DIRS ${NCCL_INCLUDE_DIR})
+list(APPEND QSIM_EXT_LIBRARIES ${NCCL_LIBRARY})
 
 #quartz
 add_subdirectory(deps/quartz)
@@ -137,13 +151,13 @@ list(APPEND QSIM_SRC ${QSIM_ROOT}/src/base/performance_monitor_global.cc)
 
 
 cuda_add_library(quansim SHARED ${QSIM_GPU_SRC} ${QSIM_SRC})
-set_property(TARGET quansim PROPERTY CUDA_ARCHITECTURES "70;75;80;90")
+set_property(TARGET quansim PROPERTY CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}")
 target_include_directories(quansim PUBLIC ${QSIM_INCLUDE_DIRS})
 # TODO: add option to choose simulator backend
 if(USE_LEGION)
-  target_link_libraries(quansim ${LEGION_LIBRARY} quartz_runtime nvidia-ml)
+  target_link_libraries(quansim ${LEGION_LIBRARY} quartz_runtime ${NVML_LIBRARY})
 else()
-  target_link_libraries(quansim quartz_runtime nvidia-ml)
+  target_link_libraries(quansim quartz_runtime ${NVML_LIBRARY})
 endif()
 
 set(INCLUDE_DEST "include")
