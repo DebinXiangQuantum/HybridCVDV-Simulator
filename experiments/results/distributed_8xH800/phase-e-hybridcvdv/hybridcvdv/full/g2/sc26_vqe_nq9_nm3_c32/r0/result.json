@@ -1,0 +1,639 @@
+{
+  "schema_version": "3.0",
+  "generated_at_utc": "2026-07-28T09:44:20Z",
+  "system": "hybridcvdv",
+  "case_name": "sc26_vqe_nq9_nm3_c32",
+  "phase": "full",
+  "gpu_count": 2,
+  "gpu_ids": [
+    0,
+    1
+  ],
+  "process_repetition": 0,
+  "status": "ok",
+  "cutoff": 32,
+  "num_modes": 3,
+  "num_qubits": 9,
+  "warmup_runs": 1,
+  "measured_runs": 3,
+  "timing": {
+    "total_wall_ms": 25287.16082079336,
+    "simulation_ms": 4843.221218,
+    "gpu_compute_ms": 2965.928418,
+    "planning_ms": 0.059738,
+    "host_orchestration_ms": 1926.32570100003,
+    "correctness_reduction_ms": 0.544582,
+    "communication_ms": 1.382236,
+    "h2d_ms": 0.0,
+    "d2h_ms": 0.0
+  },
+  "throughput": {
+    "completed_circuit_evaluations": 3,
+    "circuit_evaluations_per_sec": 0.2064741532522746,
+    "completed_gate_applications": 429
+  },
+  "memory": {
+    "per_gpu": {
+      "0": {
+        "active_state_count": 1,
+        "state_pool_active_bytes": 524288,
+        "state_pool_reserved_bytes": 136839168,
+        "scratch_bytes": 1192,
+        "gpu_memory_peak_bytes": 17766023168.0
+      },
+      "1": {
+        "active_state_count": 512,
+        "state_pool_active_bytes": 268435456,
+        "state_pool_reserved_bytes": 538443776,
+        "scratch_bytes": 268455940,
+        "gpu_memory_peak_bytes": 18065915904.0
+      }
+    },
+    "aggregate": {}
+  },
+  "communication": {
+    "p2p_bytes": 134217728,
+    "p2p_time_ms": 1.382236,
+    "host_staged_bytes": 0,
+    "host_staged_time_ms": 0,
+    "transfer_count": 256,
+    "state_migration_count": 256
+  },
+  "correctness": {
+    "output_norm": 1,
+    "checksum": 15991.2026841505
+  },
+  "telemetry": {
+    "per_gpu": {
+      "0": {
+        "samples": [
+          {
+            "timestamp_unix": 1785231861.0395837,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 16279.0,
+            "power_draw": 119.38,
+            "temperature_gpu": 38.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231862.246618,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 16801.0,
+            "power_draw": 119.38,
+            "temperature_gpu": 38.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231863.3260787,
+            "utilization_gpu": 60.0,
+            "utilization_memory": 0.0,
+            "memory_used": 16943.0,
+            "power_draw": 127.8,
+            "temperature_gpu": 39.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231864.4284039,
+            "utilization_gpu": 45.0,
+            "utilization_memory": 0.0,
+            "memory_used": 16643.0,
+            "power_draw": 130.72,
+            "temperature_gpu": 38.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231865.5205588,
+            "utilization_gpu": 43.0,
+            "utilization_memory": 0.0,
+            "memory_used": 12197.0,
+            "power_draw": 129.05,
+            "temperature_gpu": 38.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231866.6646454,
+            "utilization_gpu": 2.0,
+            "utilization_memory": 0.0,
+            "memory_used": 8153.0,
+            "power_draw": 128.87,
+            "temperature_gpu": 38.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231867.7882006,
+            "utilization_gpu": 42.0,
+            "utilization_memory": 0.0,
+            "memory_used": 3441.0,
+            "power_draw": 126.92,
+            "temperature_gpu": 38.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231869.637398,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 593.0,
+            "power_draw": 122.68,
+            "temperature_gpu": 38.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231870.7102265,
+            "utilization_gpu": 46.0,
+            "utilization_memory": 0.0,
+            "memory_used": 641.0,
+            "power_draw": 130.27,
+            "temperature_gpu": 38.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231871.7812178,
+            "utilization_gpu": 40.0,
+            "utilization_memory": 12.0,
+            "memory_used": 1299.0,
+            "power_draw": 151.51,
+            "temperature_gpu": 38.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231872.8467486,
+            "utilization_gpu": 46.0,
+            "utilization_memory": 0.0,
+            "memory_used": 573.0,
+            "power_draw": 134.02,
+            "temperature_gpu": 38.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231873.9156854,
+            "utilization_gpu": 45.0,
+            "utilization_memory": 0.0,
+            "memory_used": 621.0,
+            "power_draw": 130.21,
+            "temperature_gpu": 38.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231874.9939747,
+            "utilization_gpu": 23.0,
+            "utilization_memory": 0.0,
+            "memory_used": 661.0,
+            "power_draw": 130.77,
+            "temperature_gpu": 38.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231876.2619236,
+            "utilization_gpu": 25.0,
+            "utilization_memory": 0.0,
+            "memory_used": 553.0,
+            "power_draw": 124.07,
+            "temperature_gpu": 38.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231877.395581,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 557.0,
+            "power_draw": 119.69,
+            "temperature_gpu": 38.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231878.5155938,
+            "utilization_gpu": 23.0,
+            "utilization_memory": 0.0,
+            "memory_used": 571.0,
+            "power_draw": 121.99,
+            "temperature_gpu": 38.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231879.9433918,
+            "utilization_gpu": 20.0,
+            "utilization_memory": 0.0,
+            "memory_used": 593.0,
+            "power_draw": 123.1,
+            "temperature_gpu": 38.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231881.6544251,
+            "utilization_gpu": 7.0,
+            "utilization_memory": 0.0,
+            "memory_used": 1415.0,
+            "power_draw": 121.69,
+            "temperature_gpu": 38.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231883.1109543,
+            "utilization_gpu": 13.0,
+            "utilization_memory": 0.0,
+            "memory_used": 1343.0,
+            "power_draw": 122.58,
+            "temperature_gpu": 38.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231884.5030165,
+            "utilization_gpu": 13.0,
+            "utilization_memory": 0.0,
+            "memory_used": 1489.0,
+            "power_draw": 122.13,
+            "temperature_gpu": 38.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231885.629398,
+            "utilization_gpu": 2.0,
+            "utilization_memory": 0.0,
+            "memory_used": 1815.0,
+            "power_draw": 123.15,
+            "temperature_gpu": 38.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231886.3410158,
+            "utilization_gpu": 1.0,
+            "utilization_memory": 0.0,
+            "memory_used": 2213.0,
+            "power_draw": 120.5,
+            "temperature_gpu": 38.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          }
+        ],
+        "samples_retained": 22,
+        "samples_truncated": false,
+        "summary": {
+          "sample_count": 22.0,
+          "avg_utilization_gpu": 22.545454545454547,
+          "peak_utilization_gpu": 60.0,
+          "avg_utilization_memory": 0.5454545454545454,
+          "peak_utilization_memory": 12.0,
+          "avg_memory_used": 4790.636363636364,
+          "peak_memory_used": 16943.0,
+          "avg_power_draw": 126.38545454545455,
+          "peak_power_draw": 151.51,
+          "avg_temperature_gpu": 38.04545454545455,
+          "peak_temperature_gpu": 39.0,
+          "avg_clocks_sm": 1980.0,
+          "peak_clocks_sm": 1980.0,
+          "avg_pcie_link_gen_current": 5.0,
+          "peak_pcie_link_gen_current": 5.0,
+          "avg_pcie_link_width_current": 16.0,
+          "peak_pcie_link_width_current": 16.0,
+          "energy_joules": 3197.0099620807173
+        }
+      },
+      "1": {
+        "samples": [
+          {
+            "timestamp_unix": 1785231861.0395837,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 16673.0,
+            "power_draw": 113.07,
+            "temperature_gpu": 36.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231862.246618,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 16693.0,
+            "power_draw": 113.04,
+            "temperature_gpu": 36.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231863.3260787,
+            "utilization_gpu": 23.0,
+            "utilization_memory": 0.0,
+            "memory_used": 17229.0,
+            "power_draw": 121.24,
+            "temperature_gpu": 37.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231864.4284039,
+            "utilization_gpu": 45.0,
+            "utilization_memory": 0.0,
+            "memory_used": 16791.0,
+            "power_draw": 122.87,
+            "temperature_gpu": 37.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231865.5205588,
+            "utilization_gpu": 41.0,
+            "utilization_memory": 0.0,
+            "memory_used": 11703.0,
+            "power_draw": 122.29,
+            "temperature_gpu": 37.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231866.6646454,
+            "utilization_gpu": 62.0,
+            "utilization_memory": 14.0,
+            "memory_used": 7939.0,
+            "power_draw": 141.46,
+            "temperature_gpu": 37.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231867.7882006,
+            "utilization_gpu": 36.0,
+            "utilization_memory": 0.0,
+            "memory_used": 3431.0,
+            "power_draw": 125.07,
+            "temperature_gpu": 37.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231869.637398,
+            "utilization_gpu": 2.0,
+            "utilization_memory": 0.0,
+            "memory_used": 593.0,
+            "power_draw": 115.49,
+            "temperature_gpu": 37.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231870.7102265,
+            "utilization_gpu": 42.0,
+            "utilization_memory": 0.0,
+            "memory_used": 643.0,
+            "power_draw": 123.95,
+            "temperature_gpu": 37.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231871.7812178,
+            "utilization_gpu": 9.0,
+            "utilization_memory": 0.0,
+            "memory_used": 661.0,
+            "power_draw": 120.3,
+            "temperature_gpu": 37.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231872.8467486,
+            "utilization_gpu": 45.0,
+            "utilization_memory": 0.0,
+            "memory_used": 573.0,
+            "power_draw": 122.76,
+            "temperature_gpu": 37.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231873.9156854,
+            "utilization_gpu": 42.0,
+            "utilization_memory": 0.0,
+            "memory_used": 621.0,
+            "power_draw": 123.35,
+            "temperature_gpu": 37.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231874.9939747,
+            "utilization_gpu": 51.0,
+            "utilization_memory": 9.0,
+            "memory_used": 1367.0,
+            "power_draw": 134.27,
+            "temperature_gpu": 37.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231876.2619236,
+            "utilization_gpu": 24.0,
+            "utilization_memory": 0.0,
+            "memory_used": 553.0,
+            "power_draw": 123.61,
+            "temperature_gpu": 37.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231877.395581,
+            "utilization_gpu": 0.0,
+            "utilization_memory": 0.0,
+            "memory_used": 585.0,
+            "power_draw": 113.71,
+            "temperature_gpu": 36.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231878.5155938,
+            "utilization_gpu": 27.0,
+            "utilization_memory": 0.0,
+            "memory_used": 569.0,
+            "power_draw": 115.74,
+            "temperature_gpu": 37.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231879.9433918,
+            "utilization_gpu": 24.0,
+            "utilization_memory": 0.0,
+            "memory_used": 705.0,
+            "power_draw": 117.11,
+            "temperature_gpu": 37.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231881.6544251,
+            "utilization_gpu": 7.0,
+            "utilization_memory": 0.0,
+            "memory_used": 1417.0,
+            "power_draw": 115.2,
+            "temperature_gpu": 37.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231883.1109543,
+            "utilization_gpu": 10.0,
+            "utilization_memory": 0.0,
+            "memory_used": 1345.0,
+            "power_draw": 115.77,
+            "temperature_gpu": 37.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231884.5030165,
+            "utilization_gpu": 12.0,
+            "utilization_memory": 0.0,
+            "memory_used": 1361.0,
+            "power_draw": 116.2,
+            "temperature_gpu": 37.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231885.629398,
+            "utilization_gpu": 18.0,
+            "utilization_memory": 6.0,
+            "memory_used": 2485.0,
+            "power_draw": 141.28,
+            "temperature_gpu": 37.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          },
+          {
+            "timestamp_unix": 1785231886.3410158,
+            "utilization_gpu": 1.0,
+            "utilization_memory": 0.0,
+            "memory_used": 2245.0,
+            "power_draw": 123.59,
+            "temperature_gpu": 37.0,
+            "clocks_sm": 1980.0,
+            "pcie_link_gen_current": 5.0,
+            "pcie_link_width_current": 16.0
+          }
+        ],
+        "samples_retained": 22,
+        "samples_truncated": false,
+        "summary": {
+          "sample_count": 22.0,
+          "avg_utilization_gpu": 23.681818181818183,
+          "peak_utilization_gpu": 62.0,
+          "avg_utilization_memory": 1.3181818181818181,
+          "peak_utilization_memory": 14.0,
+          "avg_memory_used": 4826.454545454545,
+          "peak_memory_used": 17229.0,
+          "avg_power_draw": 121.88045454545454,
+          "peak_power_draw": 141.46,
+          "avg_temperature_gpu": 36.86363636363637,
+          "peak_temperature_gpu": 37.0,
+          "avg_clocks_sm": 1980.0,
+          "peak_clocks_sm": 1980.0,
+          "avg_pcie_link_gen_current": 5.0,
+          "peak_pcie_link_gen_current": 5.0,
+          "avg_pcie_link_width_current": 16.0,
+          "peak_pcie_link_width_current": 16.0,
+          "energy_joules": 3073.916779642105
+        }
+      }
+    },
+    "aggregate": {
+      "sample_count": 44.0,
+      "energy_joules": 6270.926741722822,
+      "gpu_util_imbalance_pct": 1.1363636363636367
+    }
+  },
+  "environment": {},
+  "runner": {
+    "command": [
+      "/root/workspace/HybridCVDV-Simulator/build-H800/hybridcvdv_single_gpu_experiments",
+      "--suite",
+      "scaling",
+      "--name-filter",
+      "sc26_vqe_nq9_nm3_c32",
+      "--output",
+      "/root/workspace/HybridCVDV-Simulator/experiments/results/distributed_8xH800/phase-e-hybridcvdv/hybridcvdv/full/g2/sc26_vqe_nq9_nm3_c32/r0/raw.json"
+    ],
+    "returncode": 0,
+    "stdout": "[GPUContext] P2P: 2 links enabled (0 NVLink)\n[GPUContext] Initialized with 2 device(s) (multi-GPU enabled)\n[MultiGPU] Initialized 2 GPU(s) with P2P\n\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n\u2551          GPU Context Summary                    \u2551\n\u2560\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2563\n\u2551 GPU 0: NVIDIA H800                              \u2551\n\u2551   Compute: SM 9.0  |  SMs: 132   |  Warp: 32   \u2551\n\u2551   Memory:  81007 MiB total / 64206 MiB free    \u2551\n\u2551   SharedMem/Block:    48 KB  /SM:   228 KB    \u2551\n\u2551 GPU 1: NVIDIA H800                              \u2551\n\u2551   Compute: SM 9.0  |  SMs: 132   |  Warp: 32   \u2551\n\u2551   Memory:  81007 MiB total / 63812 MiB free    \u2551\n\u2551   SharedMem/Block:    48 KB  /SM:   228 KB    \u2551\n\u2560\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2563\n\u2551 P2P Topology:                                    \u2551\n\u2551   0 \u2192 1  [ENABLED]                            \u2551\n\u2551   1 \u2192 0  [ENABLED]                            \u2551\n\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\nCUDA\u8bbe\u5907\u68c0\u67e5: device_count=2, error=no error\nCVStatePool \u521d\u59cb\u5316\u5b8c\u6210: \u5355\u4e2aqumode\u622a\u65ad\u7ef4\u5ea6=32, \u521d\u59cb\u603b\u7ef4\u5ea6=32768, \u5bb9\u91cf=128, \u8bbe\u5907\u6570=2\n\u521b\u5efa\u91cf\u5b50\u7535\u8def: 9 qubits, 3 qumodes, \u622a\u65ad\u7ef4\u5ea6=32, \u6267\u884cGPU=0\n\u6784\u5efa\u91cf\u5b50\u7ebf\u8def...\n\u5f02\u6b65CV\u6d41\u6c34\u7ebf\u5df2\u7981\u7528\uff08\u73af\u5883\u53d8\u91cf\u6216multi-GPU\u72b6\u6001\u6c60\uff09\n\u91cf\u5b50\u7ebf\u8def\u6784\u5efa\u5b8c\u6210\n\u6267\u884c\u91cf\u5b50\u7ebf\u8def...\n\u5757\u7ea7\u7f16\u8bd1-\u6267\u884c\u6d41\u6c34\u7ebf\u5df2\u542f\u7528\uff0c\u5757\u6570=6\nGaussianStatePool initialized: 3 qumodes, 4096 capacity (refcount-enabled).\n\u91cf\u5b50\u7ebf\u8def\u6267\u884c\u5b8c\u6210\n\u6267\u884c\u65f6\u95f4: 4628.04 ms\n\u4f20\u8f93\u65f6\u5ef6: 0.265215 ms\n\u8ba1\u7b97\u65f6\u5ef6: 3138.96 ms\n\u89c4\u5212\u65f6\u5ef6: 0.074941 ms\nHDD\u8282\u70b9\u7ba1\u7406\u5668\u5df2\u6e05\u7a7a\nCVStatePool \u5df2\u91cd\u7f6e\nCVStatePool \u9500\u6bc1\u5b8c\u6210\nCUDA\u8bbe\u5907\u68c0\u67e5: device_count=2, error=no error\nCVStatePool \u521d\u59cb\u5316\u5b8c\u6210: \u5355\u4e2aqumode\u622a\u65ad\u7ef4\u5ea6=32, \u521d\u59cb\u603b\u7ef4\u5ea6=32768, \u5bb9\u91cf=128, \u8bbe\u5907\u6570=2\n\u521b\u5efa\u91cf\u5b50\u7535\u8def: 9 qubits, 3 qumodes, \u622a\u65ad\u7ef4\u5ea6=32, \u6267\u884cGPU=1\n\u6784\u5efa\u91cf\u5b50\u7ebf\u8def...\n\u5f02\u6b65CV\u6d41\u6c34\u7ebf\u5df2\u7981\u7528\uff08\u73af\u5883\u53d8\u91cf\u6216multi-GPU\u72b6\u6001\u6c60\uff09\n\u91cf\u5b50\u7ebf\u8def\u6784\u5efa\u5b8c\u6210\n\u6267\u884c\u91cf\u5b50\u7ebf\u8def...\n\u5757\u7ea7\u7f16\u8bd1-\u6267\u884c\u6d41\u6c34\u7ebf\u5df2\u542f\u7528\uff0c\u5757\u6570=6\nGaussianStatePool initialized: 3 qumodes, 4096 capacity (refcount-enabled).\n\u91cf\u5b50\u7ebf\u8def\u6267\u884c\u5b8c\u6210\n\u6267\u884c\u65f6\u95f4: 4843.22 ms\n\u4f20\u8f93\u65f6\u5ef6: 0.274936 ms\n\u8ba1\u7b97\u65f6\u5ef6: 2916.56 ms\n\u89c4\u5212\u65f6\u5ef6: 0.057204 ms\nHDD\u8282\u70b9\u7ba1\u7406\u5668\u5df2\u6e05\u7a7a\nCVStatePool \u5df2\u91cd\u7f6e\nCVStatePool \u9500\u6bc1\u5b8c\u6210\nCUDA\u8bbe\u5907\u68c0\u67e5: device_count=2, error=no error\nCVStatePool \u521d\u59cb\u5316\u5b8c\u6210: \u5355\u4e2aqumode\u622a\u65ad\u7ef4\u5ea6=32, \u521d\u59cb\u603b\u7ef4\u5ea6=32768, \u5bb9\u91cf=128, \u8bbe\u5907\u6570=2\n\u521b\u5efa\u91cf\u5b50\u7535\u8def: 9 qubits, 3 qumodes, \u622a\u65ad\u7ef4\u5ea6=32, \u6267\u884cGPU=0\n\u6784\u5efa\u91cf\u5b50\u7ebf\u8def...\n\u5f02\u6b65CV\u6d41\u6c34\u7ebf\u5df2\u7981\u7528\uff08\u73af\u5883\u53d8\u91cf\u6216multi-GPU\u72b6\u6001\u6c60\uff09\n\u91cf\u5b50\u7ebf\u8def\u6784\u5efa\u5b8c\u6210\n\u6267\u884c\u91cf\u5b50\u7ebf\u8def...\n\u5757\u7ea7\u7f16\u8bd1-\u6267\u884c\u6d41\u6c34\u7ebf\u5df2\u542f\u7528\uff0c\u5757\u6570=6\nGaussianStatePool initialized: 3 qumodes, 4096 capacity (refcount-enabled).\n\u91cf\u5b50\u7ebf\u8def\u6267\u884c\u5b8c\u6210\n\u6267\u884c\u65f6\u95f4: 3634.21 ms\n\u4f20\u8f93\u65f6\u5ef6: 0.272081 ms\n\u8ba1\u7b97\u65f6\u5ef6: 2965.93 ms\n\u89c4\u5212\u65f6\u5ef6: 0.059738 ms\nHDD\u8282\u70b9\u7ba1\u7406\u5668\u5df2\u6e05\u7a7a\nCVStatePool \u5df2\u91cd\u7f6e\nCVStatePool \u9500\u6bc1\u5b8c\u6210\nCUDA\u8bbe\u5907\u68c0\u67e5: device_count=2, error=no error\nCVStatePool \u521d\u59cb\u5316\u5b8c\u6210: \u5355\u4e2aqumode\u622a\u65ad\u7ef4\u5ea6=32, \u521d\u59cb\u603b\u7ef4\u5ea6=32768, \u5bb9\u91cf=128, \u8bbe\u5907\u6570=2\n\u521b\u5efa\u91cf\u5b50\u7535\u8def: 9 qubits, 3 qumodes, \u622a\u65ad\u7ef4\u5ea6=32, \u6267\u884cGPU=0\n\u6784\u5efa\u91cf\u5b50\u7ebf\u8def...\n\u5f02\u6b65CV\u6d41\u6c34\u7ebf\u5df2\u7981\u7528\uff08\u73af\u5883\u53d8\u91cf\u6216multi-GPU\u72b6\u6001\u6c60\uff09\n\u91cf\u5b50\u7ebf\u8def\u6784\u5efa\u5b8c\u6210\n\u6267\u884c\u91cf\u5b50\u7ebf\u8def...\n\u5757\u7ea7\u7f16\u8bd1-\u6267\u884c\u6d41\u6c34\u7ebf\u5df2\u542f\u7528\uff0c\u5757\u6570=6\nGaussianStatePool initialized: 3 qumodes, 4096 capacity (refcount-enabled).\n\u91cf\u5b50\u7ebf\u8def\u6267\u884c\u5b8c\u6210\n\u6267\u884c\u65f6\u95f4: 10280.8 ms\n\u4f20\u8f93\u65f6\u5ef6: 0.276626 ms\n\u8ba1\u7b97\u65f6\u5ef6: 3376.32 ms\n\u89c4\u5212\u65f6\u5ef6: 0.070042 ms\nHDD\u8282\u70b9\u7ba1\u7406\u5668\u5df2\u6e05\u7a7a\nCVStatePool \u5df2\u91cd\u7f6e\nCVStatePool \u9500\u6bc1\u5b8c\u6210\nWrote experiment report to \"/root/workspace/HybridCVDV-Simulator/experiments/results/distributed_8xH800/phase-e-hybridcvdv/hybridcvdv/full/g2/sc26_vqe_nq9_nm3_c32/r0/raw.json\"\nResults: ok=1, unsupported=0, error=0\n",
+    "stderr": "",
+    "timed_out": false,
+    "wall_time_ms": 25287.16082079336
+  },
+  "diagnostics": {
+    "host_fraction": 0.3977364680020755,
+    "avg_gpu_utilization_pct": 23.113636363636367,
+    "scaling_role": "gpu_scaling_candidate",
+    "gpu_scaling_eligible": true,
+    "eligibility_thresholds": {
+      "max_host_fraction": 0.5,
+      "min_avg_gpu_utilization_pct": 10.0,
+      "min_simulation_ms": 10.0
+    }
+  }
+}
